@@ -32,6 +32,9 @@ def relaunch_with_channel(direct=False, extra=None):
         extra = dict(extra or {}, engine=os.environ["WIND_ENGINE"]); direct = True
     # The default engine is render since 2026-11-01: suites that name none still run macOS zoom.
     extra = {"engine": "zoom", **(extra or {})}
+    # Transform's defaults since 2026-11-01 are Wind's cursor and no pointer speed-up; the suites were
+    # built on the system cursor with the speed-up on and set either one where they test it.
+    extra = {"cursor": "system", "keepPointerSpeed": True, **extra}
     if os.environ.get("WIND_CURSOR"):              # WIND_CURSOR=wind: Wind's own cursor
         extra = dict(extra or {}, cursor=os.environ["WIND_CURSOR"])
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)

@@ -119,7 +119,7 @@
     <div class="step" data-step="screen">
       <h1>Allow Screen Recording</h1>
       <p>For the Render engine, Wind's default: it reads the screen and draws the zoomed view itself, and macOS calls that Screen Recording. Nothing is recorded or saved. macOS may ask you to reopen Wind after you allow it.</p>
-      <p class="onote">Only Render needs this. The macOS zoom engine (Settings, Advanced, Engine) works without it.</p>
+      <p class="onote">Only Render needs this. The Transform engine (Settings, Zoom, Engine) works without it.</p>
       <div class="orow">
         <div class="ot"><div class="rlabel">Screen Recording</div>
           <div class="st" class:ok={srOk} role="status">{srOk ? 'Allowed' : 'Not allowed yet'}</div></div>

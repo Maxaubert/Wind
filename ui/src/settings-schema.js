@@ -89,9 +89,9 @@ export const groups = [
       { caption: 'Engine', rows: [
         { key: 'smoothImages', type: 'select', label: 'Scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'linear', 'bilinear', 'antialiasing', 'images'],
           desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0' },
-        // Switches live; Wind falls back to the macOS zoom when it cannot capture the screen.
-        { key: 'engine', type: 'select', adv: true, label: 'Engine', keywords: ['renderer', 'render', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
-          desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'macOS zoom' }, def: 'draw' },
+        // Switches live; Wind falls back to Transform (macOS's zoom) when it cannot capture the screen.
+        { key: 'engine', type: 'select', label: 'Engine', keywords: ['renderer', 'render', 'transform', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
+          desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'Transform' }, def: 'draw' },
       ] },
     ] },
 
@@ -117,7 +117,7 @@ export const groups = [
         { key: 'trackGlideMs', type: 'slider', label: 'Typing glide', keywords: ['glide', 'smooth', 'animation', 'ease', 'jump', 'caret', 'typing', 'focus', 'how fast', 'milliseconds', 'duration'], desc: 'How long the view takes to reach the text cursor', min: 0, max: 600, step: 10, def: 200, unit: 'ms' },
         { key: 'hidePointerWhileTracking', type: 'toggle', label: 'Hide the pointer while typing', keywords: ['hide mouse', 'hide cursor', 'pointer', 'typing', 'caret', 'invisible', 'distraction', 'focus'], desc: 'The pointer comes back when you move the mouse', def: 1 },
       ] },
-      { caption: 'macOS zoom engine', rows: [
+      { caption: 'Transform engine', rows: [
         { key: 'slowPrecision', type: 'toggle', label: 'Fine steps for slow moves', keywords: ['precision', 'slow', 'fine', 'steps', 'exact', 'accuracy', 'small moves', 'pixel'],
           desc: 'Very slow moves keep the small zoomed steps', def: 0, showIf: ZOOM_ENGINE },
         { key: 'precisionBelow', type: 'slider', adv: true, label: 'Fine steps below', keywords: ['precision', 'threshold', 'slow', 'fine', 'speed', 'points per second', 'hand speed'],
@@ -126,7 +126,7 @@ export const groups = [
         { key: 'slowPanGlide', type: 'toggle', label: 'Smooth slow pans', tag: 'Experimental', keywords: ['glide', 'smooth', 'slow', 'pan', 'steps', 'stutter', 'judder', 'whole point'],
           desc: 'Glides each small step of a slow pan', def: 0, showIf: ZOOM_ENGINE },
         { key: 'cursor', type: 'select', label: 'Pointer while zoomed', keywords: ['cursor', 'pointer', 'mouse', 'draw', 'steady', 'shake', 'wobble', 'system cursor', 'own cursor'],
-          desc: 'Who draws the pointer while zoomed', options: ['system', 'wind'], optionLabels: { system: 'macOS', wind: 'Wind' }, def: 'system', showIf: ZOOM_ENGINE },
+          desc: 'Who draws the pointer while zoomed', options: ['system', 'wind'], optionLabels: { system: 'macOS', wind: 'Wind' }, def: 'wind', showIf: ZOOM_ENGINE },
       ] },
     ] },
 

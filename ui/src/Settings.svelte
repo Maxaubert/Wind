@@ -58,7 +58,7 @@
     setConfig(key, val);
   }
   function change(key, val) {
-    if (key === 'engine') announce('Engine set to ' + (val === 'zoom' ? 'macOS zoom' : 'Render') + '. Some options changed.');
+    if (key === 'engine') announce('Engine set to ' + (val === 'zoom' ? 'Transform' : 'Render') + '. Some options changed.');
     if (key === 'uiPalette') announce('Theme ' + (themes.find((t) => t.id === val)?.label ?? val));
     values = { ...values, [key]: String(val) };
     write(key, val);

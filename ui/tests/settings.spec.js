@@ -104,43 +104,43 @@ test('offIf: the soft start sliders dim while Soft start is off', async ({ page 
 test('the advanced switch shows the advanced rows inline and hides them again', async ({ page }) => {
   await open(page);
   await go(page, 'zoom');
-  await expect(row(page, 'engine')).toHaveCount(0);
+  await expect(row(page, 'smoothZoom')).toHaveCount(0);
   await advanced(page, true);
   await expect.poll(() => live(page, 'showAdvanced')).toBe('1');
   await go(page, 'zoom');
-  await expect(row(page, 'engine')).toBeVisible();
   await expect(row(page, 'smoothZoom')).toBeVisible();
   await advanced(page, false);
   await go(page, 'zoom');
-  await expect(row(page, 'engine')).toHaveCount(0);
+  await expect(row(page, 'smoothZoom')).toHaveCount(0);
 });
 
 // ---- engine ---------------------------------------------------------------------------------------
 
-test('Engine lives in Advanced, defaults to Render, and macOS zoom brings its rows', async ({ page }) => {
+test('Engine shows on Zoom without Advanced, defaults to Render, and Transform brings its rows', async ({ page }) => {
   await open(page);
-  await advanced(page, true);
   await go(page, 'zoom');
   const sel = row(page, 'engine').locator('select');
   await expect(sel).toHaveValue('draw');
-  await expect(sel.locator('option')).toHaveText(['Render', 'macOS zoom']);
+  await expect(sel.locator('option')).toHaveText(['Render', 'Transform']);
   await go(page, 'view');
   for (const k of ['slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toHaveCount(0);
   await go(page, 'zoom');
   await sel.selectOption('zoom');
   await expect.poll(() => wrote(page, 'engine')).toBe('zoom');
-  await expect(page.locator('[role=status]').filter({ hasText: 'Engine set to macOS zoom' })).toHaveCount(1);
+  await expect(page.locator('[role=status]').filter({ hasText: 'Engine set to Transform' })).toHaveCount(1);
+  await advanced(page, true);                     // precisionBelow is an advanced row
   await go(page, 'view');
-  await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'macOS zoom engine']);
+  await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'Transform engine']);
   for (const k of ['slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toBeVisible();
   await expect(row(page, 'slowPanGlide').locator('.tag')).toHaveText('Experimental');
   await expect(row(page, 'precisionBelow')).toHaveClass(/disabled/);   // slowPrecision is off
   await row(page, 'slowPrecision').getByRole('switch').check({ force: true });
   await expect(row(page, 'precisionBelow')).not.toHaveClass(/disabled/);
-  await row(page, 'cursor').locator('select').selectOption('wind');
-  await expect.poll(() => live(page, 'cursor')).toBe('wind');
+  await expect(row(page, 'cursor').locator('select')).toHaveValue('wind');   // Transform's default: Wind draws the pointer
+  await row(page, 'cursor').locator('select').selectOption('system');
+  await expect.poll(() => live(page, 'cursor')).toBe('system');
 });
 
 // ---- the host -------------------------------------------------------------------------------------
