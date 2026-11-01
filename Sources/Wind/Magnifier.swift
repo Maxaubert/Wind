@@ -1384,11 +1384,13 @@ final class Magnifier {
     }
 
     private func reportLevel() {
-        // Render engine: the menu-bar readout waits for the zoom to stop. Retitling the variable-length
-        // status item (first "" -> " 1.1x" at lv 1.05) stalled the tick 11-31 ms at every 0.1x crossing
-        // while zooming in (owner's log 2026-10-31): a repeated frame, then a double step.
+        // The menu-bar readout waits for the zoom to stop. Retitling the variable-length status item
+        // (first "" -> " 1.1x" at lv 1.05) stalled the tick 11-31 ms at every 0.1x crossing while
+        // zooming (owner's log 2026-10-31, render): a repeated frame, then a double step. On macOS zoom
+        // the same: 16% of the ticks after a title change were late against 0.8% of the others, felt as
+        // a shake near screen edges where the view moves most per frame (owner 2026-11-01).
         // (Not at 1x or at the maximum: a held key there leaves the readout stale until release.)
-        if DrawZoom.enabled && zoom.isMoving && zoom.level > 1.0001 && zoom.level < config.maxLevel - 1e-6 { return }
+        if zoom.isMoving && zoom.level > 1.0001 && zoom.level < config.maxLevel - 1e-6 { return }
         let lv = (zoom.level * 10).rounded() / 10
         if lv != lastReportedLevel { lastReportedLevel = lv; onLevelChange?(lv) }
     }
