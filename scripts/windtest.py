@@ -49,7 +49,7 @@ def relaunch_with_channel(direct=False, extra=None):
     c = json.loads(own)
     for k in TEST_DEFAULTS_DROP: c.pop(k, None)
     # Past the first-run setup: without it Wind opens the setup window at launch (AppDelegate.needsSetup).
-    c.update({"onboarded": True, **(extra or {})})
+    c.update({"onboarded": True, **TEST_BINDS, **(extra or {})})
     with open(cfg, "w") as f: json.dump(c, f, indent=2)
     if direct:
         # Started from this shell so it inherits the terminal's permissions (Screen Recording for
@@ -71,9 +71,11 @@ TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZo
                       "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "panSmoothMs", "slowPrecision",
                       "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
                       "engine", "slowPanGlide", "cursor",
-                      # The checks press the default binds (the owner's own setup may have changed them).
-                      "zoomIn", "zoomOut", "wheelZoomMods", "quickZoom", "panLeft", "panRight", "panUp", "panDown",
-                      "inspect", "hideCursor", "quit"]
+                      "wheelZoomMods", "panLeft", "panRight", "panUp", "panDown", "hideCursor", "quit"]
+# The binds the checks press. Since 2026-11-01 most actions have no preset, so the tests set their own
+# (the owner's own setup may have changed them too).
+TEST_BINDS = {"zoomIn": ["mouse4", "ctrl+opt+equal"], "zoomOut": ["mouse3", "ctrl+opt+minus"],
+              "quickZoom": ["ctrl+opt+z"], "inspect": ["ctrl+opt+i"]}
 
 def kill_all_wind():
     """Every Wind (installed or test build) must be gone before another starts: a test copy whose

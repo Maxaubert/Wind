@@ -15,6 +15,10 @@ import { expect } from '@playwright/test';
 
 export const MAC_OK = { accessibility: true, screenRecording: true, zoomShortcuts: [], loginItem: false, logLevel: 1 };
 
+// Binds the specs work with. Since 2026-11-01 only Ctrl+scroll, Ctrl+Opt+arrows and Cmd+Esc are
+// presets, so the specs give the other actions the binds they press and edit (like scripts/windtest.py).
+export const BINDS = { zoomIn: 'mouse4,ctrl+opt+equal', zoomOut: 'mouse3,ctrl+opt+minus', quickZoom: 'ctrl+opt+z', inspect: 'ctrl+opt+i' };
+
 export async function mockHost(page, opts = {}) {
   await page.addInitScript(({ values, mac, init, refuse, resume }) => {
     window.__msgs = [];
@@ -32,7 +36,7 @@ export async function mockHost(page, opts = {}) {
         else window.__live[msg.key] = msg.value;
       } else if (msg.type === 'getMacStatus') send({ type: 'macStatus', ...window.__mac });
     };
-  }, { values: opts.values || {}, mac: { ...MAC_OK, ...(opts.mac || {}) }, init: !!opts.init, refuse: opts.refuse, resume: !!opts.resume });
+  }, { values: { ...BINDS, ...(opts.values || {}) }, mac: { ...MAC_OK, ...(opts.mac || {}) }, init: !!opts.init, refuse: opts.refuse, resume: !!opts.resume });
 }
 
 // Messages of one type the page posted.

@@ -148,8 +148,11 @@ ctl("post key ctrl+opt+k down"); time.sleep(0.5); s = ctl("post key ctrl+opt+k u
 check("the new hotkey zooms in", s["level"] > 1.3, f"level {s['level']:.2f}")
 ctl("level 1"); time.sleep(0.2)
 # Through the bridge directly as well (the host types and clamps the value).
+js("window.webkit.messageHandlers.wind.postMessage({ type: 'setConfig', key: 'zoomOut', value: 'ctrl+opt+j, f13' }); return true")
+check("bridge setConfig writes a bind list", bool(until(lambda: cfg().get("zoomOut") == ["ctrl+opt+j", "f13"])), str(cfg().get("zoomOut")))
+# Only zoom in and out take several binds: any other action keeps the first.
 js("window.webkit.messageHandlers.wind.postMessage({ type: 'setConfig', key: 'inspect', value: 'ctrl+opt+j, f13' }); return true")
-check("bridge setConfig writes a bind list", bool(until(lambda: cfg().get("inspect") == ["ctrl+opt+j", "f13"])), str(cfg().get("inspect")))
+check("a second bind for a one-bind action is dropped", bool(until(lambda: cfg().get("inspect") == ["ctrl+opt+j"])), str(cfg().get("inspect")))
 js("window.webkit.messageHandlers.wind.postMessage({ type: 'setConfig', key: 'maxLevel', value: 'abc' }); return true")
 time.sleep(0.4)
 check("a bad value is refused", cfg().get("maxLevel", 30) != "abc")

@@ -56,7 +56,7 @@ export function bindVerdict(b) {
   if (F_KEYS.has(b.key)) return 'ok';
   const ctrl = has('ctrl'), opt = has('opt'), cmd = has('cmd');
   if (!ctrl && !opt && !cmd) return 'needsmod';
-  if (b.mods.length === 1 && cmd) return 'cmdalone';
+  if (b.mods.length === 1 && cmd && b.key !== 'escape') return 'cmdalone';   // Cmd+Esc: no app uses it (quit preset)
   if (opt && !ctrl && !cmd && CHAR_KEYS.has(b.key)) return 'opttypes';
   return 'ok';
 }

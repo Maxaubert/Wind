@@ -145,7 +145,7 @@ public func bindVerdict(_ b: Bind) -> BindVerdict {
         if fKeyCodes.contains(k) { return .ok }
         let ctrl = b.mods.contains(.ctrl), opt = b.mods.contains(.opt), cmd = b.mods.contains(.cmd)
         if !ctrl && !opt && !cmd { return .needsmod }
-        if b.mods == [.cmd] { return .cmdalone }
+        if b.mods == [.cmd] && k != keyCodes["escape"] { return .cmdalone }   // Cmd+Esc: no app uses it (quit preset)
         if opt && !ctrl && !cmd && charKeyCodes.contains(k) { return .opttypes }
         return .ok
     }

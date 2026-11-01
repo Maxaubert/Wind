@@ -262,6 +262,14 @@ struct ConfigTests {
         expect(c.zoomInSpeed == 0.25)
     }
 
+    /// Only zoom in and out take several binds (up to three); every other action keeps its first.
+    func clampsBindCounts() throws {
+        let c = try Config.load(from: Data(#"{"zoomIn": ["mouse4", "f13", "f14", "f15"], "quit": ["cmd+escape", "f16"], "panLeft": ["ctrl+opt+left", "f17"]}"#.utf8))
+        expect(c.zoomIn == ["mouse4", "f13", "f14"])
+        expect(c.quit == ["cmd+escape"])
+        expect(c.panLeft == ["ctrl+opt+left"])
+    }
+
     func defaultBindsAreAllValid() {
         expect(Config().binds().problems.isEmpty)
         expect(Config().wheelMods == [.ctrl])

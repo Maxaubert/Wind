@@ -50,13 +50,11 @@ game takes the pointer, Wind also asks for **Input Monitoring**, which it needs 
 
 | Action | Default |
 |---|---|
-| Zoom in (hold) | mouse forward button, or Ctrl+Opt+= |
-| Zoom out (hold) | mouse back button, or Ctrl+Opt+- |
-| Wheel zoom | Ctrl + scroll wheel or two-finger scroll (each notch is one step; speed in Settings) |
-| Quick zoom (toggle 1x and last level) | Ctrl+Opt+Z |
+| Zoom in and out | Ctrl + scroll wheel or two-finger scroll (each notch is one step; speed in Settings) |
+| Zoom in or out by holding a key or button | none: pick them in the first-run setup or Settings (up to three each) |
 | Pan with the keyboard | Ctrl+Opt+arrows |
-| Inspect mode | Ctrl+Opt+I |
-| Quit Wind | Ctrl+Opt+Esc |
+| Quit Wind | Cmd+Esc |
+| Quick zoom, Inspect mode, Hide pointer | none: set one key each in Settings |
 
 Bound keys and buttons are not passed on to the app you are using.
 

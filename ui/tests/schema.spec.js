@@ -51,7 +51,7 @@ test('keybind rows follow the builders\' contract', () => {
   for (const r of binds) {
     if (r.panArrows) expect(r.panKeys).toEqual(['panLeft', 'panUp', 'panRight', 'panDown']);
     else if (r.wheelMods) expect(r.max).toBeUndefined();
-    else expect(r.max, r.key).toBeGreaterThanOrEqual(2);
+    else expect(r.max, r.key).toBe(r.key === 'zoomIn' || r.key === 'zoomOut' ? 3 : 1);   // only zoom takes several
     expect(r.keywords.length, r.key).toBeGreaterThanOrEqual(3);
   }
   expect(allRows.find((r) => r.key === 'zoomIn').max).toBe(3);

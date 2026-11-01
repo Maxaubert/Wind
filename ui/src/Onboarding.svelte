@@ -139,7 +139,7 @@
     {:else if step === 'keys'}
     <div class="step" data-step="keys">
       <h1>Set your zoom keys</h1>
-      <p>Pick the buttons or keys you hold to zoom</p>
+      <p>Pick the buttons or keys you hold to zoom. ⌃ Control + scroll zooms already.</p>
       <div class="orow"><div class="ot"><div class="rlabel" id="ob-in-l">Zoom in</div><div class="rdesc" id="ob-in-d">Hold to zoom in</div></div>
         <div class="rctl"><KeybindCapture row={zoomInRow} {values} onChange={live}
                             labelledby="ob-in-l ob-in-v" describedby="ob-in-d" valueId="ob-in-v" /></div></div>

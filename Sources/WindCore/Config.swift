@@ -5,19 +5,21 @@ import Foundation
 // file is reloaded live when it changes. Defaults mirror Wind's config.h where a key exists there.
 
 public struct Config: Codable, Equatable {
-    // Binds (see Binds.swift for the syntax). Each action takes a list.
-    public var zoomIn = ["mouse4", "ctrl+opt+equal"]
-    public var zoomOut = ["mouse3", "ctrl+opt+minus"]
+    // Binds (see Binds.swift for the syntax). Zoom in and out take up to three binds, every other
+    // action one. The only presets are Ctrl+scroll, Ctrl+Opt+arrows and Cmd+Esc (owner, 2026-11-01);
+    // the zoom keys are picked in the first-run setup.
+    public var zoomIn: [String] = []
+    public var zoomOut: [String] = []
     public var wheelZoomMods = "ctrl"            // modifier(s) + scroll wheel/trackpad zooms; "" = off
     public var wheelZoomSpeed = 0.6               // zoom per wheel notch, relative to the hold speed
-    public var quickZoom = ["ctrl+opt+z"]
+    public var quickZoom: [String] = []
     public var panLeft = ["ctrl+opt+left"]
     public var panRight = ["ctrl+opt+right"]
     public var panUp = ["ctrl+opt+up"]
     public var panDown = ["ctrl+opt+down"]
-    public var inspect = ["ctrl+opt+i"]
+    public var inspect: [String] = []
     public var hideCursor: [String] = []          // toggles hiding the pointer (Wind's hideCursor hotkey)
-    public var quit = ["ctrl+opt+escape"]
+    public var quit = ["cmd+escape"]               // like Win+Esc closing Windows Wind
 
     // Zoom feel.
     public var maxLevel = 30.0
@@ -104,6 +106,10 @@ public struct Config: Codable, Equatable {
     }
 
     public mutating func clamp() {
+        zoomIn = Array(zoomIn.prefix(3)); zoomOut = Array(zoomOut.prefix(3))
+        for kp in [\Config.quickZoom, \.panLeft, \.panRight, \.panUp, \.panDown, \.inspect, \.hideCursor, \.quit] {
+            self[keyPath: kp] = Array(self[keyPath: kp].prefix(1))
+        }
         maxLevel = min(64, max(1.5, maxLevel))
         zoomInSpeed = min(4, max(0.25, zoomInSpeed))
         zoomOutSpeed = min(4, max(0.25, zoomOutSpeed))

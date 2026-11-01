@@ -5,17 +5,11 @@
 # Verdicts: ok, empty, mousebutton, modifier, needsmod, cmdalone, opttypes, invalid.
 
 # The defaults (Config.swift) are all allowed.
-mouse4 ok
-mouse3 ok
-ctrl+opt+equal ok
-ctrl+opt+minus ok
-ctrl+opt+z ok
 ctrl+opt+left ok
 ctrl+opt+right ok
 ctrl+opt+up ok
 ctrl+opt+down ok
-ctrl+opt+i ok
-ctrl+opt+escape ok
+cmd+escape ok
 ctrl ok
 
 # Parsing: aliases, case, spaces, order, the "+" key.
@@ -107,7 +101,6 @@ cmd+c cmdalone
 cmd+q cmdalone
 cmd+equal cmdalone
 cmd+left cmdalone
-cmd+escape cmdalone
 cmd+space cmdalone
 cmd+keypad1 cmdalone
 cmd+shift+z ok
