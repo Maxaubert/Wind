@@ -109,7 +109,7 @@ struct SettingsView: View {
             if m.config.mouseAlign == 1 {
                 slider("Edge margin", \.mouseMarginPct, 0...40, step: 1, format: "%.0f%%")
             }
-            slider("Pan smoothing", \.panSmoothMs, 0...150, step: 5, format: "%.0f ms")
+            slider("Pan smoothing", \.panSmoothMs, 0...500, step: 10, format: "%.0f ms")
             Text(draw ? "Steadies the view against hand jitter at high zoom; fast moves still follow at once."
                       : "Glides the pointer over macOS's whole-point steps.")
                 .font(.caption).foregroundStyle(.secondary)

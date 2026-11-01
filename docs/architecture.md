@@ -585,6 +585,21 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   of frames jumping, up to 12.7 pt. Render now draws it as a layer in its overlay (`DrawZoom.crosshair`,
   screen-sized), placed in the same commit as the view and on every tick, at the look point (which stays
   on what Inspect looks at when the view stops at an edge): 0.4% (one frame of 0.5 pt).
+- **Pan smoothing smooths the pointer, not just the view** (owner 2026-11-01: with smoothing on "the
+  cursor stops being centred; it should have weight, not lag"). The One Euro filter now runs on the
+  pointer: the view AND the drawn cursor follow the smoothed position, so the cursor stays on the view
+  centre, and mouse presses/releases are moved to it in the tap (render: macOS is not zoomed, so plain
+  desktop points), so clicks land where the cursor is drawn. Moves and drags are left alone: at the HID
+  tap a moved location also moves the pointer, and rewriting every move would pull it back. The real
+  pointer moves natively (a warp would put it on whole points). Render also draws the cursor at the
+  pointer the view was placed for that tick, not at a later read.
+- Pan smoothing goes up to 500 ms (was 150 on the slider, 200 in the config clamp), and the filter's
+  speed term is 0.02 Hz per desktop pt/s (was 0.05) for more weight (owner: "I don't really feel it").
+  Tremor at 16x: sd 6.0 screen pt off, 1.0 at 150 ms, 0.7 at 300, 0.6 at 500; a steady fast pan at 4x
+  trails ~11 screen pt at every setting.
+- `cursor_truth` on render: `WIND_CURSOR_PROBE` is a fixed 12 pt block on the hotspot (a silhouette's
+  centroid moved with every shape change and read as jumps); `WIND_CURSOR_SHAPE_PROBE` is the silhouette
+  for `cursor_shape_truth`. `WIND_TRUTH_EXTRA='{"panSmoothMs": 150}'` adds settings.
 - **Pan smoothing on render** (owner 2026-11-01: the setting seemed to do nothing). The macOS-zoom
   pointer settings (keep speed, fine steps, smooth slow pans, cursor choice) never ran on render, which
   moves the pointer at 1x and draws its own cursor; Settings now greys them out there. Pan smoothing on

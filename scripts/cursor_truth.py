@@ -36,7 +36,9 @@ if not os.path.exists(VM):
     subprocess.run([os.path.join(W.ROOT, "tools/vmouse/build.sh")], check=True)
 
 os.environ["WIND_CURSOR_PROBE"] = "1"
-W.relaunch_with_channel(direct=True, extra={"cursor": "wind"})
+# WIND_TRUTH_EXTRA='{"panSmoothMs": 150}' adds settings (JSON); on WIND_ENGINE=draw it measures render's cursor.
+import json
+W.relaunch_with_channel(direct=True, extra={"cursor": "wind", **json.loads(os.environ.get("WIND_TRUTH_EXTRA", "{}"))})
 vm = subprocess.Popen(["sudo", VM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse: Karabiner virtual HID device not ready")
 def send(s):

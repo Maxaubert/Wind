@@ -300,8 +300,18 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 var r = CGRect(origin: .zero, size: img.size)
                 var cg = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
                 #if WIND_TEST_CHANNEL
-                // scripts/cursor_shape_truth.py finds the drawn cursor on screen as a magenta silhouette.
-                if ProcessInfo.processInfo.environment["WIND_CURSOR_PROBE"] != nil, let src = cg,
+                // Test probes. WIND_CURSOR_PROBE: a fixed 12 x 12 pt magenta block on the hotspot, so
+                // scripts/cursor_truth.py measures where the cursor is, whatever its shape (a silhouette's
+                // centroid moved with each shape change and read as jumps). WIND_CURSOR_SHAPE_PROBE: the
+                // shape as a magenta silhouette, for scripts/cursor_shape_truth.py (its area).
+                let env = ProcessInfo.processInfo.environment
+                if env["WIND_CURSOR_PROBE"] != nil && env["WIND_CURSOR_SHAPE_PROBE"] == nil,
+                   let ctx = CGContext(data: nil, width: 24, height: 24, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                    ctx.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
+                    cg = ctx.makeImage(); cursorSize = CGSize(width: 12, height: 12); cursorHotSpot = CGPoint(x: 6, y: 6)
+                }
+                if env["WIND_CURSOR_SHAPE_PROBE"] != nil, let src = cg,
                    let ctx = CGContext(data: nil, width: src.width, height: src.height, bitsPerComponent: 8, bytesPerRow: 0,
                                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
                     let rect = CGRect(x: 0, y: 0, width: src.width, height: src.height)

@@ -112,7 +112,7 @@ public struct Config: Codable, Equatable {
         mouseMarginPct = min(40, max(0, mouseMarginPct))
         cursorSensitivity = min(8, max(0.1, cursorSensitivity))
         panSpeed = min(4, max(0.25, panSpeed))
-        panSmoothMs = min(200, max(0, panSmoothMs))
+        panSmoothMs = min(500, max(0, panSmoothMs))
         panMaxLagPt = min(40, max(0, panMaxLagPt))
         trackAlign = trackAlign == 1 ? 1 : 0
         trackGlideMs = min(2000, max(0, trackGlideMs))

@@ -82,7 +82,10 @@ final class Magnifier {
     private var inspectLook = Pt(0, 0)          // the crosshair: where Inspect is looking
     private var pendingPlace: Pt?               // next tick: put the pointer here (leaving Inspect)
     private var returning = false               // the view is gliding back to the pointer
-    private var euroX = OneEuro(minCutoff: 1, beta: 0.05), euroY = OneEuro(minCutoff: 1, beta: 0.05)   // render pan smoothing
+    private var euroX = OneEuro(minCutoff: 1, beta: 0.02), euroY = OneEuro(minCutoff: 1, beta: 0.02)   // render pan smoothing
+    /// Render pan smoothing: the pointer as drawn and as apps get it (nil when not smoothing).
+    nonisolated(unsafe) private var smoothPointer: Pt?
+    private func resetSmooth() { euroX.reset(); euroY.reset(); smoothPointer = nil }
     private var returnOffset: Pt?               // while returning: view minus the pointer's view, gliding to zero
     private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
@@ -233,6 +236,13 @@ final class Magnifier {
         }
         if paused { return pass }
         let now = CACurrentMediaTime()
+        // Render pan smoothing: a click lands where the (smoothed) cursor is drawn. macOS is not zoomed on
+        // render, so the location is plain desktop points. Only presses and releases: at this tap a moved
+        // location also moves the pointer, and rewriting every move would keep pulling it back.
+        if let sp = smoothPointer, DrawZoom.enabled, [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+            .otherMouseDown, .otherMouseUp].contains(type) {
+            e.location = CGPoint(x: sp.x, y: sp.y)
+        }
         mods = Mods(rawValue: e.flags.rawValue).intersection(.all)
 
         switch type {
@@ -774,7 +784,7 @@ final class Magnifier {
                     // it for as long as the hand moved and never finished: after typing, panning drew
                     // the cursor 70-90 screen pt off centre, swinging with the hand's speed (owner
                     // 2026-10-31: "after typing the cursor tracking degenerates").
-                    euroX.reset(); euroY.reset()
+                    resetSmooth()
                     let o0 = returnOffset ?? Pt(center.x - want.x, center.y - want.y)
                     var vx = springVel.x, vy = springVel.y
                     let ox = springToward(o0.x, 0, vel: &vx, dtMs: dt * 1000, glideMs: 160)
@@ -787,18 +797,25 @@ final class Magnifier {
                     target = want
                     returnOffset = nil
                     springVel = (0, 0)
-                    // Render engine: pan smoothing steadies the view against hand jitter, which the zoom
-                    // magnifies. Adaptive (One Euro): slow, small motion is smoothed with the time
-                    // constant set; real motion raises the cutoff with its on-screen speed, so a pan
-                    // follows with little lag. (On macOS's zoom the setting glides the pointer instead.)
+                    // Render engine: pan smoothing gives the POINTER weight against hand jitter, which the
+                    // zoom magnifies. Adaptive (One Euro): slow, small motion is smoothed with the time
+                    // constant set; real motion raises the cutoff with its speed. The drawn cursor and the
+                    // view follow the smoothed pointer, so the cursor stays centred (smoothing the view
+                    // alone left the cursor off centre while moving: owner 2026-11-01), and clicks are
+                    // moved to it (the tap), so they land where the cursor shows. The real
+                    // pointer moves natively: a warp would put it back on whole points.
+                    // (On macOS's zoom the setting glides the pointer instead.)
                     if DrawZoom.enabled && config.panSmoothMs > 0 && lv > 1.0001 {
                         let fc = 1 / (2 * Double.pi * config.panSmoothMs / 1000)
                         euroX.minCutoff = fc; euroY.minCutoff = fc
-                        target = Pt(euroX.filter(want.x, dt: dt), euroY.filter(want.y, dt: dt))
-                    } else { euroX.reset(); euroY.reset() }
+                        let fp = Pt(min(max(euroX.filter(virtualPtr.x, dt: dt), 0), screen.w - 1),
+                                    min(max(euroY.filter(virtualPtr.y, dt: dt), 0), screen.h - 1))
+                        smoothPointer = fp
+                        target = mouseTarget(fp, lv)
+                    } else { resetSmooth() }
                 }
             case .caret, .focus:
-                euroX.reset(); euroY.reset()
+                resetSmooth()
                 if let t = trackTargetCenter(owner.target.rect, cur: center, level: lv, screen: screen,
                                              align: config.trackAlign, marginPct: config.trackMarginPct) {
                     var vx = springVel.x, vy = springVel.y
@@ -808,7 +825,7 @@ final class Magnifier {
                     target = Pt(x, y)
                 }
             case .keys:
-                euroX.reset(); euroY.reset()
+                resetSmooth()
                 let v = keyPanSpeed(level: lv, screenWidth: screen.w, panSpeed: config.panSpeed) * dt
                 target = Pt(center.x + panX * v, center.y + panY * v)
             }
@@ -842,7 +859,13 @@ final class Magnifier {
         // A plain read after the writes, for the game-lock detector only (a held pointer is dragged
         // by Wind's writes). It is never used to measure the hand.
         let endPtr = Magnifier.pointer().map { Pt($0.x, $0.y) }
-        if DrawZoom.enabled, let e = endPtr { DrawZoom.shared.lockHidden = locked; DrawZoom.shared.updateCursor(CGPoint(x: e.x, y: e.y)) }
+        if !(owner.owner == .mouse && !locked && !inspect) { smoothPointer = nil }
+        // Render: the cursor is drawn at the pointer the view was placed for this tick (the smoothed one,
+        // or this tick's read), not at a later read. A read after the writes includes the hand's motion
+        // since, and drew the cursor off the view centre by that much: 10-25% of frames jumped over half a
+        // point while panning at 4x-12x (cursor_truth on render, 2026-11-01).
+        let following = owner.owner == .mouse && !locked && !inspect
+        if DrawZoom.enabled, let e = smoothPointer ?? (following ? virtualPtr : endPtr) { DrawZoom.shared.lockHidden = locked; DrawZoom.shared.updateCursor(CGPoint(x: e.x, y: e.y)) }
         prevShift = lastShift
         lastShift = Pt(center.x - tickStartCenter.x, center.y - tickStartCenter.y)
         // Where Wind's writes left the pointer: this tick's read plus the whole points carried

@@ -2,7 +2,7 @@
 """Render engine: the drawn cursor never shows big for a frame when its shape changes (owner report
 2026-10-31: moving across a window's edge, I-beam -> scroll bar -> resize cursor, the cursor showed big
 for about a frame at each change). The test build draws the cursor as a magenta silhouette
-(WIND_CURSOR_PROBE); tools/cursorcap captures the screen (render's overlay included) every refresh and
+(WIND_CURSOR_SHAPE_PROBE); tools/cursorcap captures the screen (render's overlay included) every refresh and
 counts its pixels. Moving across the right edge of the frontmost Terminal window, a frame whose
 cursor area is over 2.5x the median is a "big frame". FAIL on any.
 Measured 2026-10-31 at 3x: before the fix every shape change animated the cursor from ~225 px to
@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory() as td:            # private (0700) directory,
 if len(out) < 4: sys.exit(f"no {a.app} window on screen")
 x, y, w, h = map(float, out)
 edge, midy = x + w, y + h / 2
-os.environ["WIND_CURSOR_PROBE"] = "1"
+os.environ["WIND_CURSOR_SHAPE_PROBE"] = "1"
 W.relaunch_with_channel(direct=True, extra={"engine": "draw"})
 vm = subprocess.Popen(["sudo", os.path.join(W.ROOT, "tools/vmouse/vmouse")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse not ready")
