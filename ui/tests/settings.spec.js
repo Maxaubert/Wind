@@ -212,3 +212,64 @@ test('hotkeys rows show the Mac binds as boxes with glyphs', async ({ page }) =>
   // No on/off switches on the Hotkeys page.
   await expect(page.locator('main').getByRole('switch')).toHaveCount(0);
 });
+
+// ---- select list and slider keys (owner 2026-11-01) ---------------------------------------------------
+
+test('a select opens its own list below the button, not the native menu over it', async ({ page }) => {
+  await open(page);
+  await go(page, 'zoom');
+  const sel = row(page, 'engine').locator('select');
+  await sel.click();
+  const list = page.getByRole('listbox');
+  await expect(list).toBeVisible();
+  await expect(list.getByRole('option')).toHaveText(['Render', 'Transform']);
+  await expect(list.getByRole('option', { name: 'Render' })).toHaveAttribute('aria-selected', 'true');
+  const s = await sel.boundingBox(), l = await list.boundingBox();
+  expect(l.y).toBeGreaterThanOrEqual(s.y + s.height);              // below the button, never over it
+  await list.getByRole('option', { name: 'Transform' }).click();
+  await expect(list).toHaveCount(0);
+  await expect.poll(() => wrote(page, 'engine')).toBe('zoom');
+  await expect(sel).toHaveValue('zoom');
+  // Keyboard: Space opens, arrows move, Enter picks; Escape closes without a change.
+  await sel.focus();
+  await page.keyboard.press(' ');
+  await expect(list).toBeVisible();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => wrote(page, 'engine')).toBe('draw');
+  await expect(sel).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(list).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  await expect(sel).toHaveValue('draw');
+  // A press outside closes it.
+  await sel.click();
+  await page.locator('h1').click();
+  await expect(list).toHaveCount(0);
+});
+
+test('after dragging a slider the arrow keys step it by its increment, with no focus ring', async ({ page }) => {
+  await open(page);
+  await go(page, 'zoom');
+  const sl = row(page, 'zoomInSpeed').locator('input[type=range]');
+  const b = await sl.boundingBox();
+  await page.mouse.move(b.x + b.width * 0.3, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width * 0.5, b.y + b.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect(sl).toBeFocused();
+  const v0 = Number(await sl.inputValue());
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => Number(await sl.inputValue())).toBeCloseTo(v0 + 0.05, 5);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => Number(await sl.inputValue())).toBeCloseTo(v0 - 0.05, 5);
+  await expect.poll(async () => Number(await live(page, 'zoomInSpeed'))).toBeCloseTo(v0 - 0.05, 5);
+  expect(await sl.evaluate((e) => getComputedStyle(e).outlineStyle)).toBe('none');
+  // A second press on the focused slider keeps it quiet too.
+  await page.mouse.click(b.x + b.width * 0.6, b.y + b.height / 2);
+  await expect(sl).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  expect(await sl.evaluate((e) => getComputedStyle(e).outlineStyle)).toBe('none');
+});

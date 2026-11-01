@@ -29,12 +29,25 @@
     else timer = setTimeout(() => { timer = null; if (pending !== null) send(pending); }, wait);
   }
   $effect(() => () => flush());
+
+  // WebKit on the Mac does not focus a range input it is clicked or dragged on (the press focuses the
+  // page instead), so the arrow keys went nowhere (owner 2026-11-01). Focus it just after the press;
+  // the arrows then step it by `step`. The focus ring stays off for a pointer focus (no visual
+  // change) and shows for Tab as before.
+  let quiet = $state(false);
+  function onDown(e) {
+    if (disabled) return;
+    const el = e.currentTarget;
+    quiet = true;
+    setTimeout(() => { quiet = true; el.focus({ preventScroll: true }); }, 0);
+  }
 </script>
 
 <div class="sl" class:disabled>
-  <input type="range" {min} {max} {step} {value} {disabled} style="--pct:{pct}%"
+  <input type="range" {min} {max} {step} {value} {disabled} style="--pct:{pct}%" class:quiet
          aria-labelledby={labelledby} aria-describedby={describedby} aria-valuetext={text}
-         oninput={(e) => onInput(e.currentTarget.value)} onchange={flush} onblur={flush} />
+         onpointerdown={onDown} oninput={(e) => onInput(e.currentTarget.value)} onchange={flush}
+         onblur={() => { quiet = false; flush(); }} />
   <span class="val" aria-hidden="true">{shown}</span>
 </div>
 
@@ -49,5 +62,6 @@
   input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 3px; height: 9px;
     margin-top: -3px; border-radius: 1px; background: var(--thumb); border: 0; box-shadow: none; }
   input:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 2px; }
+  input.quiet:focus-visible { outline: none; }
   .val { width: 46px; margin-left: 4px; text-align: right; font: 500 13px var(--s); font-variant-numeric: tabular-nums; color: var(--fg); }
 </style>
