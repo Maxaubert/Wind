@@ -282,8 +282,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "openAccessibility":
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
             case "openScreenRecording":
-                if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                // The request adds Wind to the list; opened at the same moment, System Settings drew
+                // the list before Wind was in it (2026-11-01). Ask first, open the pane a moment later.
+                let asked = !CGPreflightScreenCaptureAccess()
+                if asked { _ = CGRequestScreenCaptureAccess() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + (asked ? 1.0 : 0)) {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                }
             case "setLogin":
                 let svc = SMAppService.mainApp
                 do { if value == "1" { try svc.register() } else { try svc.unregister() } }

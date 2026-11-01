@@ -117,13 +117,13 @@ test('the advanced switch shows the advanced rows inline and hides them again', 
 
 // ---- engine ---------------------------------------------------------------------------------------
 
-test('Engine lives in Advanced, defaults to Wind draws, and macOS zoom brings its rows', async ({ page }) => {
+test('Engine lives in Advanced, defaults to Render, and macOS zoom brings its rows', async ({ page }) => {
   await open(page);
   await advanced(page, true);
   await go(page, 'zoom');
   const sel = row(page, 'engine').locator('select');
   await expect(sel).toHaveValue('draw');
-  await expect(sel.locator('option')).toHaveText(['Wind draws', 'macOS zoom']);
+  await expect(sel.locator('option')).toHaveText(['Render', 'macOS zoom']);
   await go(page, 'view');
   for (const k of ['keepPointerSpeed', 'slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toHaveCount(0);

@@ -46,4 +46,5 @@
   button:hover { border-color: var(--outline); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--onaccent); }
   button.danger { background: var(--dangerbtn); border-color: var(--dangerbtn); color: var(--dangerbtnfg); }
+  button.primary:hover, button.danger:hover { opacity: .86; }
 </style>

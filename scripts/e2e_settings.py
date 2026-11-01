@@ -18,6 +18,12 @@ SHOTS = os.path.join(ROOT, "build", "settings-shots")
 REPLY = os.path.join(D, "js.json")
 
 # Started directly so it inherits this terminal's Screen Recording (the render engine is the default).
+# The test build shares the installed Wind's defaults: a setup the owner left half done would make the
+# setup resume mid-way. Clear that flag for the run and put it back afterwards.
+_flag = subprocess.run(["defaults", "read", "com.maxaubert.wind", "setupInProgress"], capture_output=True, text=True).stdout.strip()
+subprocess.run(["defaults", "delete", "com.maxaubert.wind", "setupInProgress"], capture_output=True)
+import atexit
+atexit.register(lambda: _flag == "1" and subprocess.run(["defaults", "write", "com.maxaubert.wind", "setupInProgress", "-bool", "true"]))
 relaunch_with_channel(direct=True)
 
 
@@ -125,7 +131,7 @@ rows = until(lambda: js("return !!document.querySelector('[data-key=\"keepPointe
 check("macOS zoom rows show on the macOS zoom engine", bool(rows))
 go("zoom")
 js(SET_VALUE + "set(document.querySelector('[data-key=\"engine\"] select'), 'draw'); return true")
-check("engine back to Wind draws", bool(until(lambda: cfg().get("engine") == "draw")))
+check("engine back to Render", bool(until(lambda: cfg().get("engine") == "draw")))
 
 # ---- a keybind recorded on the page is a live hotkey -----------------------------------------------------
 go("hotkeys")

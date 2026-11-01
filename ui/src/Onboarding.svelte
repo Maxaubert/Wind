@@ -118,7 +118,8 @@
     {:else if step === 'screen'}
     <div class="step" data-step="screen">
       <h1>Allow Screen Recording</h1>
-      <p>Wind draws the zoomed screen itself, which needs Screen Recording. Nothing is recorded or saved. macOS may ask you to reopen Wind after you allow it.</p>
+      <p>For the Render engine, Wind's default: it reads the screen and draws the zoomed view itself, and macOS calls that Screen Recording. Nothing is recorded or saved. macOS may ask you to reopen Wind after you allow it.</p>
+      <p class="onote">Only Render needs this. The macOS zoom engine (Settings, Advanced, Engine) works without it.</p>
       <div class="orow">
         <div class="ot"><div class="rlabel">Screen Recording</div>
           <div class="st" class:ok={srOk} role="status">{srOk ? 'Allowed' : 'Not allowed yet'}</div></div>
@@ -176,6 +177,8 @@
   .step { width: 100%; max-width: 460px; }
   .step h1 { font-size: 27px; margin: 0 0 10px; font-weight: 600; letter-spacing: -.3px; }
   .step p { color: var(--fg3); font-size: 13.5px; line-height: 1.55; margin: 0 0 24px; }
+  .step p:has(+ .onote) { margin-bottom: 8px; }
+  .step p.onote { font-size: 12.5px; }
   .step.center { text-align: center; }
   .step.center p { max-width: 384px; margin-left: auto; margin-right: auto; }
 
@@ -221,6 +224,8 @@
   .btn { height: 36px; padding: 0 20px; border-radius: var(--rp); border: 1px solid var(--chipb); background: transparent; color: var(--fg2); font: 600 13px var(--s); cursor: pointer; }
   .btn:hover:not(:disabled) { border-color: var(--outline); color: var(--fg); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--onaccent); }
+  /* The plain hover above outranks .primary: keep its text on the accent, show the hover as a dim. */
+  .btn.primary:hover:not(:disabled) { border-color: var(--accent); color: var(--onaccent); opacity: .86; }
   .btn:disabled { opacity: .4; cursor: default; }
   .wizfoot .btn:first-child { margin-left: auto; }
   /* KeybindCapture: restyle its keycap with the tokens here. */

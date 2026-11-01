@@ -81,11 +81,11 @@ test('the macOS zoom rows show only on the macOS zoom engine and sit on View', (
   for (const r of allRows.filter((x) => !card.rows.includes(x))) expect(r.showIf?.key, r.key).not.toBe('engine');
 });
 
-test('the engine select: Wind draws (default) or macOS zoom, in the Engine card on Zoom', () => {
+test('the engine select: Render (default) or macOS zoom, in the Engine card on Zoom', () => {
   const zoom = groups.find((g) => g.id === 'zoom');
   const e = groupRows(zoom).find((r) => r.key === 'engine');
   expect(e.options).toEqual(['draw', 'zoom']);
-  expect(e.optionLabels).toEqual({ draw: 'Wind draws', zoom: 'macOS zoom' });
+  expect(e.optionLabels).toEqual({ draw: 'Render', zoom: 'macOS zoom' });
   expect(e.def).toBe('draw');
   expect(schemaDefaults().engine).toBe('draw');
 });
