@@ -60,6 +60,9 @@ public struct Config: Codable, Equatable {
     /// macOS slows the pointer by the zoom level (it moves in screen space). true = Wind's
     /// behaviour: the pointer covers the same desktop distance per hand movement at any zoom.
     public var keepPointerSpeed = false           // Transform runs at macOS's own pointer speed (owner 2026-11-01)
+    /// Transform: raise linear-mode mice's HID gain by the level, so the pointer is never slowed
+    /// (HIDGain). Off falls back to keepPointerSpeed, or macOS's slowdown.
+    public var fullPointerSpeed = true
 
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
 

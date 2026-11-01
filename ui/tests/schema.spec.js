@@ -75,7 +75,7 @@ test('gates point at real rows and values', () => {
 test('the macOS zoom rows show only on the macOS zoom engine and sit on View', () => {
   const view = groups.find((g) => g.id === 'view');
   const card = view.cards.find((c) => c.caption === 'Transform engine');
-  expect(card.rows.map((r) => r.key)).toEqual(['slowPrecision', 'precisionBelow', 'slowPanGlide', 'cursor']);
+  expect(card.rows.map((r) => r.key)).toEqual(['slowPrecision', 'precisionBelow', 'slowPanGlide', 'fullPointerSpeed', 'cursor']);
   for (const r of card.rows) expect(r.showIf, r.key).toEqual({ key: 'engine', eq: 'zoom' });
   // Nothing else depends on the engine.
   for (const r of allRows.filter((x) => !card.rows.includes(x))) expect(r.showIf?.key, r.key).not.toBe('engine');

@@ -56,7 +56,7 @@ enum Log {
 }
 
 /// While Wind is alive this process does nothing; when Wind dies (crash, kill -9) it puts the
-/// zoom back to 1x and the display colours back, so a crash never leaves the screen zoomed.
+/// zoom back to 1x, the mice's speed and the display colours back, so a crash never leaves the screen zoomed.
 enum Watchdog {
     static func spawn() {
         let p = Process()
@@ -73,6 +73,7 @@ enum Watchdog {
         signal(SIGTERM, SIG_IGN)
         while kill(parent, 0) == 0 { usleep(200_000) }
         if SkyLight.isZoomed { SkyLight.reset() }
+        HIDGain.restoreSaved()
         CGDisplayRestoreColorSyncSettings()
         exit(0)
     }

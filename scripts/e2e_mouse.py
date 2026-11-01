@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pointer end-to-end checks with REAL HID motion (tools/vmouse, Karabiner's virtual mouse).
 Measures how far the pointer travels per hand movement at 1x and zoomed, with and without
-keepPointerSpeed, and sweeps across the screen looking for snaps. Needs sudo (vmouse) and
+keepPointerSpeed and fullPointerSpeed (the HID gain), and sweeps across the screen looking for snaps. Needs sudo (vmouse) and
 Karabiner-Elements. The screen visibly zooms while this runs."""
-import math, os, subprocess, sys, time
+import math, os, re, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from windtest import assert_zoom_live, ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
 
@@ -18,8 +18,8 @@ assert_zoom_live()
 def mv(dx, dy, n=10, ms=8):
     vm.stdin.write(f"move {dx} {dy} {n} {ms}\n"); vm.stdin.flush(); vm.stdout.readline()
 
-def travel(level, keep):
-    set_config(keepPointerSpeed=keep)
+def travel(level, keep, full=False):
+    set_config(keepPointerSpeed=keep, fullPointerSpeed=full)
     ctl("level 1"); time.sleep(0.3); ctl("warp 700 500"); time.sleep(0.2)
     if level > 1: ctl(f"level {level}"); time.sleep(0.4)
     mv(10, 0); time.sleep(0.15)          # settle the first move after zooming in
@@ -39,6 +39,39 @@ for lv in (4, 10):
     fast, s = travel(lv, True)
     check(f"{lv}x keepPointerSpeed matches 1x", abs(fast - base) < base * 0.08, f"{fast:.1f} pt, 1x {base:.1f}")
     check(f"{lv}x view stays centred on the pointer", abs(s["center"][1] - s["pointer"][1]) < 1, f"center {s['center']} pointer {s['pointer']}")
+
+# Full pointer speed (HIDGain): Wind raises the mouse's own HID gain by the level, so macOS's zoom
+# never slows the pointer and nothing compensates. The virtual mouse is in linear mode (LinearMouse).
+def gains():
+    out = subprocess.run(["hidutil", "property", "--matching", '{"PrimaryUsagePage":1,"PrimaryUsage":2}',
+                          "--get", "HIDMouseAcceleration"], capture_output=True, text=True).stdout
+    return [int(m) for m in re.findall(r"HIDMouseAcceleration\D+(\d+)", out)]
+base_gain = gains()
+check("a linear-mode mouse to raise", bool(base_gain), f"hidutil gains {base_gain}")
+for lv in (2, 4, 10):
+    full, s = travel(lv, False, True)
+    check(f"{lv}x full pointer speed matches 1x", abs(full - base) < base * 0.02, f"{full:.2f} pt, 1x {base:.2f}")
+    check(f"{lv}x full pointer speed: gain is base x level", gains() == [round(g * lv) for g in base_gain], f"{gains()} base {base_gain}")
+    check(f"{lv}x full pointer speed: view centred on the pointer", abs(s["center"][1] - s["pointer"][1]) < 1, f"center {s['center']} pointer {s['pointer']}")
+ctl("level 1"); time.sleep(0.4)
+check("full pointer speed: gain back to base at 1x", gains() == base_gain, f"{gains()} base {base_gain}")
+for name, x, d in (("right", 1700, 10), ("left", 220, -10)):
+    ctl(f"warp {x} 540"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+    mv(d, 0); time.sleep(0.15)
+    a = ctl("state")["pointer"][0]
+    mv(d, 0); time.sleep(0.15)
+    b = ctl("state")["pointer"][0]
+    check(f"full pointer speed: {name} edge moves at 1x", abs(abs(b - a) - base) < base * 0.02 or b in (0, 1919), f"moved {b - a:.2f}, 1x {base:.2f}")
+    ctl("level 1"); time.sleep(0.4)
+# Something else (LinearMouse on a mouse switch, the System Settings slider) puts its own value back:
+# Wind takes it as the new base and raises it again within a poll.
+ctl("warp 700 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+subprocess.run(["hidutil", "property", "--matching", '{"PrimaryUsagePage":1,"PrimaryUsage":2}',
+                "--set", f'{{"HIDMouseAcceleration":{base_gain[0] if base_gain else 45056}}}'], capture_output=True)
+time.sleep(0.4)
+check("full pointer speed: a reset gain is raised again", gains() == [round(g * 4) for g in base_gain], f"{gains()} base {base_gain}")
+ctl("level 1"); time.sleep(0.4)
+set_config(fullPointerSpeed=False)
 
 # Near the edges the view is clamped: the pointer must still move at 1x speed (owner report 2026-10-29).
 set_config(keepPointerSpeed=True)
@@ -260,7 +293,19 @@ if not screen_locked():
     check("wind cursor: game lock released afterwards", not ctl("state")["locked"])
 set_config(**saved_c)
 
-ctl("level 1")
-set_config(**saved)
+# Inspect under the HID gain: the crosshair still moves like the pointer at 1x.
+set_config(keepPointerSpeed=False, fullPointerSpeed=True)
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2)
+p0 = ctl("state")["pointer"][0]; mv(10, 0); time.sleep(0.2); ref = ctl("state")["pointer"][0] - p0
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+inspect_key(); a = ctl("state"); mv(10, 0); time.sleep(0.2); b = ctl("state"); inspect_key()
+check("full pointer speed: inspect crosshair moves like the pointer at 1x", abs((b["look"][0] - a["look"][0]) - ref) < max(3, ref * 0.15),
+      f"look moved {b['look'][0] - a['look'][0]:.1f}, pointer at 1x {ref:.1f}")
+
+# A crash while zoomed: WindGuard puts the mouse's gain back (and the zoom to 1x).
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.5)
+raised = gains()
+subprocess.run(["pkill", "-9", "-x", "Wind"]); time.sleep(1.0)
+check("crash: WindGuard puts the mouse gain back", raised != base_gain and gains() == base_gain, f"zoomed {raised}, after {gains()}, base {base_gain}")
 vm.stdin.write("quit\n"); vm.stdin.flush(); vm.wait()
 finish()

@@ -135,6 +135,7 @@ final class Magnifier {
             lastWritten = nil
             Log.info("engine: \(draw ? "draw (capture and draw, experimental)" : "zoom (macOS)")")
         }
+        HIDGain.shared.enabled = c.fullPointerSpeed && !c.keepPointerSpeed
         Log.level = c.logLevel
         let (b, problems) = c.binds()
         router.setBinds(b)
@@ -660,11 +661,11 @@ final class Magnifier {
             // and the view follows it like the pointer (owner 2026-11-01: Inspect moves like the
             // cursor, no speed setting). Movement is how far the pointer got from where it really
             // landed last tick (placement snaps to a grid), so the snap is never counted as hand
-            // movement. macOS zoom slows the zoomed pointer to 1/level; render does not.
+            // movement. macOS zoom slows the zoomed pointer to 1/level, less the HID gain; render does not.
             let a = Pt(inspectAnchor.x, inspectAnchor.y)
             let ref = inspectRef ?? a
             if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
-                let gain = DrawZoom.enabled ? 1 : lv
+                let gain = DrawZoom.enabled ? 1 : lv / HIDGain.shared.gain
                 inspectLook = Pt(inspectLook.x + (ptr.x - ref.x) * gain, inspectLook.y + (ptr.y - ref.y) * gain)
                 inspectRef = placePointer(at: a, from: Pt(ptr.x, ptr.y), level: lv, view: center)
             }

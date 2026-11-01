@@ -71,7 +71,7 @@ def relaunch_with_channel(direct=False, extra=None):
 
 # Feel settings the checks expect at their defaults (removed from the config while tests run).
 TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZoom", "smoothZoomAccel",
-                      "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "panSmoothMs", "slowPrecision",
+                      "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "fullPointerSpeed", "panSmoothMs", "slowPrecision",
                       "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
                       "engine", "slowPanGlide", "cursor",
                       "wheelZoomMods", "panLeft", "panRight", "panUp", "panDown", "hideCursor", "quit"]

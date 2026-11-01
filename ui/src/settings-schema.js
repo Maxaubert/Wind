@@ -125,6 +125,8 @@ export const groups = [
           showIf: ZOOM_ENGINE, offIf: { key: 'slowPrecision', eq: '0' } },
         { key: 'slowPanGlide', type: 'toggle', label: 'Smooth slow pans', tag: 'Experimental', keywords: ['glide', 'smooth', 'slow', 'pan', 'steps', 'stutter', 'judder', 'whole point'],
           desc: 'Glides each small step of a slow pan', def: 0, showIf: ZOOM_ENGINE },
+        { key: 'fullPointerSpeed', type: 'toggle', label: 'Full pointer speed', keywords: ['pointer speed', 'mouse speed', 'slow', 'slowdown', 'slower', 'sluggish', 'sensitivity', 'tracking speed', 'acceleration', 'gain', 'cursor', 'mouse'],
+          desc: 'The pointer moves as fast as at 1x (mice with acceleration off)', def: 1, showIf: ZOOM_ENGINE },
         { key: 'cursor', type: 'select', label: 'Pointer while zoomed', keywords: ['cursor', 'pointer', 'mouse', 'draw', 'steady', 'shake', 'wobble', 'system cursor', 'own cursor'],
           desc: 'Who draws the pointer while zoomed', options: ['system', 'wind'], optionLabels: { system: 'macOS', wind: 'Wind' }, def: 'wind', showIf: ZOOM_ENGINE },
       ] },

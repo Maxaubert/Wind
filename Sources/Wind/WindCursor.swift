@@ -19,6 +19,7 @@ final class WindCursor {
     private var key: Data?
     private var hotSpot = CGPoint.zero
     private var size = CGSize(width: 1, height: 1)
+    private var pendingShape: CGImage??
     private(set) var active = false
     /// Where the cursor is drawn now (desktop point, top-left origin), nil while hidden.
     private(set) var drawnAt: CGPoint?
@@ -62,11 +63,23 @@ final class WindCursor {
                 if k != key {
                     key = k; size = img.size; hotSpot = cur.hotSpot
                     var r = CGRect(origin: .zero, size: img.size)
-                    image.contents = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
+                    var cg = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
+                    #if WIND_TEST_CHANNEL
+                    // WIND_CURSOR_SHAPE_PROBE: the shape as a magenta silhouette, for scripts/cursor_shape_truth.py.
+                    if ProcessInfo.processInfo.environment["WIND_CURSOR_SHAPE_PROBE"] != nil, let src = cg,
+                       let ctx = CGContext(data: nil, width: src.width, height: src.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                        let rect = CGRect(x: 0, y: 0, width: src.width, height: src.height)
+                        ctx.clip(to: rect, mask: src)
+                        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); ctx.fill(rect)
+                        cg = ctx.makeImage()
+                    }
+                    #endif
+                    pendingShape = .some(cg)
                 }
             }
         }
-        if let d = drawnAt, panel.isVisible, abs(d.x - p.x) < 1e-9, abs(d.y - p.y) < 1e-9 { return }
+        if pendingShape == nil, let d = drawnAt, panel.isVisible, abs(d.x - p.x) < 1e-9, abs(d.y - p.y) < 1e-9 { return }
         place(p, panel: panel)
         if !panel.isVisible { panel.orderFrontRegardless() }
         commit()
@@ -92,6 +105,10 @@ final class WindCursor {
         drawnAt = p
         let primaryH = NSScreen.screens.first?.frame.height ?? 0
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        // A new shape goes up in the same no-animation commit as its size and place: set on its own,
+        // Core Animation animated it and the cursor showed big at every shape change (owner
+        // 2026-11-01, render's bug of 2026-10-31; scripts/cursor_shape_truth.py --engine zoom).
+        if let c = pendingShape { image.contents = c; pendingShape = nil }
         if WindCursor.moveWindow {
             // The old way: a small window moved to the cursor, the image carrying the fraction.
             // Measured on the zoomed screen: the window move reached the screen 1-2 frames after the

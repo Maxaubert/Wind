@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render engine: the drawn cursor never shows big for a frame when its shape changes (owner report
+"""The drawn cursor (render, or Wind's cursor on Transform with --engine zoom) never shows big for a frame when its shape changes (owner report
 2026-10-31: moving across a window's edge, I-beam -> scroll bar -> resize cursor, the cursor showed big
 for about a frame at each change). The test build draws the cursor as a magenta silhouette
 (WIND_CURSOR_SHAPE_PROBE); tools/cursorcap captures the screen (render's overlay included) every refresh and
@@ -8,12 +8,13 @@ cursor area is over 2.5x the median is a "big frame". FAIL on any.
 Measured 2026-10-31 at 3x: before the fix every shape change animated the cursor from ~225 px to
 ~3400 px and back over ~10 frames (the image was set outside the no-animation commit); after, 0.
 
-usage: cursor_shape_truth.py [--level 3] [--app Terminal]"""
+usage: cursor_shape_truth.py [--level 3] [--app Terminal] [--engine draw|zoom]"""
 import argparse, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import windtest as W
 
 ap = argparse.ArgumentParser(); ap.add_argument("--level", type=float, default=3); ap.add_argument("--app", default="Terminal")
+ap.add_argument("--engine", default="draw")
 a = ap.parse_args()
 CAP = os.path.join(W.ROOT, "tools/cursorcap/cursorcap")
 subprocess.run([os.path.join(W.ROOT, "tools/cursorcap/build.sh")], check=True, stdout=subprocess.DEVNULL)
@@ -31,7 +32,7 @@ if len(out) < 4: sys.exit(f"no {a.app} window on screen")
 x, y, w, h = map(float, out)
 edge, midy = x + w, y + h / 2
 os.environ["WIND_CURSOR_SHAPE_PROBE"] = "1"
-W.relaunch_with_channel(direct=True, extra={"engine": "draw"})
+W.relaunch_with_channel(direct=True, extra={"engine": a.engine, "cursor": "wind", "keepPointerSpeed": False})
 vm = subprocess.Popen(["sudo", os.path.join(W.ROOT, "tools/vmouse/vmouse")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse not ready")
 def mv(dx, dy, n, ms=8):

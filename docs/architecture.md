@@ -10,6 +10,7 @@ feasibility research behind it is in `~/Documents/Claude/research/wind-mac/2026-
 | `Sources/WindCore` | Pure logic, no AppKit or private APIs: zoom ramp (`ZoomController`, a port of Wind's), view geometry, lock detector, view-owner rules, binds, config. Checked by `swift run wind-checks`. |
 | `Sources/Wind/SkyLight.swift` | The compositor zoom (private SkyLight calls, looked up with `dlsym`). |
 | `Sources/Wind/Magnifier.swift` | The event tap, the display-link tick, pointer speed compensation, Inspect. |
+| `Sources/Wind/HIDGain.swift` | Full pointer speed under macOS zoom: raises each linear-mode mouse's HID gain by the level. |
 | `Sources/Wind/CaretTracker.swift` | Caret and focus following through the Accessibility API. |
 | `Sources/Wind/SystemZoom.swift`, `SettingsToggle.swift` | macOS Zoom clash detection and fixing by pressing System Settings switches. |
 | `Sources/Wind/CommandChannel.swift` | Test-only command file, compiled only into `scripts/build.sh test` builds, used by `scripts/e2e*.py`. |
@@ -112,7 +113,22 @@ Kept as an option:
 - **The alternative.** A glide (`panSmoothMs`) also smooths slow pans, but the pointer then trails
   the view by up to about 12 screen pt and had spikes at 10x, so it is off by default.
 
-Pointer speed compensation (`keepPointerSpeed`, default on) uses this every tick: the pointer
+**Full pointer speed (`fullPointerSpeed`, default on, `HIDGain`, 2026-11-01).** hidd multiplies
+every delta of a mouse in linear mode (acceleration off: LinearMouse, or the macOS switch) by its
+`HIDMouseAcceleration` before WindowServer sees it. Wind sets that to base x level with each view
+write (on its own queue, a set is a 1 to 3 ms call into hidd), so the 1/level slowdown cancels and
+nothing reads or moves the pointer. Measured with the virtual mouse: 68.75 pt at 1x, 2x, 4x and 10x.
+- LinearMouse puts its own value back when a mouse becomes the active one, and no notification
+  reports it: Wind reads the gain back every 100 ms while zoomed, takes a changed value as the new
+  base and raises it again. New mice are picked up within a second.
+- The bases are saved in `hidgain.json` (Application Support) while raised; WindGuard and the next
+  launch put them back after a crash.
+- Curve-mode mice and trackpads are left alone (the gain is not a plain multiplier there; scaling
+  `UserPointerAccelCurvesKey` would work, unbuilt). Apps see relative deltas level times larger.
+- Inspect divides the gain back out of its crosshair speed. Research:
+  `~/Documents/Claude/research/wind-mac/2026-11-01-disable-zoom-slowdown.md`.
+
+Pointer speed compensation (`keepPointerSpeed`, default off, and off whenever the HID gain is on) uses this every tick: the pointer
 moves `level` times the step macOS gave it, so it covers the 1x distance. Inspect uses it to hold
 the pointer still, and leaving Inspect or the caret uses it to bring the pointer to the view.
 Placement snaps to a grid (for example x.19), so movement is always measured from where the
@@ -579,6 +595,8 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   Core Animation animated it, from ~225 px to ~3400 px area and back over ~10 frames. The image now goes
   up in the same commit as its size and place. Measured: `scripts/cursor_shape_truth.py` (a magenta
   silhouette probe in test builds, moving across a Terminal window's right edge).
+  Wind's cursor on Transform had the same bug (owner 2026-11-01) and the same fix;
+  `cursor_shape_truth.py --engine zoom` checks it (101 big frames before, 0 after).
 - **Back to the pointer after typing** (owner: "after typing the cursor tracking degenerates"). The
   view sprang toward the moving pointer and lagged it for as long as the hand moved: after typing,
   panning drew the cursor 70-90 screen pt off centre in 2 of 6 runs, swinging with the hand's speed. Now

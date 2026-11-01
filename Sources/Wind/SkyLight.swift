@@ -113,6 +113,7 @@ enum SkyLight {
     /// 10 ms timer with a cosine ease (the sixth argument; reverse-engineered 2026-10-31). Its
     /// duration is about pi * sqrt(scale * distance) / (1500 * glide), clamped to 0.01-0.5 s.
     static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true, glide: Double = 0, drawnFollow: Bool = true) -> Bool {
+        HIDGain.shared.follow(DrawZoom.enabled ? 1 : scale)   // render does not slow the pointer
         if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale, smooth: smooth); return true }
         guard let f = setZoom else { return false }
         if glide == 0 && drawnFollow { beforeWrite?(center, scale) }
@@ -185,6 +186,7 @@ enum SkyLight {
 
     /// macOS's own zoom back to 1x, whichever engine is selected (draw engine handover).
     static func resetCompositor() {
+        HIDGain.shared.follow(1)
         guard let f = setZoom else { return }
         let b = CGDisplayBounds(CGMainDisplayID())
         var c = CGPoint(x: b.midX, y: b.midY)
