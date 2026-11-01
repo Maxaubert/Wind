@@ -49,13 +49,7 @@ enum SystemZoom {
             completion(); return
         }
         let press = {
-            let src = CGEventSource(stateID: .hidSystemState)
-            for down in [true, false] {
-                let e = CGEvent(keyboardEventSource: src, virtualKey: 0x1C, keyDown: down)   // the 8 key
-                e?.flags = [.maskAlternate, .maskCommand]
-                e?.post(tap: .cghidEventTap)
-            }
-            Log.info("macOS Zoom was zoomed in: sent its toggle shortcut")
+            pressToggle()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { completion() }
         }
         if bool("closeViewHotkeysEnabled") == true { press(); return }
@@ -63,6 +57,25 @@ enum SystemZoom {
             if case .notFound = r { completion(); return }        // never send it into another app
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { press() }
         }
+    }
+
+    private static func pressToggle() {
+        let src = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: src, virtualKey: 0x1C, keyDown: down)   // the 8 key
+            e?.flags = [.maskAlternate, .maskCommand]
+            e?.post(tap: .cghidEventTap)
+        }
+        Log.info("macOS Zoom was zoomed in: sent its toggle shortcut")
+    }
+
+    /// Release an engaged macOS Zoom right away when that needs no trip through System Settings
+    /// (its keyboard shortcuts are on with the default toggle). Wind calls this as it starts to
+    /// zoom in, so macOS Zoom does not magnify Wind's view a second time. False: not released.
+    static func releaseQuickly() -> Bool {
+        guard engaged, bool("closeViewHotkeysEnabled") == true, toggleShortcutIsDefault else { return false }
+        pressToggle()
+        return true
     }
 
     /// Symbolic hotkey 15 (Zoom on/off) keeps its default key, Option-Command-8. Whether it is
@@ -87,11 +100,18 @@ enum SystemZoom {
         }
     }
 
-    private static func turnOffSwitches(wasRunning: Bool, completion: @escaping (Bool) -> Void) {
+    /// `retries`: System Settings sometimes never shows a switch within the wait (2 of 5 e2e runs,
+    /// 2026-11-01), so a pass that missed one runs once more.
+    private static func turnOffSwitches(wasRunning: Bool, retries: Int = 1, completion: @escaping (Bool) -> Void) {
         let labels = [keyboardLabel, trackpadLabel, scrollLabel]
         var ok = true
         func next(_ i: Int) {
             guard i < labels.count else {
+                if !ok && retries > 0 && !shortcutsOn().isEmpty {
+                    Log.info("macOS Zoom: a switch was not found, trying once more")
+                    turnOffSwitches(wasRunning: wasRunning, retries: retries - 1, completion: completion)
+                    return
+                }
                 if !wasRunning { closeSettings() }
                 // System Settings writes the preferences a moment after the press.
                 func verify(_ tries: Int) {

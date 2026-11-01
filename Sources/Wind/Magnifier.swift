@@ -97,6 +97,7 @@ final class Magnifier {
 
     var onLevelChange: ((Double) -> Void)?
     var onQuitRequested: (() -> Void)?
+    var onSessionStart: (() -> Void)?
     private var lastReportedLevel = 1.0
 
     var level: Double { zoom.level }
@@ -538,6 +539,7 @@ final class Magnifier {
             resetViewOwnerForSession(&owner)
             lock.reset()
             Log.info("zoom session start at \(Int(ptr.x)),\(Int(ptr.y))")
+            onSessionStart?()
         }
 
         tickStartCenter = center

@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loadConfig(force: true)
         mag.onLevelChange = { [weak self] lv in self?.showLevel(lv) }
         mag.onQuitRequested = { NSApp.terminate(nil) }
+        mag.onSessionStart = { [weak self] in self?.releaseSystemZoomOnZoomIn() }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
         // The first-run setup asks for the permissions itself, so macOS's own Accessibility prompt is
         // shown only when the setup is not.
@@ -112,6 +113,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if on.isEmpty { Log.info("macOS Zoom shortcuts: all off") }
             else { Log.info("macOS Zoom shortcuts on (they clash with Wind): \(on.joined(separator: ", "))") }
             showLevel(mag.level)
+        }
+    }
+
+    /// Zooming in while macOS Zoom is zoomed in would magnify Wind's view twice (and on the macOS
+    /// zoom engine the two fight over the view): release macOS Zoom first. Only the quick way, its
+    /// own toggle shortcut; when that is off the menu's warning and fix remain.
+    private func releaseSystemZoomOnZoomIn() {
+        guard SystemZoom.engaged else { return }
+        if SystemZoom.releaseQuickly() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.mag.reassert()                             // releasing macOS Zoom resets the shared zoom
+                self?.checkSystemZoom()
+            }
+        } else {
+            Log.error("macOS Zoom is zoomed in and its keyboard shortcuts are off: Wind cannot release it here")
         }
     }
 

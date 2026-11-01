@@ -30,6 +30,8 @@ def relaunch_with_channel(direct=False, extra=None):
     # WIND_ENGINE=draw runs any suite on the draw engine (started directly: no permission prompt).
     if os.environ.get("WIND_ENGINE"):
         extra = dict(extra or {}, engine=os.environ["WIND_ENGINE"]); direct = True
+    # The default engine is render since 2026-11-01: suites that name none still run macOS zoom.
+    extra = {"engine": "zoom", **(extra or {})}
     if os.environ.get("WIND_CURSOR"):              # WIND_CURSOR=wind: Wind's own cursor
         extra = dict(extra or {}, cursor=os.environ["WIND_CURSOR"])
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
@@ -68,7 +70,10 @@ def relaunch_with_channel(direct=False, extra=None):
 TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZoom", "smoothZoomAccel",
                       "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "panSmoothMs", "slowPrecision",
                       "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
-                      "engine", "slowPanGlide", "cursor"]   # transform engine unless WIND_ENGINE says otherwise
+                      "engine", "slowPanGlide", "cursor",
+                      # The checks press the default binds (the owner's own setup may have changed them).
+                      "zoomIn", "zoomOut", "wheelZoomMods", "quickZoom", "panLeft", "panRight", "panUp", "panDown",
+                      "inspect", "hideCursor", "quit"]
 
 def kill_all_wind():
     """Every Wind (installed or test build) must be gone before another starts: a test copy whose

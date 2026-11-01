@@ -157,7 +157,12 @@ mice only: a mouse's Pointer collection repeats X/Y.
   is on.
 - **Wind's fix (menu or Settings):**
   1. If macOS Zoom is zoomed in, switch its keyboard shortcuts on if needed and send the toggle.
-  2. Switch all three shortcuts off.
+  2. Switch all three shortcuts off. A pass that misses a switch runs once more: System Settings
+     sometimes never shows one within the wait (2 of 5 runs, 2026-11-01).
+- **Zooming in releases it (2026-11-01).** At the start of a Wind zoom session, an engaged macOS
+  Zoom is released with its toggle shortcut, so it does not magnify Wind's view a second time
+  (render) or fight over the view (macOS zoom). This happens only when its keyboard shortcuts are
+  already on; otherwise Wind logs it and leaves the release to the fix, which opens System Settings.
 - **Switch lookup.** In Settings, a switch row is the label, then its description lines, then the
   switch. The lookup skips text and stops at any other control.
 - **Test.** `scripts/e2e_syszoom.py` covers the whole flow.
