@@ -42,6 +42,7 @@ final class CaretTracker {
         guard enabled, let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != getpid() else { return }
         pid = app.processIdentifier
+        reEnhanced = false
         isTerminal = CaretTracker.terminalBundles.contains(app.bundleIdentifier ?? "")
         let el = AXUIElementCreateApplication(pid)
         // A hung app must not stall the main thread, which also runs the event tap.
@@ -52,6 +53,14 @@ final class CaretTracker {
         AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         isChromium = CaretTracker.chromiumBundles.contains(app.bundleIdentifier ?? "")
         applyEnhanced()
+        if isChromium {
+            // A browser still launching can ignore the switch: set it again a second later.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self, self.pid == pid, let el = self.appElement else { return }
+                AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                if self.enhancedOn != nil { AXUIElementSetAttributeValue(el, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) }
+            }
+        }
         var obs: AXObserver?
         let cb: AXObserverCallback = { _, element, notification, refcon in
             guard let refcon else { return }
@@ -152,13 +161,37 @@ final class CaretTracker {
         guard enabled, pollTimer?.isValid != true, Date() >= pollPausedUntil else { return }
         if observer == nil { attachFrontmost() }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: false) { [weak self] _ in
-            guard let self, let el = self.focusedElement() else { return }
+            guard let self else { return }
+            guard let el = self.focusedElement() else {
+                // A Chromium browser launched just before Wind attached took the accessibility switch
+                // too early and reports no focused element (Tab moved the focus, the view stayed put;
+                // e2e_focus, 2026-11-01). Switch it on again and look once more shortly after.
+                if self.isChromium, !self.reEnhanced, let app = self.appElement {
+                    self.reEnhanced = true
+                    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                    AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                    self.enhancedOn = app
+                    Log.verbose("caret: Chromium had no focused element, accessibility switched on again")
+                    // and look again once its tree is up, for this same key
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.pollSoon() }
+                }
+                return
+            }
             let started = Date()
-            if let c = self.caretInfo(of: el), !self.parkedInTerminal(c, el) { self.publish(.caret, c.rect) }
+            if let c = self.caretInfo(of: el) {
+                if !self.parkedInTerminal(c, el) { self.publish(.caret, c.rect) }
+            } else if let r = self.frame(of: el) {
+                // A focused control without a caret (button, link, list): keyboard focus. Chromium
+                // freshly launched sent no focus notifications, so Tab moved the focus and the view
+                // stayed put (e2e_focus, 2026-11-01); the poll after the key finds it. An unchanged
+                // focus is not published again (commit), so other keys do not take the view back.
+                self.publish(.focus, r)
+            }
             if Date().timeIntervalSince(started) > 0.2 { self.pollPausedUntil = Date().addingTimeInterval(1) }
         }
     }
     private var pollPausedUntil = Date.distantPast
+    private var reEnhanced = false              // the Chromium switch was re-applied once for this app
     private var pollTimer: Timer?
 
     private func publish(_ kind: TrackKind, _ r: Rc) {

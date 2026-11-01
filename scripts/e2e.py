@@ -43,7 +43,9 @@ s = ctl("post scroll 3 ctrl", wait=0.5); three = s["level"] / (lv * one)
 check("ctrl+scroll zooms in", one > 1.05, f"x{one:.3f} per notch")
 check("a big wheel delta is still one notch", abs(three - one) < 0.01, f"x{one:.3f} vs x{three:.3f}")
 
-# Game lock: deltas pan the view while the pointer stays put.
+# Game lock: deltas pan the view while the pointer stays put. (Off by default until games are tested
+# on the Mac; switched on here.)
+saved_lock = set_config(lockTracking=True)
 ctl("level 1"); time.sleep(0.2); ctl("warp 960 540"); ctl("level 4"); time.sleep(0.2)
 ctl("lock on")
 c0 = ctl("state", wait=0.2)["center"]
@@ -53,6 +55,7 @@ s = ctl("state", wait=0.2)
 # synthetic tap deltas, like the echoes of Wind's own writes, must not pan the view.
 check("locked: synthetic deltas do not pan", s["locked"] and abs(s["center"][0] - c0[0]) < 2, f"{c0[0]:.0f} -> {s['center'][0]:.0f}")
 ctl("lock off")
+set_config(**saved_lock)
 
 # Quick zoom out and back in.
 s = ctl("post key ctrl+opt+z down", wait=0.1); ctl("post key ctrl+opt+z up"); s = ctl("state", wait=0.6)

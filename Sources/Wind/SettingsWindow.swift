@@ -56,13 +56,12 @@ struct SettingsView: View {
             bindsTab.tabItem { Text("Binds") }
             macTab.tabItem { Text("macOS") }
         }
-        .padding(16)
-        .frame(width: 520, height: 430)
+        .padding(12)
+        .frame(width: 600, height: 520)
     }
 
     private func slider(_ title: String, _ kp: WritableKeyPath<Config, Double>, _ range: ClosedRange<Double>, step: Double, format: String) -> some View {
-        HStack {
-            Text(title).frame(width: 170, alignment: .leading)
+        LabeledContent(title) { HStack {
             // Continuous slider (a stepped one draws a dense row of ticks); the value is rounded.
             Slider(value: Binding(get: { m.config[keyPath: kp] }, set: { v in
                 // Write only when the rounded value changes (a drag sends many events), and keep
@@ -71,7 +70,7 @@ struct SettingsView: View {
                 if abs(q - m.config[keyPath: kp]) >= step / 2 { m.bind(kp).wrappedValue = q }
             }), in: range)
             Text(String(format: format, m.config[keyPath: kp])).monospacedDigit().frame(width: 56, alignment: .trailing)
-        }
+        } }
     }
 
     private var zoomTab: some View {
@@ -90,11 +89,16 @@ struct SettingsView: View {
             }
             Text("Wind draws: sub-pixel smooth panning at 1x pointer speed; needs Screen Recording permission and about one frame more delay for screen content.")
                 .font(.caption).foregroundStyle(.secondary)
-            Divider()
-            slider("Warmth", \.warmthPct, 0...100, step: 5, format: "%.0f%%")
-            slider("Brightness", \.dimPct, 10...100, step: 5, format: "%.0f%%")
-        }
+            Section {
+                slider("Warmth", \.warmthPct, 0...100, step: 5, format: "%.0f%%")
+                slider("Brightness", \.dimPct, 10...100, step: 5, format: "%.0f%%")
+            }
+        }.formStyle(.grouped)
     }
+
+    /// The render engine ("Wind draws") moves the pointer at 1x and draws its own cursor itself: the
+    /// macOS-zoom pointer settings do nothing there, so they are greyed out.
+    private var draw: Bool { m.config.engine == "draw" }
 
     private var mouseTab: some View {
         Form {
@@ -106,19 +110,29 @@ struct SettingsView: View {
                 slider("Edge margin", \.mouseMarginPct, 0...40, step: 1, format: "%.0f%%")
             }
             slider("Pan smoothing", \.panSmoothMs, 0...150, step: 5, format: "%.0f ms")
-            Toggle("Fine steps when moving slowly (slows down on turns)", isOn: m.bind(\.slowPrecision))
-            Toggle("Keep pointer speed when zoomed", isOn: m.bind(\.keepPointerSpeed))
-            Toggle("Smooth slow pans (experimental)", isOn: m.bind(\.slowPanGlide))
-            Picker("Cursor while zoomed", selection: m.bind(\.cursor)) {
-                Text("macOS cursor").tag("system")
-                Text("Wind's cursor (experimental)").tag("wind")
-            }
-            Text("macOS slows the pointer by the zoom level; Wind keeps the speed you have at 1x.")
+            Text(draw ? "Steadies the view against hand jitter at high zoom; fast moves still follow at once."
+                      : "Glides the pointer over macOS's whole-point steps.")
                 .font(.caption).foregroundStyle(.secondary)
-            Toggle("Follow the mouse when a game locks the pointer", isOn: m.bind(\.lockTracking))
-            slider("Game and Inspect sensitivity", \.cursorSensitivity, 0.25...4, step: 0.05, format: "%.2f")
+            slider("Inspect sensitivity", \.cursorSensitivity, 0.25...4, step: 0.05, format: "%.2f")
             slider("Keyboard pan speed", \.panSpeed, 0.25...4, step: 0.05, format: "%.2f")
-        }
+            Section {
+                Toggle("Keep pointer speed when zoomed", isOn: m.bind(\.keepPointerSpeed))
+                Toggle("Fine steps when moving slowly (slows down on turns)", isOn: m.bind(\.slowPrecision))
+                Toggle("Smooth slow pans (experimental)", isOn: m.bind(\.slowPanGlide))
+                Picker("Cursor while zoomed", selection: m.bind(\.cursor)) {
+                    Text("macOS cursor").tag("system")
+                    Text("Wind's cursor (experimental)").tag("wind")
+                }
+            } header: {
+                Text("macOS zoom engine only")
+            } footer: {
+                Text(draw ? "Off with \"Wind draws\": it moves the pointer at 1x and draws its own cursor."
+                          : "macOS slows the pointer by the zoom level; Wind keeps the speed you have at 1x.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .disabled(draw)
+            .opacity(draw ? 0.45 : 1)                  // disabled toggles in a grouped form barely dim
+        }.formStyle(.grouped)
     }
 
     private var trackingTab: some View {
@@ -134,7 +148,7 @@ struct SettingsView: View {
             if m.config.trackAlign == 1 {
                 slider("Edge margin", \.trackMarginPct, 0...40, step: 1, format: "%.0f%%")
             }
-        }
+        }.formStyle(.grouped)
     }
 
     private var bindsTab: some View {
@@ -156,7 +170,7 @@ struct SettingsView: View {
             ForEach(problems, id: \.self) { p in
                 Text("⚠︎ \(p)").font(.caption).foregroundStyle(.orange)
             }
-        }
+        }.formStyle(.grouped)
     }
 
     private var macTab: some View {
@@ -167,19 +181,18 @@ struct SettingsView: View {
                 Label("macOS Zoom shortcuts are on and fight Wind: \(m.zoomShortcuts.joined(separator: ", "))", systemImage: "exclamationmark.triangle")
                 Button("Turn off macOS Zoom shortcuts") { m.fixZoom() }
             }
-            Toggle("Enlarge the pointer when it is shaken (macOS)", isOn: Binding(get: { m.shakeOn }, set: { on in
-                SystemZoom.setShakeToLocate(on) { _ in DispatchQueue.main.async { m.refreshSystem() } }
-            }))
             Toggle("Open Wind at login", isOn: Binding(get: { m.loginOn }, set: { on in
                 let svc = SMAppService.mainApp
                 do { if on { try svc.register() } else { try svc.unregister() } }
                 catch { Log.error("open at login: \(error.localizedDescription)") }
                 m.refreshSystem()
             }))
-            Divider()
-            Button("Open the settings file") { NSWorkspace.shared.open(Paths.config) }
-            Button("Show the log") { NSWorkspace.shared.open(Paths.log) }
+            Section {
+                Button("Open the settings file") { NSWorkspace.shared.open(Paths.config) }
+                Button("Show the log") { NSWorkspace.shared.open(Paths.log) }
+            }
         }
+        .formStyle(.grouped)
         .onAppear { m.refreshSystem() }
     }
 }

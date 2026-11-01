@@ -585,6 +585,13 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   of frames jumping, up to 12.7 pt. Render now draws it as a layer in its overlay (`DrawZoom.crosshair`,
   screen-sized), placed in the same commit as the view and on every tick, at the look point (which stays
   on what Inspect looks at when the view stops at an edge): 0.4% (one frame of 0.5 pt).
+- **Pan smoothing on render** (owner 2026-11-01: the setting seemed to do nothing). The macOS-zoom
+  pointer settings (keep speed, fine steps, smooth slow pans, cursor choice) never ran on render, which
+  moves the pointer at 1x and draws its own cursor; Settings now greys them out there. Pan smoothing on
+  render is a One Euro filter on the view (cutoff 1/(2 pi T) at rest, +0.05 Hz per desktop pt/s of
+  speed): a tremor at 16x (+-2 counts every 30 ms) moved the view with sd 6.0 screen pt, 1.9 at 60 ms
+  and 1.3 at 150 ms; a steady pan at 4x trails by ~6 screen pt. Speed scaled by the level (tried
+  first) smoothed tremor LESS at high zoom.
 - Not done yet: multiple displays, DRM video (captured black).
 
 ### Smooth zoom on the render engine (owner report 2026-10-31)
@@ -644,3 +651,18 @@ indicator; the zoom magnifies it. Turned off on the owner's Mac with
 `defaults write kCFPreferencesAnyApplication TSMLanguageIndicatorEnabled 0` (no password; apps pick it up
 as they restart, or after logging out; undo with 1). The whole newer caret is a system feature flag
 (`redesigned_text_cursor` in /Library/Preferences/FeatureFlags/Domain/UIKit.plist, admin and restart).
+
+## Keyboard focus tracking (verified 2026-11-01)
+`scripts/e2e_focus.py`: a Chrome page with four buttons, real Tab presses (tools/vmouse `type >`),
+caret following off. Each Tab must move the view onto the focused button; passes on both engines.
+- A focused TEXT field reports a caret, so it follows "Follow the text caret"; focus tracking is for
+  controls without one (buttons, links, lists).
+- The poll after a key press now also publishes a focused control's frame (it only published carets),
+  so focus is followed when the app sends no focus notification. An unchanged focus is not published
+  again, so other keys do not take the view back from the mouse.
+- A Chromium browser launched just before Wind attaches ignored the accessibility switch and reported no
+  focused element: Wind sets it again a second after attaching, and again (plus one more look 0.3 s
+  later) when a poll finds no focused element.
+- Wind ignores key events its own process posts, so tests press keys through tools/vmouse.
+- Game lock tracking is off by default and hidden in Settings until games are tested on the Mac; tests
+  that cover it switch it on.

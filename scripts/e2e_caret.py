@@ -161,7 +161,7 @@ else:
 # Chromium builds its accessibility tree on demand, the weakest caret support.
 CHROME_DATA = os.path.join(SCRATCH, "chrome-profile")
 def chrome_quit():
-    for pid in subprocess.run(["pgrep", "-f", f"--user-data-dir={CHROME_DATA}"], capture_output=True, text=True).stdout.split():
+    for pid in subprocess.run(["pgrep", "-f", "--", f"--user-data-dir={CHROME_DATA}"], capture_output=True, text=True).stdout.split():
         subprocess.run(["kill", "-TERM", pid])
     time.sleep(1)
 if os.path.exists("/Applications/Google Chrome.app"):

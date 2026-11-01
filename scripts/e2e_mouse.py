@@ -208,6 +208,8 @@ ctl("cursor show")
 check("pushing into an edge with the cursor hidden is no game lock", not any(locks), f"locked {locks}")
 
 # A game locks the pointer (hidden, disassociated): the view keeps panning from mouse deltas.
+# (Off by default and hidden until games are tested on the Mac; the tests switch it on.)
+set_config(lockTracking=True)
 GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")
 if screen_locked():
     print("SKIP game lock (the screen is locked, so no app can come to the front)")

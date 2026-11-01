@@ -198,7 +198,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Follow keyboard focus", #selector(toggleFocus), on: c.trackFocus))
         menu.addItem(item("Mouse within edges (instead of centred)", #selector(toggleEdge), on: c.mouseAlign == 1))
         menu.addItem(item("Smooth images", #selector(toggleSmooth), on: c.smoothImages))
-        menu.addItem(item("Follow the mouse in games", #selector(toggleLock), on: c.lockTracking))
 
         let warm = NSMenu()
         for p in [0, 25, 50, 75, 100] {
@@ -258,7 +257,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleKeepSpeed() { saveConfig { $0.keepPointerSpeed.toggle() } }
-    @objc private func toggleLock() { saveConfig { $0.lockTracking.toggle() } }
     @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }
     @objc private func setSpeed(_ s: NSMenuItem) {
         saveConfig { $0.zoomInSpeed = Double(s.tag) / 100; $0.zoomOutSpeed = Double(s.tag) / 100 }

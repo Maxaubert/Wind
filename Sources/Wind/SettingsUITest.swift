@@ -47,7 +47,12 @@ enum SettingsUITest {
             if let mouse = tabs.first(where: { label($0).contains("Mouse") }) {
                 AXUIElementPerformAction(mouse, kAXPressAction as CFString)
                 Thread.sleep(forTimeInterval: 0.5)
-                if let sw = all(win, { role($0) == "AXCheckBox" && label($0).contains("Keep pointer speed") }).first {
+                // In the grouped form a switch has no title: its label is the text element just before it.
+                let flat = all(win, { role($0) == "AXCheckBox" || role($0) == "AXStaticText" })
+                let at = flat.firstIndex { role($0) == "AXStaticText" && ((attr($0, kAXValueAttribute) as? String) ?? label($0)).contains("Keep pointer speed") }
+                let sw = all(win, { role($0) == "AXCheckBox" && label($0).contains("Keep pointer speed") }).first
+                    ?? at.flatMap { i in flat[(i + 1)...].first { role($0) == "AXCheckBox" } }
+                if let sw {
                     let before = configBool("keepPointerSpeed") ?? true   // absent = the default
                     AXUIElementPerformAction(sw, kAXPressAction as CFString); Thread.sleep(forTimeInterval: 0.6)
                     let after = configBool("keepPointerSpeed")
@@ -62,12 +67,12 @@ enum SettingsUITest {
                 AXUIElementPerformAction(zoomTab, kAXPressAction as CFString)
                 Thread.sleep(forTimeInterval: 0.5)
                 if let slider = all(win, { role($0) == "AXSlider" }).first {
-                    let before = configDouble("zoomInSpeed")
+                    let before = configDouble("zoomInSpeed") ?? 1.75     // absent = the default
                     AXUIElementPerformAction(slider, kAXIncrementAction as CFString); Thread.sleep(forTimeInterval: 0.6)
                     let after = configDouble("zoomInSpeed")
                     AXUIElementPerformAction(slider, kAXDecrementAction as CFString); Thread.sleep(forTimeInterval: 0.6)
                     let restored = configDouble("zoomInSpeed")
-                    let ok = before != nil && after != nil && after! > before! && abs((restored ?? 0) - before!) < 0.001
+                    let ok = after != nil && after! > before && abs((restored ?? 0) - before) < 0.001
                     note((ok ? "PASS" : "FAIL") + " slider writes config: \(String(describing: before)) -> \(String(describing: after)) -> \(String(describing: restored))")
                 } else { note("FAIL no slider on the Zoom tab") }
             }

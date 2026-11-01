@@ -92,3 +92,30 @@ public func keyPanSpeed(level: Double, screenWidth: Double, panSpeed: Double) ->
     let lowZoomEase = min(1.0, 0.5 + 0.5 * (lv - 1.0) / 2.0)
     return viewW * 1.25 * panSpeed * lowZoomEase
 }
+
+/// One Euro filter (Casiez et al. 2012): a low-pass whose cutoff rises with speed, so slow jitter is
+/// smoothed strongly and real motion follows with little lag. Used for the render engine's pan
+/// smoothing (config panSmoothMs) to steady the view against hand jitter at high zoom.
+public struct OneEuro {
+    public var minCutoff: Double            // Hz at rest
+    public var beta: Double                 // cutoff added per unit/s of speed
+    public var dCutoff = 1.0                // Hz, for the speed estimate
+    var x: Double?
+    var dx = 0.0
+
+    public init(minCutoff: Double, beta: Double) { self.minCutoff = minCutoff; self.beta = beta }
+
+    public mutating func reset() { x = nil; dx = 0 }
+
+    /// Filter a sample `v` taken `dt` s after the last; `scale` converts speed into the units beta uses.
+    public mutating func filter(_ v: Double, dt: Double, scale: Double = 1) -> Double {
+        guard let px = x, dt > 0 else { x = v; dx = 0; return v }
+        func alpha(_ fc: Double) -> Double { let tau = 1 / (2 * Double.pi * fc); return 1 / (1 + tau / dt) }
+        let rawDx = (v - px) / dt
+        dx += alpha(dCutoff) * (rawDx - dx)
+        let fc = minCutoff + beta * abs(dx) * scale
+        let nx = px + alpha(fc) * (v - px)
+        x = nx
+        return nx
+    }
+}

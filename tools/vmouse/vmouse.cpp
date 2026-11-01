@@ -1,6 +1,6 @@
 // vmouse: real HID pointer motion through Karabiner's virtual HID device (test harness for Wind).
 // Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "wheel <notches> <count> <interval_ms>",
-// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace), "button <n> down|up", "quit".
+// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab), "button <n> down|up", "quit".
 #include <atomic>
 #include <iostream>
 #include <sstream>
@@ -53,6 +53,7 @@ int main() {
         else if (ch == '0') u = 0x27;
         else if (ch == '_') u = 0x2C;   // space
         else if (ch == '<') u = 0x2A;   // backspace
+        else if (ch == '>') u = 0x2B;   // tab
         if (!u) continue;
         kd::virtual_hid_device_driver::hid_report::keyboard_input kr;
         kr.keys.insert(u);

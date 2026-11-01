@@ -82,6 +82,7 @@ final class Magnifier {
     private var inspectLook = Pt(0, 0)          // the crosshair: where Inspect is looking
     private var pendingPlace: Pt?               // next tick: put the pointer here (leaving Inspect)
     private var returning = false               // the view is gliding back to the pointer
+    private var euroX = OneEuro(minCutoff: 1, beta: 0.05), euroY = OneEuro(minCutoff: 1, beta: 0.05)   // render pan smoothing
     private var returnOffset: Pt?               // while returning: view minus the pointer's view, gliding to zero
     private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
@@ -773,6 +774,7 @@ final class Magnifier {
                     // it for as long as the hand moved and never finished: after typing, panning drew
                     // the cursor 70-90 screen pt off centre, swinging with the hand's speed (owner
                     // 2026-10-31: "after typing the cursor tracking degenerates").
+                    euroX.reset(); euroY.reset()
                     let o0 = returnOffset ?? Pt(center.x - want.x, center.y - want.y)
                     var vx = springVel.x, vy = springVel.y
                     let ox = springToward(o0.x, 0, vel: &vx, dtMs: dt * 1000, glideMs: 160)
@@ -785,8 +787,18 @@ final class Magnifier {
                     target = want
                     returnOffset = nil
                     springVel = (0, 0)
+                    // Render engine: pan smoothing steadies the view against hand jitter, which the zoom
+                    // magnifies. Adaptive (One Euro): slow, small motion is smoothed with the time
+                    // constant set; real motion raises the cutoff with its on-screen speed, so a pan
+                    // follows with little lag. (On macOS's zoom the setting glides the pointer instead.)
+                    if DrawZoom.enabled && config.panSmoothMs > 0 && lv > 1.0001 {
+                        let fc = 1 / (2 * Double.pi * config.panSmoothMs / 1000)
+                        euroX.minCutoff = fc; euroY.minCutoff = fc
+                        target = Pt(euroX.filter(want.x, dt: dt), euroY.filter(want.y, dt: dt))
+                    } else { euroX.reset(); euroY.reset() }
                 }
             case .caret, .focus:
+                euroX.reset(); euroY.reset()
                 if let t = trackTargetCenter(owner.target.rect, cur: center, level: lv, screen: screen,
                                              align: config.trackAlign, marginPct: config.trackMarginPct) {
                     var vx = springVel.x, vy = springVel.y
@@ -796,6 +808,7 @@ final class Magnifier {
                     target = Pt(x, y)
                 }
             case .keys:
+                euroX.reset(); euroY.reset()
                 let v = keyPanSpeed(level: lv, screenWidth: screen.w, panSpeed: config.panSpeed) * dt
                 target = Pt(center.x + panX * v, center.y + panY * v)
             }

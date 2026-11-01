@@ -34,7 +34,7 @@ public struct Config: Codable, Equatable {
     // Mouse tracking.
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges
     public var mouseMarginPct = 0.0
-    public var lockTracking = true                // pan from raw deltas when a game locks the pointer
+    public var lockTracking = false               // pan from raw deltas when a game locks the pointer (off and hidden until games are tested on the Mac)
     public var cursorSensitivity = 1.0            // delta gain while locked
     public var panSpeed = 1.0
     public var panSmoothMs = 0.0                  // pointer glide (off: the zoom moves in whole points anyway)

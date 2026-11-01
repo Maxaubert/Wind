@@ -17,6 +17,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `python3 scripts/e2e_syszoom.py`: macOS Zoom clash and Wind's fix (opens System Settings, leaves
   every macOS Zoom shortcut off).
 - Run all three after touching `Magnifier.swift`, `SkyLight.swift` or `CaretTracker.swift`.
+- `python3 scripts/e2e_focus.py`: keyboard focus tracking in a throwaway Chrome (WIND_ENGINE=draw for render).
 - `python3 scripts/e2e_draw.py`: the experimental draw engine (`engine = "draw"`); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
