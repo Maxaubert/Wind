@@ -33,7 +33,16 @@
     'keys', 'done'];
   const TITLES = { welcome: 'Welcome to Wind', access: 'Allow Accessibility', screen: 'Allow Screen Recording',
                    zoom: 'Turn off the macOS Zoom shortcuts', keys: 'Set your zoom keys', done: "You're all set" };
-  let cur = $state(0);
+  // Resumed after Wind quit mid-setup (macOS's "Quit & Reopen" once Screen Recording is allowed): start at
+  // the first step not done yet instead of the welcome page.
+  function firstOpen() {
+    if (!init.resume) return 0;
+    const m = initMac || {};
+    const i = steps.findIndex((s) => (s === 'access' && !m.accessibility) || (s === 'screen' && !m.screenRecording)
+      || (s === 'zoom' && m.zoomShortcuts && m.zoomShortcuts.length) || s === 'keys');
+    return i < 0 ? 0 : i;
+  }
+  let cur = $state(firstOpen());
   const step = $derived(steps[cur]);
   const N = steps.length;
 

@@ -146,3 +146,21 @@ test('the step is announced to screen readers', async ({ page }) => {
   await primary(page).click();
   await expect(page.locator('.sr-only[role=status]')).toHaveText(/Step 2 of 5: Allow Accessibility/);
 });
+
+// macOS's "Quit & Reopen" after the Screen Recording grant quits Wind mid-setup; the host reopens the
+// setup with resume, and it continues at the first step not done (owner 2026-11-01).
+test('a resumed setup starts at the first step not done yet', async ({ page }) => {
+  await mockHost(page, { init: true, mac: ALL, resume: true });
+  await page.goto('/?mode=onboard');
+  await expect(step(page)).toHaveAttribute('data-step', 'keys');
+});
+test('a resumed setup still missing Screen Recording starts there', async ({ page }) => {
+  await mockHost(page, { init: true, mac: { ...NONE, accessibility: true }, resume: true });
+  await page.goto('/?mode=onboard');
+  await expect(step(page)).toHaveAttribute('data-step', 'screen');
+});
+test('a first setup starts at the welcome page even with every permission granted', async ({ page }) => {
+  await mockHost(page, { init: true, mac: ALL });
+  await page.goto('/?mode=onboard');
+  await expect(page.locator('h1')).toHaveText('Welcome to Wind');
+});

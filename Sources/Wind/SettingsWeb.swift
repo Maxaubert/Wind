@@ -27,7 +27,13 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     /// Show the settings (or the first-run setup with `onboard`).
     func show(config: Config, save: @escaping (Config) -> Void, fixZoom: @escaping () -> Void, onboard: Bool = false) {
         self.config = config; self.save = save; self.fixZoom = fixZoom
-        if onboard { onboarding = true }
+        if onboard {
+            resumeSetup = UserDefaults.standard.bool(forKey: SettingsWindowController.setupInProgressKey)
+            onboarding = true
+            // Remembered across a relaunch: macOS's "Quit & Reopen" after the Screen Recording grant quits
+            // Wind mid-setup, and the setup then resumes where it was.
+            UserDefaults.standard.set(true, forKey: SettingsWindowController.setupInProgressKey)
+        }
         if let w = window, let web {
             if onboard { load(web, onboard: true) }
             present(w)
@@ -95,13 +101,25 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     private var lastStatus = ""
     /// The window shows the first-run setup: closing it counts as skipping (writes onboarded).
     private var onboarding = false
+    static let setupInProgressKey = "setupInProgress"
+    /// Wind is quitting: a window closing now is not the user ending the setup.
+    private var terminating = false
+    /// This setup continues one that Wind quit in the middle of (the page starts at the first step not done).
+    private var resumeSetup = false
+    private var terminateObserver: NSObjectProtocol?
 
     var isOpen: Bool { window?.isVisible == true }
 
     private func load(_ web: WKWebView, onboard: Bool) {
         // First paint without a round trip: the page reads window.__windInit once (bridge.js getSession).
+        if terminateObserver == nil {
+            terminateObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.terminating = true
+            }
+        }
+        let resume = onboard && resumeSetup
         let initJSON = json(["values": values(config), "saved": values(config), "runningModel": runningEngine(),
-                             "mac": macStatus()])
+                             "mac": macStatus(), "resume": resume])
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
         ucc.addUserScript(WKUserScript(source: "window.__windInit = \(initJSON);", injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -122,6 +140,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
             if let c = setting(config, key, s("value")) {
                 config = c
                 save?(c)
+                if key == "onboarded" && c.onboarded { UserDefaults.standard.removeObject(forKey: SettingsWindowController.setupInProgressKey) }
             } else {
                 Log.error("settings: refused \(key)=\(s("value"))")
                 send(["type": "configWriteFailed", "key": key])
@@ -225,9 +244,13 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
 
     func windowWillClose(_ n: Notification) {
         onCapture?(false)
-        if onboarding && !config.onboarded {
+        // The user closing the setup ends it; Wind quitting (macOS's "Quit & Reopen" after a permission
+        // grant) does not: that marked setup done and it never came back after the relaunch
+        // (owner 2026-11-01).
+        if onboarding && !config.onboarded && !terminating {
             config.onboarded = true
             save?(config)
+            UserDefaults.standard.removeObject(forKey: SettingsWindowController.setupInProgressKey)
         }
         onboarding = false
         window?.contentView = nil

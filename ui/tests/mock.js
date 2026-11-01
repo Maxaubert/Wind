@@ -16,14 +16,14 @@ import { expect } from '@playwright/test';
 export const MAC_OK = { accessibility: true, screenRecording: true, zoomShortcuts: [], loginItem: false, logLevel: 1 };
 
 export async function mockHost(page, opts = {}) {
-  await page.addInitScript(({ values, mac, init, refuse }) => {
+  await page.addInitScript(({ values, mac, init, refuse, resume }) => {
     window.__msgs = [];
     window.__live = { ...values };
     window.__mac = { ...mac };
     window.__refuse = refuse || [];
     window.__hostSend = (msg) => window.__windReceive && window.__windReceive(msg);
     const send = (msg) => queueMicrotask(() => window.__hostSend(msg));
-    if (init) window.__windInit = { values: { ...values }, runningModel: values.engine || 'draw', mac: { ...mac } };
+    if (init) window.__windInit = { values: { ...values }, runningModel: values.engine || 'draw', mac: { ...mac }, resume: !!resume };
     window.__windMock = (msg) => {
       window.__msgs.push(msg);
       if (msg.type === 'getConfig') send({ type: 'config', values: { ...window.__live }, runningModel: window.__live.engine || 'draw' });
@@ -32,7 +32,7 @@ export async function mockHost(page, opts = {}) {
         else window.__live[msg.key] = msg.value;
       } else if (msg.type === 'getMacStatus') send({ type: 'macStatus', ...window.__mac });
     };
-  }, { values: opts.values || {}, mac: { ...MAC_OK, ...(opts.mac || {}) }, init: !!opts.init, refuse: opts.refuse });
+  }, { values: opts.values || {}, mac: { ...MAC_OK, ...(opts.mac || {}) }, init: !!opts.init, refuse: opts.refuse, resume: !!opts.resume });
 }
 
 // Messages of one type the page posted.
