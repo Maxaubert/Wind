@@ -1197,6 +1197,10 @@ final class Magnifier {
     private func placePointer(at t: Pt, from p: Pt, level lv: Double, view: Pt? = nil) -> Pt {
         if DrawZoom.enabled {                           // macOS is not zoomed: a warp is exact
             let w = CGPoint(x: min(max(t.x, 0), screen.w - 1), y: min(max(t.y, 0), screen.h - 1))
+            // Without this a warp holds the hand's motion back for a moment (CGAssociate... did not
+            // lift it): leaving Inspect while moving, the pointer stood still ~0.1 s while the view
+            // followed the hand, then caught up, dragging the view (owner 2026-11-01).
+            Self.noSuppression?.localEventsSuppressionInterval = 0
             CGWarpMouseCursorPosition(w); CGAssociateMouseAndMouseCursorPosition(1)
             return Pt(w.x, w.y)
         }

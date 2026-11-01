@@ -84,6 +84,23 @@ inspect_key(); c = ctl("state")
 check("draw engine: leaving Inspect puts the pointer on the crosshair", abs(c["pointer"][0] - b["look"][0]) < 2, f"pointer {c['pointer']} look {b['look']}")
 ctl("level 1"); time.sleep(0.4)
 
+# Leaving Inspect while the hand still moves: the pointer starts on the crosshair and keeps moving
+# with the hand at once (a warp held the hand back ~0.1 s, then the pointer caught up and dragged the
+# view, owner 2026-11-01).
+import threading
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.6)
+saved_l = set_config(logLevel=2)
+inspect_key(); mv(10, 0); time.sleep(0.1)
+mvt = threading.Thread(target=lambda: mv(3, 1, 120)); mvt.start(); time.sleep(0.15)   # ~1 s of motion
+n0 = nlines(); ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); mvt.join(); time.sleep(0.1)
+L = log_since(n0); start = next((i for i, l in enumerate(L) if "inspect off" in l), None)
+V = [l.split() for l in L[start:] if " view " in l][1:25] if start is not None else []
+frozen = sum(1 for a, b in zip(V, V[1:]) if abs(float(b[5]) - float(a[5])) < 0.01 and abs(float(b[2]) - float(a[2])) > 0.5)
+check("draw engine: leaving Inspect while moving, the pointer follows the hand at once",
+      start is not None and len(V) > 15 and frozen <= 1, f"{frozen} ticks with the view moving and the pointer still, of {len(V)}")
+set_config(**saved_l)
+ctl("level 1"); time.sleep(0.4)
+
 # A game holding the pointer is still detected (the pointer stops while counts come).
 GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")
 ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.5)
