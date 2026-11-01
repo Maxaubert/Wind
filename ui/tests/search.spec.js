@@ -44,7 +44,6 @@ test('ranking: exact label first, label beats keyword', () => {
   expect(keys('theme')).toEqual(['uiPalette']);
   expect(keys('brigh')[0]).toBe('dimPct');
   expect(keys('max zoom')[0]).toBe('maxLevel');
-  expect(keys('mouse speed')[0]).toBe('cursorSensitivity');
   expect(keys('soft start length')[0]).toBe('smoothZoomRamp');
   expect(rank('speed', 'zoomInSpeed')).toBeLessThan(rank('speed', 'zoomEaseOutMs'));
   expect(keys('preferences')).toContain('uiPalette');   // the page name still finds rows
@@ -55,9 +54,7 @@ test('typo tolerance: transpositions, dropped letters, phonetic spellings', () =
   expect(keys('brigthness')[0]).toBe('dimPct');
   expect(keys('brihtness')[0]).toBe('dimPct');
   expect(keys('inertai')).toContain('zoomEaseOutMs');
-  expect(keys('sensitivty')).toContain('cursorSensitivity');
   expect(keys('nite light')[0]).toBe('warmthPct');
-  expect(keys('mouze')).toContain('cursorSensitivity');
   expect(keys('MAX ZO')).toContain('maxLevel');
   expect(keys('zoomin')).toContain('zoomIn');
   expect(keys('xom')).toEqual([]);   // 3 letters: no typo budget
@@ -164,8 +161,8 @@ test('a row gated by another setting shows dimmed, not hidden', async ({ page })
   await input(page).fill('edge margin');
   await expect(page.locator('.res .hit[data-hit="mouseMarginPct"] .row')).toHaveClass(/disabled/);
   // The macOS zoom rows are dimmed on the render engine.
-  await input(page).fill('keep pointer speed');
-  await expect(page.locator('.res .hit[data-hit="keepPointerSpeed"] .row')).toHaveClass(/disabled/);
+  await input(page).fill('fine steps');
+  await expect(page.locator('.res .hit[data-hit="slowPrecision"] .row')).toHaveClass(/disabled/);
 });
 
 test('Esc clears, Cmd+F focuses, Enter moves into the first result, Tab walks on', async ({ page, browserName }) => {

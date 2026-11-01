@@ -548,7 +548,7 @@ final class Magnifier {
         // A game holding the pointer: the cursor stays hidden while the hand keeps moving. While it
         // holds it, pan from raw HID counts: Wind's own view writes drag the held pointer around and
         // WindowServer reports that as moves with large unrelated deltas, so tap deltas run away.
-        let rawOn = (config.lockTracking || inspect) && raw.start()
+        let rawOn = (config.lockTracking || inspect) && raw.start()   // Inspect no longer reads the counts; kept so lock detection behaves as tested
         let r = raw.take()
         let motion = rawOn ? abs(r.dx) + abs(r.dy) : abs(ldx) + abs(ldy)
         if rawOn && motion > 0 { lastRawAt = CACurrentMediaTime() }   // raw counts are flowing (a trackpad sends none)
@@ -656,22 +656,17 @@ final class Magnifier {
         var target = center
         if inspect {
             // The real pointer stays frozen and hidden (a tooltip stays open); the hand moves the
-            // crosshair (the look point) at 1x speed and the view follows it like the pointer.
-            // Movement is measured from where the pointer really landed last tick (placement snaps
-            // to a grid), so the snap is never counted as hand movement.
+            // crosshair (the look point) at the pointer's own speed, macOS acceleration included,
+            // and the view follows it like the pointer (owner 2026-11-01: Inspect moves like the
+            // cursor, no speed setting). Movement is how far the pointer got from where it really
+            // landed last tick (placement snaps to a grid), so the snap is never counted as hand
+            // movement. macOS zoom slows the zoomed pointer to 1/level; render does not.
             let a = Pt(inspectAnchor.x, inspectAnchor.y)
-            let sens = config.cursorSensitivity
-            if rawOn {
-                // Raw counts, like Wind's Inspect on Windows: independent of the held pointer.
-                inspectLook = Pt(inspectLook.x + r.dx * sens, inspectLook.y + r.dy * sens)
-                let landed = inspectRef ?? a
-                if abs(ptr.x - landed.x) + abs(ptr.y - landed.y) > 0.5 { inspectRef = placePointer(at: a, from: Pt(ptr.x, ptr.y), level: lv, view: center) }
-            } else {
-                let ref = inspectRef ?? a
-                if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
-                    inspectLook = Pt(inspectLook.x + (ptr.x - ref.x) * lv * sens, inspectLook.y + (ptr.y - ref.y) * lv * sens)
-                    inspectRef = placePointer(at: a, from: Pt(ptr.x, ptr.y), level: lv, view: center)
-                }
+            let ref = inspectRef ?? a
+            if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
+                let gain = DrawZoom.enabled ? 1 : lv
+                inspectLook = Pt(inspectLook.x + (ptr.x - ref.x) * gain, inspectLook.y + (ptr.y - ref.y) * gain)
+                inspectRef = placePointer(at: a, from: Pt(ptr.x, ptr.y), level: lv, view: center)
             }
             inspectLook = Pt(min(max(inspectLook.x, 0), screen.w - 1), min(max(inspectLook.y, 0), screen.h - 1))
             if SkyLight.cursorVisible { SkyLight.setCursorHidden(true, force: true) }   // the Dock can show it again
@@ -679,7 +674,7 @@ final class Magnifier {
         } else if locked {
             // Without Input Monitoring there is no trustworthy hand motion: hold the view still.
             let gx = rawOn ? r.dx : 0, gy = rawOn ? r.dy : 0
-            virtualPtr = Pt(virtualPtr.x + gx * config.cursorSensitivity, virtualPtr.y + gy * config.cursorSensitivity)
+            virtualPtr = Pt(virtualPtr.x + gx, virtualPtr.y + gy)
             virtualPtr = Pt(min(max(virtualPtr.x, 0), screen.w), min(max(virtualPtr.y, 0), screen.h))
             target = mouseTarget(virtualPtr, lv)
         } else {

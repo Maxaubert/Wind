@@ -100,7 +100,6 @@ export const groups = [
     cards: [
       { caption: 'Movement', rows: [
         { key: 'panSpeed', type: 'slider', label: 'Arrow key speed', keywords: ['pan', 'pan speed', 'arrows', 'move', 'scroll', 'keyboard', 'how fast', 'velocity', 'shift view', 'rate'], desc: 'How fast the arrow keys move the view', min: 0.25, max: 4, step: 0.05, def: 1, unit: 'times' },
-        { key: 'cursorSensitivity', type: 'slider', label: 'Inspect mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'mouse speed', 'inspect', 'look around', 'locked', 'game', 'how fast', 'velocity', 'rate'], desc: 'How fast the view moves in Inspect mode', min: 0.25, max: 4, step: 0.05, def: 1, unit: 'times' },
         // panSmoothMs: on the render engine a low-pass on the pointer (it gets weight against hand
         // jitter while the view stays centred on it); on the macOS zoom a glide over whole-point steps.
         { key: 'panSmoothMs', type: 'slider', label: 'Pointer weight', keywords: ['jitter', 'shake', 'tremor', 'steady', 'smooth', 'smoothing', 'glide', 'inertia', 'heavy', 'weight', 'filter', 'mouse', 'pan', 'stabilise', 'stabilize', 'milliseconds'],
@@ -119,8 +118,6 @@ export const groups = [
         { key: 'hidePointerWhileTracking', type: 'toggle', label: 'Hide the pointer while typing', keywords: ['hide mouse', 'hide cursor', 'pointer', 'typing', 'caret', 'invisible', 'distraction', 'focus'], desc: 'The pointer comes back when you move the mouse', def: 1 },
       ] },
       { caption: 'macOS zoom engine', rows: [
-        { key: 'keepPointerSpeed', type: 'toggle', label: 'Keep pointer speed', keywords: ['pointer speed', 'mouse speed', 'cursor speed', 'slow', 'sluggish', 'acceleration', 'tracking speed', 'zoomed', 'same distance'],
-          desc: 'The pointer covers the same distance at any zoom', def: 1, showIf: ZOOM_ENGINE },
         { key: 'slowPrecision', type: 'toggle', label: 'Fine steps for slow moves', keywords: ['precision', 'slow', 'fine', 'steps', 'exact', 'accuracy', 'small moves', 'pixel'],
           desc: 'Very slow moves keep the small zoomed steps', def: 0, showIf: ZOOM_ENGINE },
         { key: 'precisionBelow', type: 'slider', adv: true, label: 'Fine steps below', keywords: ['precision', 'threshold', 'slow', 'fine', 'speed', 'points per second', 'hand speed'],

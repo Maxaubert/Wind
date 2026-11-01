@@ -156,10 +156,14 @@ s = ctl("state")
 check("compositor agrees with Wind after the sweep", abs(s["sky"]["center"][0] - s["center"][0]) <= 1, f"sky {s['sky']['center']} wind {s['center']}")
 
 # Inspect: the crosshair starts at the pointer, the real pointer is hidden and frozen, the hand
-# moves the crosshair at 1x speed, and the view never moves on entering or leaving (owner list).
+# moves the crosshair as far as it would move the pointer at 1x (macOS acceleration included), and
+# the view never moves on entering or leaving (owner list).
 def inspect_key():
     ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.25)
 for name, start in (("middle", (800, 500)), ("edge", (60, 1040))):
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {start[0]} {start[1]}"); time.sleep(0.2)
+    p0 = ctl("state")["pointer"]; mv(10, -10 if name == "edge" else 0); time.sleep(0.2)
+    ref = ctl("state")["pointer"][0] - p0[0]
     ctl("level 1"); time.sleep(0.3); ctl(f"warp {start[0]} {start[1]}"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
     before = ctl("state")
     inspect_key()
@@ -170,8 +174,8 @@ for name, start in (("middle", (800, 500)), ("edge", (60, 1040))):
     mv(10, -10 if name == "edge" else 0); time.sleep(0.2)
     b = ctl("state")
     check(f"inspect ({name}): pointer frozen", max(abs(b["pointer"][0] - a["pointer"][0]), abs(b["pointer"][1] - a["pointer"][1])) < 1, f"{a['pointer']} -> {b['pointer']}")
-    # Like Wind's Inspect on Windows, the crosshair moves by raw mouse counts (10 reports x 10).
-    check(f"inspect ({name}): crosshair moves with the raw mouse", abs((b["look"][0] - a["look"][0]) - 100) < 12, f"look moved {b['look'][0] - a['look'][0]:.1f} for 100 counts")
+    check(f"inspect ({name}): crosshair moves like the pointer at 1x", abs((b["look"][0] - a["look"][0]) - ref) < max(3, ref * 0.15),
+          f"look moved {b['look'][0] - a['look'][0]:.1f}, pointer at 1x {ref:.1f}")
     if name == "middle":
         for _ in range(12): mv(10, 0)                    # pan several view widths
         time.sleep(0.2)

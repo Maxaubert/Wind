@@ -20,6 +20,7 @@ const NO_ROW = {
   lockTracking: 'hidden until games are tested on the Mac (Config.swift)',
   panMaxLagPt: 'nothing in Sources reads it',
   onboarded: 'written by the first-run setup, not a setting',
+  keepPointerSpeed: 'always on: no cursor speed setting (owner 2026-11-01)',
 };
 
 function fixture() {

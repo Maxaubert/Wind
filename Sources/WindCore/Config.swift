@@ -35,7 +35,6 @@ public struct Config: Codable, Equatable {
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges
     public var mouseMarginPct = 0.0
     public var lockTracking = false               // pan from raw deltas when a game locks the pointer (off and hidden until games are tested on the Mac)
-    public var cursorSensitivity = 1.0            // delta gain while locked
     public var panSpeed = 1.0
     public var panSmoothMs = 0.0                  // pointer glide (off: the zoom moves in whole points anyway)
     public var slowPrecision = false              // very slow motion keeps macOS's fine zoomed steps (speed changes on turns)
@@ -58,7 +57,7 @@ public struct Config: Codable, Equatable {
 
     /// macOS slows the pointer by the zoom level (it moves in screen space). true = Wind's
     /// behaviour: the pointer covers the same desktop distance per hand movement at any zoom.
-    public var keepPointerSpeed = true
+    public var keepPointerSpeed = true            // no setting since 2026-11-01 (owner: no cursor speed setting)
 
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
 
@@ -115,7 +114,6 @@ public struct Config: Codable, Equatable {
         quickZoomDefault = min(maxLevel, max(1.1, quickZoomDefault))
         mouseAlign = mouseAlign == 1 ? 1 : 0
         mouseMarginPct = min(40, max(0, mouseMarginPct))
-        cursorSensitivity = min(8, max(0.1, cursorSensitivity))
         panSpeed = min(4, max(0.25, panSpeed))
         panSmoothMs = min(500, max(0, panSmoothMs))
         precisionBelow = min(1000, max(10, precisionBelow))   // Magnifier divides by it

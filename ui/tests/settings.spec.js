@@ -125,7 +125,7 @@ test('Engine lives in Advanced, defaults to Render, and macOS zoom brings its ro
   await expect(sel).toHaveValue('draw');
   await expect(sel.locator('option')).toHaveText(['Render', 'macOS zoom']);
   await go(page, 'view');
-  for (const k of ['keepPointerSpeed', 'slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
+  for (const k of ['slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toHaveCount(0);
   await go(page, 'zoom');
   await sel.selectOption('zoom');
@@ -133,7 +133,7 @@ test('Engine lives in Advanced, defaults to Render, and macOS zoom brings its ro
   await expect(page.locator('[role=status]').filter({ hasText: 'Engine set to macOS zoom' })).toHaveCount(1);
   await go(page, 'view');
   await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'macOS zoom engine']);
-  for (const k of ['keepPointerSpeed', 'slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
+  for (const k of ['slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toBeVisible();
   await expect(row(page, 'slowPanGlide').locator('.tag')).toHaveText('Experimental');
   await expect(row(page, 'precisionBelow')).toHaveClass(/disabled/);   // slowPrecision is off

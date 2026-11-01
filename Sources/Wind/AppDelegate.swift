@@ -251,7 +251,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for p in problems { binds.addItem(item("⚠︎ \(p)", nil)) }
         let bi = item("Binds", nil); bi.submenu = binds
         menu.addItem(bi)
-        menu.addItem(item("Keep pointer speed when zoomed", #selector(toggleKeepSpeed), on: c.keepPointerSpeed))
         menu.addItem(item("macOS: enlarge pointer when shaken", #selector(toggleShake), on: SystemZoom.shakeToLocateOn))
         menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(item("Settings…", #selector(openSettings)))
@@ -314,7 +313,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func toggleKeepSpeed() { saveConfig { $0.keepPointerSpeed.toggle() } }
     @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }
     @objc private func setSpeed(_ s: NSMenuItem) {
         saveConfig { $0.zoomInSpeed = Double(s.tag) / 100; $0.zoomOutSpeed = Double(s.tag) / 100 }

@@ -71,14 +71,18 @@ s = ctl("state")
 check("draw engine: key panning moves the view", s["sky"]["center"][0] > 905, f"view {s['sky']['center']}")
 ctl("level 1"); time.sleep(0.4)
 
-# Inspect: the crosshair follows the raw mouse, the pointer stays put, the view follows the crosshair.
+# Inspect: the crosshair moves like the pointer would (macOS acceleration included), the pointer stays
+# put, the view follows the crosshair. The same hand motion at 1x is the reference.
 def inspect_key():
     ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.3)
-ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.6)
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2)
+p0 = ctl("state")["pointer"]; mv(10, 0); time.sleep(0.2); ref = ctl("state")["pointer"][0] - p0[0]
+ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.6)
 inspect_key(); a = ctl("state")
 mv(10, 0); time.sleep(0.2); b = ctl("state")
 check("draw engine: Inspect on", a["inspect"], f"inspect {a['inspect']}")
-check("draw engine: Inspect crosshair moves with the raw mouse", abs((b["look"][0] - a["look"][0]) - 100) < 12, f"look moved {b['look'][0] - a['look'][0]:.1f}")
+check("draw engine: Inspect crosshair moves like the pointer at 1x", abs((b["look"][0] - a["look"][0]) - ref) < max(3, ref * 0.15),
+      f"look moved {b['look'][0] - a['look'][0]:.1f}, pointer at 1x {ref:.1f}")
 check("draw engine: Inspect pointer stays put", abs(b["pointer"][0] - a["pointer"][0]) < 1.5, f"{a['pointer']} -> {b['pointer']}")
 inspect_key(); c = ctl("state")
 check("draw engine: leaving Inspect puts the pointer on the crosshair", abs(c["pointer"][0] - b["look"][0]) < 2, f"pointer {c['pointer']} look {b['look']}")
