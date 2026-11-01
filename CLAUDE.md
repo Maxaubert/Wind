@@ -10,6 +10,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   and relaunches. Signs with the local "Wind Mac Dev" identity (keychain
   `~/Library/Keychains/windmac-dev.keychain-db`, password in the login keychain) so the Accessibility grant survives rebuilds.
 - `scripts/build.sh test`: `build/test/Wind.app` with the e2e command channel compiled in.
+- App icon: `assets/Wind.icon` (Icon Composer) compiled by `scripts/make_icon.sh` (needs Xcode) into the
+  committed `assets/icon/` (Assets.car: no grey plate on macOS 26+; Wind.icns for older macOS).
 - Settings UI (`ui/`, Svelte): `npm ci && npm run build`, `npx playwright test` (mock bridge, WebKit +
   Chromium), `npm run test:rules` (keybind rules and config defaults). Design: `docs/architecture.md`, Settings window.
 - `python3 scripts/e2e_settings.py`: the settings window in the test build (page writes, keybinds, setup).

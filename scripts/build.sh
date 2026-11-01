@@ -31,12 +31,15 @@ if [[ ! -f ui/dist/index.html || -n "$(find ui/src ui/index.html ui/public ui/vi
   (cd ui && npm run build --silent > /dev/null) || { echo "ui: build failed"; exit 1; }
 fi
 cp -R ui/dist "$APP/Contents/Resources/ui"
+cp assets/icon/Assets.car assets/icon/Wind.icns "$APP/Contents/Resources/"   # app icon (scripts/make_icon.sh)
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.maxaubert.wind</string>
   <key>CFBundleName</key><string>Wind</string>
+  <key>CFBundleIconFile</key><string>Wind</string>
+  <key>CFBundleIconName</key><string>Wind</string>
   <key>CFBundleDisplayName</key><string>Wind</string>
   <key>CFBundleExecutable</key><string>Wind</string>
   <key>CFBundlePackageType</key><string>APPL</string>
