@@ -566,6 +566,19 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   - Both ways the other engine shows the same view at once.
   - Dead ends: the cursor plane (a screen-sized cursor image) is above prompts but changes a frame late;
     a CGDisplayCapture shield and a displayable CAContext stay under them.
+- **Drawn cursor shape changes** (owner 2026-10-31: the cursor showed big for a moment at every shape
+  change, I-beam, scroll bar, resize edge). The new image was set outside the no-animation commit, so
+  Core Animation animated it, from ~225 px to ~3400 px area and back over ~10 frames. The image now goes
+  up in the same commit as its size and place. Measured: `scripts/cursor_shape_truth.py` (a magenta
+  silhouette probe in test builds, moving across a Terminal window's right edge).
+- **Back to the pointer after typing** (owner: "after typing the cursor tracking degenerates"). The
+  view sprang toward the moving pointer and lagged it for as long as the hand moved: after typing,
+  panning drew the cursor 70-90 screen pt off centre in 2 of 6 runs, swinging with the hand's speed. Now
+  the OFFSET between the view and the pointer's view glides to zero (160 ms), while that view follows
+  the pointer directly: 0 off centre in 9 of 9 runs.
+- **Wheel ease-in** (owner's choice). A notch glides with a critically damped approach in log space
+  (~95% in 0.25 s), starting from rest and keeping its speed across notches: the first frame of a notch
+  is +0.5% (was +2.9%), and each notch still zooms 1.2x.
 - Not done yet: multiple displays, DRM video (captured black).
 
 ### Smooth zoom on the render engine (owner report 2026-10-31)

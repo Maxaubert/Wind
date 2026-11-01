@@ -88,7 +88,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             // left the unzoomed screen with no cursor for 90-136 ms on a cold start (2026-10-31).
             // Cursor shape and hiding come BEFORE the order-in: right after it, CGDisplayHideCursor
             // and NSCursor.currentSystem each waited 2-8 ms on WindowServer in the first zoom tick.
-            if haveFrame { cursorShape(); lastCursorCheck = CACurrentMediaTime(); takeCursor() }
+            if haveFrame { CATransaction.begin(); CATransaction.setDisableActions(true); cursorShape(); CATransaction.commit(); lastCursorCheck = CACurrentMediaTime(); takeCursor() }
             window?.orderFrontRegardless()
             // Above password prompts too: they are captured like any window and then drawn magnified
             // once, and clicks land on them where drawn (the drawn cursor maps onto the real pointer).
@@ -292,7 +292,19 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if key != cursorKey {
                 cursorKey = key; cursorSize = img.size; cursorHotSpot = cur.hotSpot
                 var r = CGRect(origin: .zero, size: img.size)
-                cursorLayer.contents = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
+                var cg = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
+                #if WIND_TEST_CHANNEL
+                // scripts/cursor_shape_truth.py finds the drawn cursor on screen as a magenta silhouette.
+                if ProcessInfo.processInfo.environment["WIND_CURSOR_PROBE"] != nil, let src = cg,
+                   let ctx = CGContext(data: nil, width: src.width, height: src.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                       space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                    let rect = CGRect(x: 0, y: 0, width: src.width, height: src.height)
+                    ctx.clip(to: rect, mask: src)
+                    ctx.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); ctx.fill(rect)
+                    cg = ctx.makeImage()
+                }
+                #endif
+                cursorLayer.contents = cg
             }
         }
     }
@@ -302,20 +314,26 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         DrawZoom.beat = CACurrentMediaTime()
         guard visible, let screen = NSScreen.screens.first else { return }
         let now = CACurrentMediaTime()
+        var shapeDue = false
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
             // macOS can show it again (Dock, app switch). Not in the 0.1 s after taking it: the
             // scoreboard can still read shown then, and a forced show+hide right after the order-in
             // blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
             if now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
-            cursorShape()
+            shapeDue = true
         }
         let W = screen.frame.width, H = screen.frame.height
         // Screen position of the pointer (top-left origin), then the layer frame (bottom-left).
         let sx = (p.x - center.x) * scale + W / 2, sy = (p.y - center.y) * scale + H / 2
-        let w = cursorSize.width * scale, h = cursorSize.height * scale
         lastTickAt = now
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        // A new shape goes up in the same commit as its size and place, with no implicit animation:
+        // set on its own (outside this transaction) the new image and the new size reached the screen
+        // a frame apart, and the cursor showed big for a frame at every shape change (owner
+        // 2026-10-31: I-beam, scroll bar, resize edge).
+        if shapeDue { cursorShape() }
+        let w = cursorSize.width * scale, h = cursorSize.height * scale
         if let p = pendingSurface { image.contents = p; pendingSurface = nil }
         cursorLayer.isHidden = pointerHidden || lockHidden
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * scale, y: H - sy - (h - cursorHotSpot.y * scale), width: w, height: h)

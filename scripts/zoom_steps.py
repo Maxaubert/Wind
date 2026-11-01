@@ -23,7 +23,7 @@ import windtest as W
 
 ROOT = W.ROOT
 CAP = os.path.join(ROOT, "tools/viewcap/viewcap")
-LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
+LOG = os.path.expanduser("~/Library/Logs/Wind/test/wind.log")
 OUT = os.path.join(ROOT, "build/zoom_steps")
 REFRESH = 1 / 144.0
 

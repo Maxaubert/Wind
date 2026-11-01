@@ -62,7 +62,7 @@ check("wheel: slow and fast notches zoom alike", abs(slow - fast) < 0.02 and slo
 ctl("mods"); ctl("level 1")
 
 # Wobble: where the real pointer sits on screen against the view, per frame, during sweeps.
-LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
+LOG = os.path.expanduser("~/Library/Logs/Wind/test/wind.log")
 for lv in (4, 10):
     saved_w = set_config(logLevel=2, keepPointerSpeed=True)
     ctl("level 1"); time.sleep(0.3); ctl("warp 700 540"); time.sleep(0.2); ctl(f"level {lv}"); time.sleep(0.4)

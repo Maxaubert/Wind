@@ -16,7 +16,7 @@ import math, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from windtest import assert_zoom_live, ROOT, ctl, relaunch_with_channel, set_config
 
-LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
+LOG = os.path.expanduser("~/Library/Logs/Wind/test/wind.log")
 W, H = 1920, 1080
 QUICK = "--quick" in sys.argv
 ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else ""

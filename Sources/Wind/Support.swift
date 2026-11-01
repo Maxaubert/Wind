@@ -12,7 +12,13 @@ enum Paths {
     static let command = support.appendingPathComponent("command")
     static let state = support.appendingPathComponent("state.json")
     static let logDir: URL = {
+        // Test builds log apart: their runs rotated the owner's own session log away before it could be
+        // read (twice on 2026-10-31).
+        #if WIND_TEST_CHANNEL
+        let u = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Wind/test")
+        #else
         let u = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Wind")
+        #endif
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }()

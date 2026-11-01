@@ -13,8 +13,10 @@ public func resolveDirection(inHeld: Bool, outHeld: Bool) -> ZoomDir {
 
 /// At speed 1.0 the magnification doubles this many times per second, independent of maxLevel.
 public let kZoomDoublingsPerSecond = 2.5
-/// Wheel glide time constant: a notch feels immediate but is still a glide (~95% in 0.25 s).
-let kWheelTau = 0.08
+/// Wheel glide: a critically damped approach in log space, ~95% of a notch in 0.25 s. It starts
+/// from rest (the owner asked for an ease-in, 2026-10-31: a first-order glide put +2.9% on a notch's
+/// very first frame) and keeps its speed across notches that come in a row.
+let kWheelGlideMs = 250.0
 /// One wheel notch zooms as far as holding the zoom bind does in this long.
 let kWheelNotchSeconds = 0.1
 
@@ -35,6 +37,7 @@ public struct ZoomController {
     var heldIn = 0.0            // continuous seconds zoom-in held (drives the ease-in)
     var rateTau = 0.045         // release glide time constant (0 = dead stop)
     var rate = 0.0              // applied rate, signed doublings/s, glides toward the commanded one
+    var wheelVel = 0.0          // wheel glide speed, log(level) per second
 
     public init(minLevel: Double = 1.0, maxLevel: Double) {
         self.minLevel = minLevel
@@ -74,12 +77,14 @@ public struct ZoomController {
     }
 
     public mutating func tick(_ dt: Double) {
-        if direction != .none { target = 0 }   // a held zoom takes over from the wheel
+        if direction != .none { target = 0; wheelVel = 0 }   // a held zoom takes over from the wheel
         if target > 0 && dt > 0 {
-            // Exponential approach in log space: equal steps look equal at any zoom.
-            let a = 1.0 - exp(-dt / kWheelTau)
-            level = exp(log(level) + (log(target) - log(level)) * a)
-            if abs(log(level / target)) < 0.002 { level = target; target = 0 }
+            // In log space: equal steps look equal at any zoom.
+            var v = wheelVel
+            let l = springToward(log(level), log(target), vel: &v, dtMs: dt * 1000, glideMs: kWheelGlideMs)
+            wheelVel = v
+            level = exp(l)
+            if abs(log(level / target)) < 0.002 && abs(wheelVel) < 0.05 { level = target; target = 0; wheelVel = 0 }
             level = min(maxLevel, max(minLevel, level))
             rate = 0; heldIn = 0
             return
@@ -111,12 +116,12 @@ public struct ZoomController {
     }
 
     public mutating func reset() {
-        level = minLevel; direction = .none; heldIn = 0; rate = 0; target = 0
+        level = minLevel; direction = .none; heldIn = 0; rate = 0; target = 0; wheelVel = 0
     }
 
     /// Instant snap (quick zoom). Cancels any wheel glide.
     public mutating func setLevel(_ l: Double) {
-        target = 0; rate = 0
+        target = 0; rate = 0; wheelVel = 0
         level = min(maxLevel, max(minLevel, l))
     }
 

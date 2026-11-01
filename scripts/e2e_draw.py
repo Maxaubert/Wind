@@ -6,7 +6,7 @@ import os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from windtest import ROOT, assert_zoom_live, check, ctl, finish, relaunch_with_channel, set_config
 
-LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
+LOG = os.path.expanduser("~/Library/Logs/Wind/test/wind.log")
 VM = os.path.join(ROOT, "tools/vmouse/vmouse")
 relaunch_with_channel(direct=True, extra={"engine": "draw", "logLevel": 2})
 launch_line = sum(1 for _ in open(LOG))

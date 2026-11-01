@@ -8,7 +8,7 @@ A late tick shows on screen as a repeated frame followed by a doubled zoom step.
 
 Runs the test build on the draw engine at logLevel 2 with the owner's feel settings (Wind's defaults),
 does 5 warm zoom-ins from 1x with ctl("hold zoomIn 600"), 2 s apart, and reads the 'view ... lv' lines
-per 'zoom session start' from ~/Library/Logs/Wind/wind.log (and its rotations).
+per 'zoom session start' from the test build's ~/Library/Logs/Wind/test/wind.log (and its rotations).
 PASS: no gap between consecutive view lines of more than 10 ms within the first 600 ms of any session
 (144 Hz: 6.9 ms per tick; a 10 ms gap is a missed refresh).
 Main 3d24e24: 11 late ticks in 5 sessions (11-13 ms, at lv 1.05, 1.15, 1.25, ... crossings); owner log
@@ -26,7 +26,7 @@ ap.add_argument("--window", type=float, default=0.6, help="seconds after a sessi
 ap.add_argument("--gap", type=float, default=0.010, help="FAIL above this tick gap (s)")
 ap.add_argument("--analyze", default="")
 a = ap.parse_args()
-LOGDIR = os.path.expanduser("~/Library/Logs/Wind")
+LOGDIR = os.path.expanduser("~/Library/Logs/Wind/test")
 
 def secs(h, m, s): return int(h) * 3600 + int(m) * 60 + float(s)
 

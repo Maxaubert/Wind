@@ -82,6 +82,7 @@ final class Magnifier {
     private var inspectLook = Pt(0, 0)          // the crosshair: where Inspect is looking
     private var pendingPlace: Pt?               // next tick: put the pointer here (leaving Inspect)
     private var returning = false               // the view is gliding back to the pointer
+    private var returnOffset: Pt?               // while returning: view minus the pointer's view, gliding to zero
     private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
     private var paused = false                  // the user switched Wind off from the menu
@@ -597,7 +598,7 @@ final class Magnifier {
 
         // Who owns the view this tick.
         let locked = config.lockTracking && lock.locked
-        if wasLocked && !locked { returning = true }
+        if wasLocked && !locked { returning = true; returnOffset = nil }
         if locked && !wasLocked { virtualPtr = center }   // keep panning from what is on screen
         if locked != wasLocked { Log.info(locked ? "game lock: panning from mouse deltas" : "game lock released") }
         wasLocked = locked
@@ -673,7 +674,7 @@ final class Magnifier {
                 // comes to the view (Wind's rule). A button press instead gives the view back to
                 // the pointer, which glides there.
                 if owner.warpPointer { pointerToView = true }
-                else if prevOwner != .mouse { returning = true }
+                else if prevOwner != .mouse { returning = true; returnOffset = nil }
                 virtualPtr = Pt(ptr.x, ptr.y)
                 let onZoomedDisplay = ptr.x >= 0 && ptr.y >= 0 && ptr.x < screen.w && ptr.y < screen.h
                 if !onZoomedDisplay {
@@ -681,12 +682,12 @@ final class Magnifier {
                     handTarget = nil
                 } else if let p = pendingPlace {
                     pendingPlace = nil
-                    returning = false
+                    returning = false; returnOffset = nil
                     virtualPtr = placePointer(at: p, from: virtualPtr, level: lv, view: center)
                     handTarget = nil
                 } else if pointerToView {
                     pointerToView = false
-                    returning = false
+                    returning = false; returnOffset = nil
                     virtualPtr = placePointer(at: center, from: virtualPtr, level: lv, view: center)
                     handTarget = nil
                 } else if DrawZoom.enabled {
@@ -765,14 +766,23 @@ final class Magnifier {
                     if want.y > hh + 1e-6 && want.y < screen.h - hh - 1e-6 && abs(want.y - b.y) < 1 { want.y = b.y }
                 }
                 if returning {
+                    // The view glides back from where it was (the caret, keys, a game) by gliding the
+                    // OFFSET between it and the pointer's view to zero, while that view follows the
+                    // pointer directly. Springing the view itself toward a moving pointer lagged behind
+                    // it for as long as the hand moved and never finished: after typing, panning drew
+                    // the cursor 70-90 screen pt off centre, swinging with the hand's speed (owner
+                    // 2026-10-31: "after typing the cursor tracking degenerates").
+                    let o0 = returnOffset ?? Pt(center.x - want.x, center.y - want.y)
                     var vx = springVel.x, vy = springVel.y
-                    let x = springToward(center.x, want.x, vel: &vx, dtMs: dt * 1000, glideMs: 160)
-                    let y = springToward(center.y, want.y, vel: &vy, dtMs: dt * 1000, glideMs: 160)
+                    let ox = springToward(o0.x, 0, vel: &vx, dtMs: dt * 1000, glideMs: 160)
+                    let oy = springToward(o0.y, 0, vel: &vy, dtMs: dt * 1000, glideMs: 160)
                     springVel = (vx, vy)
-                    target = Pt(x, y)
-                    if abs(x - want.x) + abs(y - want.y) < 0.5 { returning = false; springVel = (0, 0) }
+                    returnOffset = Pt(ox, oy)
+                    target = Pt(want.x + ox, want.y + oy)
+                    if abs(ox) + abs(oy) < 0.5 { returning = false; returnOffset = nil; springVel = (0, 0) }
                 } else {
                     target = want
+                    returnOffset = nil
                     springVel = (0, 0)
                 }
             case .caret, .focus:
@@ -895,7 +905,7 @@ final class Magnifier {
         afterWrites = nil
         pointerToView = false
         pendingPlace = nil
-        returning = false
+        returning = false; returnOffset = nil
         wasLocked = false
         inspectRef = nil
         idleTicks = 0

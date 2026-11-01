@@ -30,6 +30,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   while zoomed: the zoom reinterprets them and the pointer snaps. Move it with `placePointer`
   (a `keepPointer=false` view write). Warps are fine at 1x only (tests warp before zooming in).
 - Normal zoom writes use `keepPointer=true`; `false` makes a pointer-following view run into the corner.
+- Test builds log to `~/Library/Logs/Wind/test/`; the installed app to `~/Library/Logs/Wind/` (tests no longer rotate the owner's log away).
 - Measure the hand from ONE pointer read per tick against Wind's own computed carry; never from a
   read taken right after a zoom write (it can be off by a whole point, or tens of points near edges).
 - `scripts/explore.py` stress-tests edges, corners and zooming with the virtual mouse; run it after
