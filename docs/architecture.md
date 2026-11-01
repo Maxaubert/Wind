@@ -579,6 +579,12 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
 - **Wheel ease-in** (owner's choice). A notch glides with a critically damped approach in log space
   (~95% in 0.25 s), starting from rest and keeping its speed across notches: the first frame of a notch
   is +0.5% (was +2.9%), and each notch still zooms 1.2x.
+- **Inspect's crosshair on render** (owner 2026-11-01: "inspect mode still has a substantial wobble").
+  It was the Crosshair window on the desktop, so render captured it and drew it magnified a capture
+  frame or more after the view moved: `WIND_ENGINE=draw cursor_truth --scenarios inspect` showed 21-22%
+  of frames jumping, up to 12.7 pt. Render now draws it as a layer in its overlay (`DrawZoom.crosshair`,
+  screen-sized), placed in the same commit as the view and on every tick, at the look point (which stays
+  on what Inspect looks at when the view stops at an edge): 0.4% (one frame of 0.5 pt).
 - Not done yet: multiple displays, DRM video (captured black).
 
 ### Smooth zoom on the render engine (owner report 2026-10-31)

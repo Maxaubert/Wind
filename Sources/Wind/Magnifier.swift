@@ -376,6 +376,7 @@ final class Magnifier {
         guard inspect else { return }
         inspect = false
         crosshair.show(at: nil, level: 1)
+        DrawZoom.shared.crosshair = nil
         if !pointerHiddenForCaret && !userHidCursor { SkyLight.setCursorHidden(false) }
         lock.reset()                                // Wind's own hiding must not read as a game
         // The pointer comes to the crosshair (next tick), so the view stays where it is.
@@ -804,7 +805,12 @@ final class Magnifier {
         // The crosshair window moves first and its move is committed before the zoom write, so both
         // land in the same frame; moved after, it trailed the view by a frame while panning.
         crosshairAt = inspect ? crosshairPoint(lv, centre: center) : nil
-        crosshair.show(at: crosshairAt, level: lv)
+        if DrawZoom.enabled {                           // render draws it with the view (DrawZoom.crosshair)
+            DrawZoom.shared.crosshair = crosshairAt.map { CGPoint(x: $0.x, y: $0.y) }
+            crosshair.show(at: nil, level: lv)
+        } else {
+            crosshair.show(at: crosshairAt, level: lv)
+        }
         // Wind's own cursor (cursor = "wind"), moved before the write like the crosshair.
         let ownCursor = config.cursor == "wind" && !DrawZoom.enabled
         let pNow = owner.owner == .mouse && !locked && !inspect ? virtualPtr : Pt(ptr.x, ptr.y)
@@ -887,8 +893,9 @@ final class Magnifier {
     }
 
     private func crosshairPoint(_ lv: Double, centre: Pt) -> CGPoint {
-        // Draw engine: the view shows the exact (fractional) centre.
-        if DrawZoom.enabled { return CGPoint(x: centre.x, y: centre.y) }
+        // Draw engine: the view shows the exact (fractional) centre, which is the look point except
+        // where the view stops at a screen edge; the crosshair stays on what Inspect looks at.
+        if DrawZoom.enabled { return CGPoint(x: inspectLook.x, y: inspectLook.y) }
         func axis(_ c: Double, _ look: Double, _ size: Double) -> Double {
             let half = size / lv / 2, shown = floor(writeAxis(c, half, size))
             return shown >= half && shown <= size - half ? shown : look

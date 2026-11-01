@@ -39,6 +39,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var window: NSWindow?
     private let image = CALayer()
     private let cursorLayer = CALayer()
+    // Inspect's crosshair, drawn in the overlay (screen points). As a window of its own on the desktop it
+    // was captured and drawn magnified a capture frame or more after the view moved: it jumped on 21-22%
+    // of frames while panning, up to 12.7 pt (cursor_truth inspect on render, 2026-11-01).
+    private let crossRoot = CALayer(), crossOutline = CAShapeLayer(), crossLine = CAShapeLayer(), crossProbe = CALayer()
+    /// Where Inspect's crosshair is (desktop point), nil when not in Inspect. Drawn with the view.
+    var crosshair: CGPoint?
     private var stream: SCStream?
     private var generation = 0                       // frames from older streams are dropped
     private var starting = false
@@ -336,6 +342,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let w = cursorSize.width * scale, h = cursorSize.height * scale
         if let p = pendingSurface { image.contents = p; pendingSurface = nil }
         cursorLayer.isHidden = pointerHidden || lockHidden
+        crossRoot.isHidden = crosshair == nil           // also on ticks with no view write (at an edge)
+        if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * scale, y: H - sy - (h - cursorHotSpot.y * scale), width: w, height: h)
         CATransaction.commit()
     }
@@ -349,6 +357,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         cursorLayer.magnificationFilter = filter
         // The desktop point at `center` sits at the screen centre.
         image.frame = CGRect(x: W / 2 - center.x * scale, y: H / 2 - (H - center.y) * scale, width: W * scale, height: H * scale)
+        // The crosshair in the same commit as the view, so both reach the same frame.
+        crossRoot.isHidden = crosshair == nil
+        if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
         CATransaction.commit()
     }
 
@@ -371,6 +382,22 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         image.contentsGravity = .resize
         image.minificationFilter = .linear
         v.layer?.addSublayer(image)
+        let path = CGMutablePath(), a = 26.0, g = 6.0       // as seen on screen, like Crosshair's
+        path.move(to: CGPoint(x: -a, y: 0)); path.addLine(to: CGPoint(x: -g, y: 0))
+        path.move(to: CGPoint(x: g, y: 0)); path.addLine(to: CGPoint(x: a, y: 0))
+        path.move(to: CGPoint(x: 0, y: -a)); path.addLine(to: CGPoint(x: 0, y: -g))
+        path.move(to: CGPoint(x: 0, y: g)); path.addLine(to: CGPoint(x: 0, y: a))
+        crossOutline.strokeColor = NSColor.black.withAlphaComponent(0.6).cgColor; crossOutline.lineWidth = 4.4
+        crossLine.strokeColor = NSColor.white.cgColor; crossLine.lineWidth = 2
+        for l in [crossOutline, crossLine] { l.path = path; l.fillColor = nil; l.lineCap = .butt; crossRoot.addSublayer(l) }
+        if Crosshair.probe {                            // test builds: the capture finds it by a magenta block
+            crossProbe.backgroundColor = CGColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
+            crossProbe.frame = CGRect(x: -6, y: -6, width: 12, height: 12)
+            crossRoot.insertSublayer(crossProbe, at: 0)
+        }
+        crossRoot.bounds = .zero
+        crossRoot.isHidden = true
+        v.layer?.addSublayer(crossRoot)
         v.layer?.addSublayer(cursorLayer)
         w.contentView = v
         window = w
