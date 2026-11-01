@@ -26,6 +26,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `python3 scripts/e2e_draw.py`: the render engine (`engine = "draw"`, the default since 2026-11-01); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
+- `python3 scripts/pan_truth.py`: stutter while zoomed on the zoomed screen (pan, stop, pan again; zooming
+  further); every movement start must be as smooth as its middle.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
 - `python3 scripts/cursor_truth.py`: Wind's cursor and Inspect's crosshair measured on the ZOOMED screen
