@@ -42,7 +42,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mag.onLevelChange = { [weak self] lv in self?.showLevel(lv) }
         mag.onQuitRequested = { NSApp.terminate(nil) }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
-        tryStart(prompt: true)
+        // The first-run setup asks for the permissions itself, so macOS's own Accessibility prompt is
+        // shown only when the setup is not.
+        let setup = AppDelegate.needsSetup(mag.config, accessibility: AXIsProcessTrusted(),
+                                           screenRecording: CGPreflightScreenCaptureAccess())
+        tryStart(prompt: !setup)
+        if setup { showSettings(onboard: true) }
+    }
+
+    /// Open the first-run setup at launch: it was never finished, or a permission Wind needs is
+    /// missing (Accessibility always; Screen Recording on the render engine).
+    static func needsSetup(_ c: Config, accessibility: Bool, screenRecording: Bool) -> Bool {
+        !c.onboarded || !accessibility || (c.engine == "draw" && !screenRecording)
     }
 
     func applicationWillTerminate(_ n: Notification) {
@@ -83,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func poll() {
         if !started { tryStart(prompt: false) }
         if polls % 8 == 0 { checkSystemZoom() }
+        if polls % 4 == 0 && settingsWindow.isOpen { settingsWindow.pushMacStatusIfChanged() }   // live permission status
         polls += 1
         loadConfig(force: false)
         #if WIND_TEST_CHANNEL
@@ -239,10 +251,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
     @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
-    @objc private func openSettings() {
+    @objc private func openSettings() { showSettings(onboard: false) }
+
+    func showSettings(onboard: Bool) {
+        settingsWindow.onCapture = { [weak self] on in self?.mag.bindsSuspended = on }
+        settingsWindow.runningEngine = { DrawZoom.enabled ? "draw" : "zoom" }
+        settingsWindow.macStatus = { [weak self] in
+            ["accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(),
+             "zoomShortcuts": self?.zoomShortcuts ?? [], "loginItem": SMAppService.mainApp.status == .enabled,
+             "logLevel": self?.mag.config.logLevel ?? 1]
+        }
+        settingsWindow.macAction = { [weak self] action, value in
+            switch action {
+            case "openAccessibility":
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+            case "openScreenRecording":
+                if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+            case "setLogin":
+                let svc = SMAppService.mainApp
+                do { if value == "1" { try svc.register() } else { try svc.unregister() } }
+                catch { Log.error("open at login: \(error.localizedDescription)") }
+            case "showLog": NSWorkspace.shared.open(Paths.log)
+            case "rerunSetup": self?.showSettings(onboard: true)
+            default: Log.verbose("settings: unknown mac action \(action)")
+            }
+        }
         settingsWindow.show(config: mag.config, save: { [weak self] c in
             self?.saveConfig { $0 = c }
-        }, fixZoom: { [weak self] in self?.turnOffSystemZoom() })
+        }, fixZoom: { [weak self] in self?.turnOffSystemZoom() }, onboard: onboard)
     }
 
     @objc private func toggleLogin() {
@@ -284,6 +321,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         writeState()
     }
 
+    /// Settings window commands for scripts/e2e_settings.py: js <base64 body>, onboard, close, offscreen on|off.
+    func testSettings(_ w: [String]) {
+        switch w.first ?? "" {
+        case "js":
+            guard w.count > 1, let d = Data(base64Encoded: w[1]), let body = String(data: d, encoding: .utf8) else { return }
+            settingsWindow.testEval(body)
+        case "onboard": showSettings(onboard: true)
+        case "close": settingsWindow.testClose()
+        case "offscreen": SettingsWindowController.testOffscreen = w.count > 1 && w[1] == "on"
+        default: showSettings(onboard: false)
+        }
+    }
+
     /// Title of the focused window of the frontmost app (tests type only into their own window).
     private func focusedWindowTitle() -> String {
         guard let app = NSWorkspace.shared.frontmostApplication else { return "" }
@@ -311,6 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
+            "config": (try? JSONSerialization.jsonObject(with: mag.config.encoded())) ?? NSNull(),   // what Wind runs on now
+            "settings": ["open": settingsWindow.isOpen, "windowId": settingsWindow.testWindowId, "url": settingsWindow.testLoadedURL],
             "caret": ["kind": "\(mag.caret.snapshot.kind)", "seq": mag.caret.snapshot.seq,
                       "rect": [mag.caret.snapshot.rect.l, mag.caret.snapshot.rect.t, mag.caret.snapshot.rect.r, mag.caret.snapshot.rect.b]],
         ]

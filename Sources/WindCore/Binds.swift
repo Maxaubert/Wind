@@ -102,25 +102,65 @@ public func formatBind(_ b: Bind) -> String {
     return parts.joined(separator: "+")
 }
 
+/// Why a bind is refused, as a short code. The settings page mirrors these rules in
+/// ui/src/lib/keybindRules.js; both are tested against Tests/fixtures/mac_keybind_cases.txt
+/// (wind-checks and `npm run test:rules`), so a rule changed here fails there until it matches.
+public enum BindVerdict: String {
+    case ok
+    case empty          // no modifier and no trigger
+    case mousebutton    // left or right button
+    case modifier       // a modifier key (or caps lock) alone as the key
+    case needsmod       // a typing key without ctrl, opt or cmd
+    case cmdalone       // cmd plus one key: app shortcuts
+    case opttypes       // opt (or opt+shift) plus a typing key types a character
+}
+
+/// F1-F20: allowed with any modifiers, or none.
+let fKeyCodes: Set<UInt16> = [0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F, 0x69, 0x6B, 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A]
+
+/// Keys that type a character with opt held: letters, digits, punctuation, space and the keypad
+/// digits and operators.
+let charKeyCodes: Set<UInt16> = {
+    var s: Set<UInt16> = []
+    for n in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r",
+              "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+              "equal", "minus", "leftbracket", "rightbracket", "quote", "semicolon", "backslash", "comma",
+              "slash", "period", "grave", "space", "keypad0", "keypad1", "keypad2", "keypad3", "keypad4",
+              "keypad5", "keypad6", "keypad7", "keypad8", "keypad9", "keypaddecimal", "keypadmultiply",
+              "keypadplus", "keypadminus", "keypaddivide", "keypadequals"] {
+        if let k = keyCodes[n] { s.insert(k) }
+    }
+    return s
+}()
+
 /// Wind's bind rules, adapted to macOS: refuse binds that would break typing or system shortcuts.
-/// Returns nil when allowed, else the reason.
-public func bindProblem(_ b: Bind) -> String? {
+public func bindVerdict(_ b: Bind) -> BindVerdict {
     switch b.trigger {
     case .mouse(let n):
-        if n < 2 { return "the left and right buttons cannot be zoom binds" }
-        return nil
+        return n < 2 ? .mousebutton : .ok
     case .none:
-        return b.mods.isEmpty ? "empty bind" : nil
+        return b.mods.isEmpty ? .empty : .ok
     case .key(let k):
-        if modifierKeyCodes.contains(k) { return "a modifier key alone cannot be a key bind" }
-        let fKeys: Set<UInt16> = [0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F, 0x69, 0x6B, 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A]
-        if fKeys.contains(k) { return nil }
-        let nonTyping = b.mods.contains(.ctrl) || b.mods.contains(.opt) || b.mods.contains(.cmd)
-        if !nonTyping { return "a typing key needs ctrl, opt or cmd" }
-        if b.mods == [.cmd] {
-            return "cmd plus one key is taken by app shortcuts; add ctrl or opt"
-        }
-        return nil
+        if modifierKeyCodes.contains(k) { return .modifier }
+        if fKeyCodes.contains(k) { return .ok }
+        let ctrl = b.mods.contains(.ctrl), opt = b.mods.contains(.opt), cmd = b.mods.contains(.cmd)
+        if !ctrl && !opt && !cmd { return .needsmod }
+        if b.mods == [.cmd] { return .cmdalone }
+        if opt && !ctrl && !cmd && charKeyCodes.contains(k) { return .opttypes }
+        return .ok
+    }
+}
+
+/// The same rules as a reason in words: nil when allowed.
+public func bindProblem(_ b: Bind) -> String? {
+    switch bindVerdict(b) {
+    case .ok: return nil
+    case .empty: return "empty bind"
+    case .mousebutton: return "the left and right buttons cannot be zoom binds"
+    case .modifier: return "a modifier key alone cannot be a key bind"
+    case .needsmod: return "a typing key needs ctrl, opt or cmd"
+    case .cmdalone: return "cmd plus one key is taken by app shortcuts; add ctrl or opt"
+    case .opttypes: return "opt plus this key types a character; add ctrl or cmd"
     }
 }
 

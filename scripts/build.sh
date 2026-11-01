@@ -25,6 +25,12 @@ mkdir -p "${APP:h}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Wind"
 cp "$BIN" "$APP/Contents/MacOS/WindGuard"     # the crash watchdog runs under its own name
+# The settings UI (ui/, Svelte): rebuilt when its sources are newer than the last build, then bundled.
+if [[ ! -f ui/dist/index.html || -n "$(find ui/src ui/index.html ui/public ui/vite.config.js VERSION -newer ui/dist/index.html -print -quit)" ]]; then
+  [[ -d ui/node_modules ]] || (cd ui && npm ci --silent) || { echo "ui: npm ci failed"; exit 1; }
+  (cd ui && npm run build --silent > /dev/null) || { echo "ui: build failed"; exit 1; }
+fi
+cp -R ui/dist "$APP/Contents/Resources/ui"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

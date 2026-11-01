@@ -15,6 +15,11 @@ func run(_ name: String, _ body: () throws -> Void) {
     do { try body() } catch { failures += 1; print("FAIL \(name): threw \(error)") }
 }
 
+if CommandLine.arguments.contains("--write-defaults") {
+    do { try DefaultsFixture.write(); print("wrote \(DefaultsFixture.url.path)"); exit(0) }
+    catch { print("could not write the defaults fixture: \(error)"); exit(1) }
+}
+
 let z = ZoomTests()
 run("holdZoomsInAtTheBaseRate", z.holdZoomsInAtTheBaseRate)
 run("releaseEasesOutThenStops", z.releaseEasesOutThenStops)
@@ -42,11 +47,13 @@ run("rules", b.rules)
 run("routerHoldsAndSwallowsBalanced", b.routerHoldsAndSwallowsBalanced)
 run("timeoutStopsButKeepsSwallowing", b.timeoutStopsButKeepsSwallowing)
 run("plusKeyBinds", b.plusKeyBinds)
+run("sharedRuleCases", b.sharedRuleCases)
 let c = ConfigTests()
 run("partialFileKeepsDefaults", c.partialFileKeepsDefaults)
 run("clampsValues", c.clampsValues)
 run("wrongTypeDropsOnlyThatKey", c.wrongTypeDropsOnlyThatKey)
 run("defaultBindsAreAllValid", c.defaultBindsAreAllValid)
+run("defaultsFixtureIsCurrent", DefaultsFixture.isCurrent)
 
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

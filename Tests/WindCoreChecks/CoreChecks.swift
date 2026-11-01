@@ -183,6 +183,8 @@ struct BindTests {
         expect(bindProblem(parseBind("ctrl+opt+z")!) == nil)
         expect(bindProblem(parseBind("f13")!) == nil)
         expect(bindProblem(parseBind("mouse3")!) == nil)
+        expect(bindProblem(parseBind("opt+a")!) != nil)
+        expect(bindProblem(parseBind("ctrl+opt+a")!) == nil)
     }
 
     func routerHoldsAndSwallowsBalanced() {
@@ -208,6 +210,27 @@ struct BindTests {
         expect(r.triggerDown(.key(0x18), mods: [], isRepeat: true) == (true, nil))   // repeat still swallowed
         expect(r.triggerUp(.key(0x18)) == (true, nil))                               // up swallowed, no edge
         expect(r.triggerUp(.key(0x18)).0 == false)
+    }
+
+    /// The shared rule cases (Tests/fixtures/mac_keybind_cases.txt), also run by the settings page's
+    /// `npm run test:rules` against ui/src/lib/keybindRules.js.
+    func sharedRuleCases() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("fixtures/mac_keybind_cases.txt")
+        let text = try String(contentsOf: url, encoding: .utf8)
+        var n = 0
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            guard let sp = line.lastIndex(of: " ") else { expect(false); continue }
+            let bind = line[..<sp].trimmingCharacters(in: .whitespaces)
+            let want = String(line[line.index(after: sp)...])
+            let got = parseBind(bind).map { bindVerdict($0).rawValue } ?? "invalid"
+            if got != want { print("  case \"\(bind)\": got \(got), want \(want)") }
+            expect(got == want)
+            n += 1
+        }
+        expect(n > 100)
     }
 
     func plusKeyBinds() {
@@ -242,5 +265,68 @@ struct ConfigTests {
     func defaultBindsAreAllValid() {
         expect(Config().binds().problems.isEmpty)
         expect(Config().wheelMods == [.ctrl])
+    }
+}
+
+/// Tests/fixtures/config_defaults.json: every Config key with its type, its default as the settings
+/// page sees it (SettingsWeb.values: bools "1"/"0", lists comma-joined) and, for numbers, the range
+/// clamp() allows (probed by loading a huge and a tiny value); for strings, what clamp() turns an
+/// unknown value into. ui/tests/config-defaults.nodetest.mjs checks the settings schema against it.
+/// Regenerate with `swift run wind-checks --write-defaults`; the check below fails when it is stale.
+enum DefaultsFixture {
+    static let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("fixtures/config_defaults.json")
+
+    static func num(_ x: Double) -> String { x == x.rounded() && abs(x) < 1e15 ? String(Int(x)) : String(x) }
+    static func str(_ s: String) -> String {
+        let d = try! JSONSerialization.data(withJSONObject: [s], options: [.fragmentsAllowed])
+        return String(String(data: d, encoding: .utf8)!.dropFirst().dropLast())
+    }
+    static func dict(_ c: Config) -> [String: Any] {
+        try! JSONSerialization.jsonObject(with: c.encoded()) as! [String: Any]
+    }
+    /// The value `key` ends up with after loading `json` (a JSON value) and clamp().
+    static func probe(_ key: String, _ json: String) -> Any? {
+        guard let c = try? Config.load(from: Data("{\"\(key)\": \(json)}".utf8)) else { return nil }
+        return dict(c)[key]
+    }
+
+    static func generate() -> String {
+        let defs = dict(Config())
+        // Int or Double from the Swift property type (JSON writes 30.0 as 30, so the number cannot tell).
+        let intKeys = Set(Mirror(reflecting: Config()).children.compactMap { $0.value is Int ? $0.label : nil })
+        var lines: [String] = []
+        for k in defs.keys.sorted() {
+            let v = defs[k]!
+            var f: [String] = []
+            if let n = v as? NSNumber {
+                if CFGetTypeID(n) == CFBooleanGetTypeID() {
+                    f = ["\"type\": \"bool\"", "\"def\": \"\(n.boolValue ? "1" : "0")\""]
+                } else {
+                    let isInt = intKeys.contains(k)
+                    let lo = (probe(k, isInt ? "-1000000" : "-1e9") as? NSNumber)?.doubleValue ?? .nan
+                    let hi = (probe(k, isInt ? "1000000" : "1e9") as? NSNumber)?.doubleValue ?? .nan
+                    f = ["\"type\": \"\(isInt ? "int" : "double")\"", "\"def\": \"\(num(n.doubleValue))\"",
+                         "\"min\": \(num(lo))", "\"max\": \(num(hi))"]
+                }
+            } else if let a = v as? [String] {
+                f = ["\"type\": \"list\"", "\"def\": \(str(a.joined(separator: ",")))"]
+            } else if let s = v as? String {
+                let fb = probe(k, "\"__unknown__\"") as? String ?? ""
+                f = ["\"type\": \"string\"", "\"def\": \(str(s))", "\"fallback\": \(str(fb))"]
+            }
+            lines.append("    \(str(k)): { " + f.joined(separator: ", ") + " }")
+        }
+        let palettes = Config.palettes.map(str).joined(separator: ", ")
+        return "{\n  \"generatedBy\": \"swift run wind-checks --write-defaults\",\n  \"palettes\": [\(palettes)],\n  \"keys\": {\n"
+            + lines.joined(separator: ",\n") + "\n  }\n}\n"
+    }
+
+    static func write() throws { try generate().write(to: url, atomically: true, encoding: .utf8) }
+
+    static func isCurrent() {
+        let have = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        if have != generate() { print("  Tests/fixtures/config_defaults.json is stale: run swift run wind-checks --write-defaults") }
+        expect(have == generate())
     }
 }

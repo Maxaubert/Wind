@@ -86,6 +86,8 @@ final class Magnifier {
     /// Render pan smoothing: the pointer as drawn and as apps get it (nil when not smoothing).
     nonisolated(unsafe) private var smoothPointer: Pt?
     private func resetSmooth() { euroX.reset(); euroY.reset(); smoothPointer = nil }
+    /// The Settings window records a keybind: binds pass through untouched.
+    var bindsSuspended = false
     private var returnOffset: Pt?               // while returning: view minus the pointer's view, gliding to zero
     private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
@@ -235,6 +237,8 @@ final class Magnifier {
             return pass
         }
         if paused { return pass }
+        // The Settings window is recording a keybind: Wind's binds must not fire or swallow the press.
+        if bindsSuspended && [.keyDown, .keyUp, .flagsChanged, .otherMouseDown, .otherMouseUp, .scrollWheel].contains(type) { return pass }
         let now = CACurrentMediaTime()
         // Render pan smoothing: a click lands where the (smoothed) cursor is drawn. macOS is not zoomed on
         // render, so the location is plain desktop points. Only presses and releases: at this tap a moved

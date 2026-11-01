@@ -10,6 +10,9 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   and relaunches. Signs with the local "Wind Mac Dev" identity (keychain
   `~/Library/Keychains/windmac-dev.keychain-db`, password in the login keychain) so the Accessibility grant survives rebuilds.
 - `scripts/build.sh test`: `build/test/Wind.app` with the e2e command channel compiled in.
+- Settings UI (`ui/`, Svelte): `npm ci && npm run build`, `npx playwright test` (mock bridge, WebKit +
+  Chromium), `npm run test:rules` (keybind rules and config defaults). Design: `docs/architecture.md`, Settings window.
+- `python3 scripts/e2e_settings.py`: the settings window in the test build (page writes, keybinds, setup).
 - `python3 scripts/e2e.py`: e2e checks; builds and runs the test app in place of the installed one, restores it after.
 - `python3 scripts/e2e_mouse.py`: real-HID pointer e2e via `tools/vmouse` (Karabiner, sudo).
 - `python3 scripts/e2e_caret.py`: real typing in TextEdit, Terminal, Safari, Chrome, Claude Code
@@ -18,7 +21,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   every macOS Zoom shortcut off).
 - Run all three after touching `Magnifier.swift`, `SkyLight.swift` or `CaretTracker.swift`.
 - `python3 scripts/e2e_focus.py`: keyboard focus tracking in a throwaway Chrome (WIND_ENGINE=draw for render).
-- `python3 scripts/e2e_draw.py`: the experimental draw engine (`engine = "draw"`); `WIND_ENGINE=draw`
+- `python3 scripts/e2e_draw.py`: the render engine (`engine = "draw"`, the default since 2026-11-01); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).

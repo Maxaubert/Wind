@@ -7,12 +7,6 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--watchdog", l
     Watchdog.run(parent: pid)
 }
 
-#if WIND_TEST_CHANNEL
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--uitest-client", let pid = pid_t(CommandLine.arguments[2]) {
-    SettingsUITest.client(pid: pid)
-}
-#endif
-
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

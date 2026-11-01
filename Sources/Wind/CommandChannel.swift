@@ -14,6 +14,10 @@ import WindCore
 //   warp <x> <y>               move the pointer       lock on|off   force the game-lock regime
 //   settoggle on|off <label>   a macOS Zoom shortcut or shake-to-locate switch (exact label)
 //   fixzoom                    switch every macOS Zoom shortcut off
+//   settings [onboard|close]   open the settings window (or the first-run setup), or close it
+//   settings offscreen on|off  later opens place the window off every display, without focus
+//   settings js <base64>       run the decoded JS (an async function body) in the settings page;
+//                              the result goes to js.json (scripts/e2e_settings.py)
 //   state                      just write state.json  quit
 
 enum CommandChannel {
@@ -55,8 +59,7 @@ enum CommandChannel {
                 let pane = label == SystemZoom.shakeLabel ? SettingsToggle.displayPane : SettingsToggle.zoomPane
                 SettingsToggle.set(pane: pane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
             }
-        case "settings": app.perform(Selector(("openSettings")))
-        case "uitest": SettingsUITest.run(openSettings: { app.perform(Selector(("openSettings"))) })
+        case "settings": app.testSettings(Array(w.dropFirst()))   // settings [onboard|close] | settings js <base64>
         case "login": app.perform(Selector(("toggleLogin")))
         case "fixzoom": app.perform(Selector(("turnOffSystemZoom")))
         case "pressbutton":

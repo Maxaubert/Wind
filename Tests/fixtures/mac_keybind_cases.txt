@@ -1,0 +1,160 @@
+# Wind for Mac keybind rules: one case per line, "<bind text> <verdict>".
+# Read by Tests/WindCoreChecks (Binds.swift bindVerdict, `swift run wind-checks`) and by
+# ui/tests/keybind-rules.nodetest.mjs (ui/src/lib/keybindRules.js, `npm run test:rules`), so the two
+# rule sets cannot drift. "invalid" means parseBind cannot read the text.
+# Verdicts: ok, empty, mousebutton, modifier, needsmod, cmdalone, opttypes, invalid.
+
+# The defaults (Config.swift) are all allowed.
+mouse4 ok
+mouse3 ok
+ctrl+opt+equal ok
+ctrl+opt+minus ok
+ctrl+opt+z ok
+ctrl+opt+left ok
+ctrl+opt+right ok
+ctrl+opt+up ok
+ctrl+opt+down ok
+ctrl+opt+i ok
+ctrl+opt+escape ok
+ctrl ok
+
+# Parsing: aliases, case, spaces, order, the "+" key.
+opt+ctrl+left ok
+CTRL+OPT+EQUAL ok
+control+option+equal ok
+alt+ctrl+equal ok
+command+ctrl+a ok
+ctrl + opt + z ok
+ctrl+opt+= ok
+ctrl+opt+- ok
+ctrl+opt+plus ok
+ctrl++ ok
+ctrl+opt+esc ok
+ctrl+ invalid
+ctrl++opt invalid
++a invalid
+a+ctrl invalid
+ctrl+nope invalid
+ctrl+opt+mouse invalid
+mouse invalid
+mouse0 invalid
+mouse1 invalid
+mouse32 invalid
+mouse-3 invalid
+ctrl+a+b invalid
+
+# Mouse buttons: 2 and up, any modifiers or none.
+mouse2 ok
+mouse5 ok
+mouse31 ok
+shift+mouse3 ok
+ctrl+mouse4 ok
+cmd+mouse2 ok
+ctrl+opt+shift+cmd+mouse4 ok
+
+# Modifier-only (the wheel zoom modifier).
+opt ok
+shift ok
+cmd ok
+ctrl+opt ok
+ctrl+shift ok
+ctrl+opt+shift+cmd ok
+
+# A modifier key (caps lock is one) as the key.
+capslock modifier
+ctrl+capslock modifier
+ctrl+opt+capslock modifier
+
+# F keys stand alone, with any modifiers.
+f1 ok
+f5 ok
+f12 ok
+f13 ok
+f18 ok
+f19 ok
+f20 ok
+shift+f13 ok
+cmd+f1 ok
+opt+f18 ok
+ctrl+opt+shift+cmd+f17 ok
+
+# Typing and other keys need ctrl, opt or cmd.
+a needsmod
+z needsmod
+1 needsmod
+equal needsmod
+space needsmod
+return needsmod
+tab needsmod
+escape needsmod
+delete needsmod
+forwarddelete needsmod
+left needsmod
+up needsmod
+home needsmod
+pageup needsmod
+help needsmod
+keypad1 needsmod
+keypadenter needsmod
+keypadclear needsmod
+shift+a needsmod
+shift+left needsmod
+shift+escape needsmod
+shift+keypad5 needsmod
+
+# cmd plus one key is an app shortcut.
+cmd+c cmdalone
+cmd+q cmdalone
+cmd+equal cmdalone
+cmd+left cmdalone
+cmd+escape cmdalone
+cmd+space cmdalone
+cmd+keypad1 cmdalone
+cmd+shift+z ok
+cmd+opt+z ok
+ctrl+cmd+z ok
+
+# opt (with or without shift) plus a typing key types a character.
+opt+a opttypes
+opt+e opttypes
+opt+z opttypes
+opt+0 opttypes
+opt+9 opttypes
+opt+equal opttypes
+opt+minus opttypes
+opt+leftbracket opttypes
+opt+rightbracket opttypes
+opt+quote opttypes
+opt+semicolon opttypes
+opt+backslash opttypes
+opt+comma opttypes
+opt+slash opttypes
+opt+period opttypes
+opt+grave opttypes
+opt+space opttypes
+opt+keypad0 opttypes
+opt+keypadplus opttypes
+opt+keypadequals opttypes
+opt+plus opttypes
+shift+opt+a opttypes
+opt+shift+equal opttypes
+
+# opt with keys that do not type, or with ctrl or cmd, is fine.
+opt+left ok
+opt+up ok
+opt+escape ok
+opt+return ok
+opt+tab ok
+opt+delete ok
+opt+home ok
+opt+keypadenter ok
+opt+keypadclear ok
+shift+opt+left ok
+ctrl+opt+a ok
+ctrl+opt+space ok
+cmd+opt+a ok
+ctrl+opt+shift+a ok
+ctrl+a ok
+ctrl+space ok
+ctrl+left ok
+ctrl+shift+1 ok

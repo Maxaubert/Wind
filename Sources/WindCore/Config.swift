@@ -29,7 +29,7 @@ public struct Config: Codable, Equatable {
     public var zoomEaseOutMs = 115.0
     public var quickZoomDefault = 4.0
     public var smoothImages = false               // false = nearest (sharp pixels), true = smoothed
-    public var engine = "zoom"                    // "zoom" = macOS's zoom; "draw" = experimental capture-and-draw (sub-pixel, issue #8)
+    public var engine = "draw"                    // "draw" = Wind captures and draws (sub-pixel, issue #8, the default); "zoom" = macOS's zoom
 
     // Mouse tracking.
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges
@@ -61,6 +61,11 @@ public struct Config: Codable, Equatable {
     public var keepPointerSpeed = true
 
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
+
+    // Settings window (ui/). Read by the page only, except onboarded (AppDelegate.needsSetup).
+    public var uiPalette = "grey"                 // the built-in theme: grey, ember, ocean or hicon
+    public var showAdvanced = false               // show the advanced rows on every page
+    public var onboarded = false                  // the first-run setup was finished, skipped or closed
 
     public init() {}
 
@@ -113,13 +118,21 @@ public struct Config: Codable, Equatable {
         cursorSensitivity = min(8, max(0.1, cursorSensitivity))
         panSpeed = min(4, max(0.25, panSpeed))
         panSmoothMs = min(500, max(0, panSmoothMs))
+        precisionBelow = min(1000, max(10, precisionBelow))   // Magnifier divides by it
         panMaxLagPt = min(40, max(0, panMaxLagPt))
         trackAlign = trackAlign == 1 ? 1 : 0
         trackGlideMs = min(2000, max(0, trackGlideMs))
         trackMarginPct = min(40, max(0, trackMarginPct))
         warmthPct = min(100, max(0, warmthPct))
         dimPct = min(100, max(10, dimPct))
+        logLevel = min(3, max(0, logLevel))
+        if engine != "zoom" { engine = "draw" }
+        if cursor != "wind" { cursor = "system" }
+        if !Config.palettes.contains(uiPalette) { uiPalette = "grey" }
     }
+
+    /// The settings window's built-in themes (ui/src/design/themes.js).
+    public static let palettes = ["grey", "ember", "ocean", "hicon"]
 
     /// Parsed binds per action, with any problems found (invalid text or a refused bind).
     public func binds() -> (binds: [Action: [Bind]], problems: [String]) {

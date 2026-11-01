@@ -399,9 +399,9 @@ when it never settles), so the view follows where the cursor settles. The view-o
   cannot take focus, and disassociation only applies to the frontmost app. Skipped while the screen
   is locked (`loginwindow` in front).
 - The colour filter is checked by reading the display transfer formula back (`scripts/gamma.py`).
-- The Settings window is checked by Wind driving its own window through Accessibility
-  (`SettingsUITest`, test builds only). The calls must run off the main thread, since the main
-  thread answers them.
+- The Settings window (a WKWebView page) is checked by `scripts/e2e_settings.py`: the test-only
+  channel command `settings js <base64>` runs JavaScript in the page and writes the result to
+  `js.json`; the script then reads config.json and the config Wind runs on (`config` in state.json).
 - **Typing tests:** macOS opens Keyboard Setup Assistant for Karabiner's virtual keyboard. Register
   its type once with `sudo defaults write /Library/Preferences/com.apple.keyboardtype keyboardtype
   -dict-add "592-1452-0" -int 40`. The harness also closes the assistant and refocuses the window.
@@ -681,3 +681,29 @@ caret following off. Each Tab must move the view onto the focused button; passes
 - Wind ignores key events its own process posts, so tests press keys through tools/vmouse.
 - Game lock tracking is off by default and hidden in Settings until games are tested on the Mac; tests
   that cover it switch it on.
+
+## Settings window (2026-11-01)
+Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
+- **Page:** `ui/` is Windows Wind's Svelte settings UI (copied at Wind commit `982e162`, see
+  `ui/README.md`), adapted for the Mac. `scripts/build.sh` builds `ui/dist` and bundles it as
+  `Wind.app/Contents/Resources/ui`.
+- **Host:** `Sources/Wind/SettingsWeb.swift`, an `NSWindow` (transparent title bar, native traffic
+  lights over the sidebar's top-left, which the page keeps free) holding a `WKWebView`. The page is
+  served from `wind://ui/` by a scheme handler (ES modules do not load from file URLs); any other
+  navigation is refused. The page has no WebKit context menu (right-click clears a keybind).
+- **Bridge:** page to host through `window.webkit.messageHandlers.wind`, host to page through
+  `window.__windReceive(json)`; `window.__windInit` gives the first paint its values without a round
+  trip. Values travel as strings (bools "1"/"0", bind lists comma-joined). `setConfig(key, value)`
+  types the value from `Config`, runs `clamp()` and saves; an unknown key or a bad value replies
+  `configWriteFailed`. Every change applies live (no profiles, no Save/Discard).
+- **Mac status:** `getMacStatus`/`macStatus` (Accessibility, Screen Recording, macOS Zoom shortcuts,
+  login item, log level) feeds the Preferences macOS card and the missing-permission banner; the host
+  pushes it when it changes while the window is open. `captureBinds` pauses Wind's hotkeys
+  (`Magnifier.bindsSuspended`) while a keybind box records.
+- **Setup:** `?mode=onboard` at launch when `AppDelegate.needsSetup` is true (`onboarded` false,
+  Accessibility missing, or Screen Recording missing on the render engine) and from Run setup again.
+  Finishing, skipping or closing it writes `onboarded`.
+- **Keybind rules:** `Binds.swift` `bindVerdict` and `ui/src/lib/keybindRules.js` must agree; both
+  are checked against `Tests/fixtures/mac_keybind_cases.txt` (wind-checks and `npm run test:rules`).
+  The schema defaults and ranges are checked against `Tests/fixtures/config_defaults.json`
+  (regenerate with `swift run wind-checks --write-defaults` after changing `Config`).

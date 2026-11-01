@@ -46,7 +46,8 @@ def relaunch_with_channel(direct=False, extra=None):
     with open(bak, "w") as f: f.write(own)
     c = json.loads(own)
     for k in TEST_DEFAULTS_DROP: c.pop(k, None)
-    c.update(extra or {})
+    # Past the first-run setup: without it Wind opens the setup window at launch (AppDelegate.needsSetup).
+    c.update({"onboarded": True, **(extra or {})})
     with open(cfg, "w") as f: json.dump(c, f, indent=2)
     if direct:
         # Started from this shell so it inherits the terminal's permissions (Screen Recording for
