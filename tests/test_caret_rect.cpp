@@ -208,3 +208,16 @@ TEST_CASE("caret rect: xterm.js input textarea is recognised by its class (Prism
     CHECK_FALSE(IsXtermInput(L""));
     CHECK_FALSE(IsXtermInput(nullptr));
 }
+
+TEST_CASE("caret rect: a terminal cursor parked at the right edge is not followed (Claude Code)") {
+    // A terminal text area 100..1700, 32 px lines (16 px cells).
+    CHECK(IsParkedTerminalCaret(1684, 500, 1700, 532, 100, 1700));   // the last column
+    CHECK(IsParkedTerminalCaret(1668, 500, 1684, 532, 100, 1700));   // the column before it
+    CHECK(IsParkedTerminalCaret(1690, 500, 1690, 532, 100, 1700));   // a zero-width caret at the edge
+    CHECK_FALSE(IsParkedTerminalCaret(400, 500, 416, 532, 100, 1700));   // where the user types
+    CHECK_FALSE(IsParkedTerminalCaret(1600, 500, 1616, 532, 100, 1700)); // a few columns from the edge
+    CHECK_FALSE(IsParkedTerminalCaret(1200, 500, 1700, 532, 100, 1700)); // a selection to the edge is real
+    CHECK_FALSE(IsParkedTerminalCaret(1684, 500, 1700, 532, 0, 0));      // unknown text area
+    CHECK_FALSE(IsParkedTerminalCaret(1684, 500, 1700, 532, 1800, 3000)); // outside the text area
+    CHECK_FALSE(IsParkedTerminalCaret(1684, 532, 1700, 500, 100, 1700)); // an empty rect
+}

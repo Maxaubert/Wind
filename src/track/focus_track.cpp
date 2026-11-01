@@ -111,6 +111,15 @@ static bool IsGeckoWindow(HWND h) {
     return wcscmp(cls, L"MozillaWindowClass") == 0;
 }
 
+// A terminal window whose focused element is its text area: Windows Terminal and the classic console.
+// TUIs in them (Claude Code) park the cursor at the right edge while redrawing (caret_rect.h
+// IsParkedTerminalCaret). xterm.js terminals are not listed: their focused element is the cursor cell
+// itself, so its bounds say nothing about where the text area ends.
+static bool IsTerminalWindow(HWND h) {
+    wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
+    return wcscmp(cls, L"CASCADIA_HOSTING_WINDOW_CLASS") == 0 || wcscmp(cls, L"ConsoleWindowClass") == 0;
+}
+
 // A Java top-level window (IntelliJ, PyCharm, ...): its caret comes from the Java Access Bridge.
 static bool IsJavaWindow(HWND h) {
     wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
@@ -716,6 +725,12 @@ struct FocusRun {
                         !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
+                    } else if (!(el && edc.xterm) && IsTerminalWindow(fg) &&
+                               wind::IsParkedTerminalCaret((int)rc.left, (int)rc.top, (int)rc.right, (int)rc.bottom,
+                                                           (int)b.left, (int)b.right)) {
+                        // A TUI's parked cursor (Claude Code): the view stays where the user types.
+                        if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (parked terminal cursor) via %s: %ld,%ld",
+                                                   src, rc.left, rc.top);
                     } else if (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost)) {
                         // A line-end ghost (#387): the view stays on the text until the next real caret.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",

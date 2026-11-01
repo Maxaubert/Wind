@@ -179,6 +179,25 @@ inline bool GhostHoldExpired(int left, int top, int bottom, long long nowMs, con
            nowMs - s.since >= kGhostConfirmMs;
 }
 
+// Terminal TUIs park the cursor (field: Wind for Mac, Claude Code in Terminal.app, 2026-11). Claude
+// Code hides the terminal cursor and draws its own; while it redraws its prompt it leaves the real
+// cursor at the right edge of the text area (on every space), and the next letter brings it back.
+// Following that report swung the view to the far right and back on every word, so tracking looked
+// broken. An insertion caret (about a cell wide) whose right edge sits in the last two columns of the
+// terminal's text area is a parked cursor, not where the user types. A selection reaching the edge is
+// real and is still followed. el* is the terminal text area (the focused element's bounds).
+inline constexpr double kTermCellRatio = 0.5;     // a terminal cell is about half as wide as tall
+inline constexpr double kTermParkCols = 2.5;      // the last two columns, with slack
+
+inline bool IsParkedTerminalCaret(int left, int top, int right, int bottom, int elLeft, int elRight) {
+    const int h = bottom - top, w = right - left;
+    if (h <= 0 || w < 0 || elRight <= elLeft) return false;
+    const double cell = h * kTermCellRatio < 4 ? 4 : h * kTermCellRatio;
+    if (w > cell * 1.5) return false;                         // a selection, not an insertion point
+    if (right > elRight + cell || left < elLeft) return false; // not in this text area: leave it alone
+    return right >= elRight - kTermParkCols * cell;
+}
+
 // A UIA text range reports one rectangle per line (4 doubles each). A selection grown with
 // Shift+arrow keeps its FIRST rectangle (the start) fixed, so following it never sees the growth
 // (review 2026-10-09 #64): use the LAST rectangle, where the selection's moving end is. Returns the
