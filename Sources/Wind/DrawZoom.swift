@@ -35,6 +35,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// captured, so they showed twice or not at all). The config still selects the draw engine.
     nonisolated(unsafe) static var handedOver = false
     private var promptTimer: Timer?
+    private var handoverWindow: Int?           // the window that made the engine hand over
 
     private var window: NSWindow?
     private let image = CALayer()
@@ -217,8 +218,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// of screen capture (it would be hidden), or the lock screen. Every other window, prompts
     /// included, is captured and drawn magnified, and clicks land on it where it is drawn (the
     /// Screen Recording prompt, universalAccessAuthWarn, sits under the overlay: it stays drawn).
-    static func promptOnScreen() -> Bool {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+    /// The window that makes it so (its window number), or nil.
+    static func blockingWindow() -> Int? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         let me = ProcessInfo.processInfo.processIdentifier
         var ignore = Set<String>()
         #if WIND_TEST_CHANNEL
@@ -240,13 +242,20 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             let big = (b["Width"] ?? 0) > 60 && (b["Height"] ?? 0) > 40
             if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
             if ignore.contains(owner) { continue }
-            if lockOwners.contains(owner) || sharing == 0 { return true }
+            let id = w[kCGWindowNumber as String] as? Int ?? 0
+            if lockOwners.contains(owner) || sharing == 0 { return id }
             // Above the overlay (listed before it). With the overlay not on screen, judge by level:
             // prompts at or above the screen-saver level would stack over it, unless the overlay
             // goes on its own space above them.
-            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return true }
+            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return id }
         }
-        return false
+        return nil
+    }
+
+    /// Is this window still on screen?
+    static func windowOnScreen(_ id: Int) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        return list.contains { ($0[kCGWindowNumber as String] as? Int) == id }
     }
 
     /// While the engine is wanted and Wind is zoomed, look for prompts 4 times a second.
@@ -256,16 +265,23 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             guard let self else { return }
             let zoomed = self.visible || DrawZoom.handedOver
             if !zoomed { self.promptTimer?.invalidate(); self.promptTimer = nil; return }
-            let prompt = DrawZoom.promptOnScreen()
+            // Handed over, wait for the window that caused it to close: with the overlay hidden, a
+            // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
+            // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
+            if DrawZoom.handedOver, let id = self.handoverWindow, DrawZoom.windowOnScreen(id) { return }
+            let blocking = DrawZoom.blockingWindow()
+            let prompt = blocking != nil
             if prompt && !DrawZoom.handedOver {
-                Log.info("draw engine: a window the capture cannot show is up (lock screen or capture-protected); macOS zoom shows it")
+                Log.info("draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay); macOS zoom shows it")
                 DrawZoom.handedOver = true
+                self.handoverWindow = blocking
                 self.hide()
                 DrawZoom.enabled = false
                 self.onHandover?(true)
             } else if !prompt && DrawZoom.handedOver {
                 Log.info("draw engine: it is gone; back to drawing")
                 DrawZoom.handedOver = false
+                self.handoverWindow = nil
                 SkyLight.resetCompositor()              // leave macOS's zoom before drawing again
                 DrawZoom.enabled = true
                 self.onHandover?(false)

@@ -131,7 +131,8 @@ check("draw engine: a prompt under the overlay stays drawn (magnified, once)", b
 b, d, a, L = prompt_run("noshare")
 check("draw engine: a capture-protected window hands the zoom to macOS", b["drawn"] and not d["drawn"] and d["sky"]["scale"] == 4, f"drawn {d['drawn']} sky {d['sky']}")
 check("draw engine: the handover keeps the view and the pointer", d["sky"]["center"] == b["sky"]["center"] and d["pointer"] == b["pointer"] and a["sky"]["center"] == b["sky"]["center"], f"view {b['sky']['center']} -> {d['sky']['center']} -> {a['sky']['center']}, pointer {b['pointer']} -> {d['pointer']}")
-check("draw engine: the handover is logged both ways", any("macOS zoom shows it" in l for l in L) and any("back to drawing" in l for l in L))
+check("draw engine: the handover is logged both ways, once", sum("macOS zoom shows it" in l for l in L) == 1 and sum("back to drawing" in l for l in L) == 1,
+      f"{sum('macOS zoom shows it' in l for l in L)} handovers, {sum('back to drawing' in l for l in L)} returns")
 check("draw engine: drawing again after it is gone", a["drawn"] and a["sky"]["scale"] == 4, f"drawn {a['drawn']} {a['sky']}")
 
 # A real password prompt (SecurityAgent): render stays on and the prompt is drawn magnified once. The prompt asks for nothing: it is closed

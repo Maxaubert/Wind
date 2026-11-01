@@ -568,6 +568,9 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   - Wind still hands over to macOS's zoom (`DrawZoom.handedOver`) for the lock screen, for a window that
     opts out of capture, and for anything stacked above the overlay. If the space cannot be placed,
     password prompts count as above it again.
+  - It hands back only when the window that caused the handover has closed. System alerts from
+    UserNotificationCenter (layer 8) sit above the overlay's space; judged by level once the overlay was
+    hidden, they looked gone and the engine flipped 4 times a second (2026-11-01).
   - Both ways the other engine shows the same view at once.
   - Dead ends: the cursor plane (a screen-sized cursor image) is above prompts but changes a frame late;
     a CGDisplayCapture shield and a displayable CAContext stay under them.
