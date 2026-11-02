@@ -763,8 +763,8 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
     such alerts, measured with a throwaway app): the cursor went BEHIND the prompt. Now a handover for a
     window above the overlay sets `Magnifier.cursorCovered`, and on macOS's zoom a 0.25 s check
     (`WindCursor.windowAbove`: a big window of another process listed before Wind's cursor panel; SecurityAgent
-    too; the window list is read off the main thread, on it `cursor_truth` showed longmed and hold at 4x over
-    3% jumps) sets it: Wind's cursor goes, the real one shows, magnified by Transform and above the prompt, until
+    too; only the windows above the panel are read, off the main thread: on it `cursor_truth` showed longmed and
+    hold at 4x over 3% jumps, and the whole list off it went with "fast" over 3% at 4x and 7.3x in 2 of 3 runs) sets it: Wind's cursor goes, the real one shows, magnified by Transform and above the prompt, until
     that same window closes. (2) Back to render, `DrawZoom.takeCursor` returned early because Wind's cursor
     still held the shared `SkyLight.forceHidden`; Wind's cursor going off a tick later cleared it and showed
     the real cursor: the drawn cursor plus a tiny real one until a zoom-out. Now Wind's cursor goes off before

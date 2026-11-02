@@ -157,23 +157,26 @@ final class WindCursor {
     /// The panel's window number while it is shown (main thread), for `windowAbove`.
     var shownWindow: Int? { panel.flatMap { $0.isVisible ? $0.windowNumber : nil } }
 
-    /// Any thread (the window list costs a few ms: off the main thread, it delayed zoom ticks).
+    /// Any thread. Only the windows above the panel are read (none, nearly always): the whole window
+    /// list 4 times a second, even off the main thread, went with cursor_truth "fast" jumps over 3% at 4x
+    /// and 7.3x in 2 of 3 runs (main: 0 of 2, 2026-11-02).
     static func windowAbove(_ mine: Int) -> (id: Int, owner: String)? {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        guard let list = CGWindowListCopyWindowInfo(.optionOnScreenAboveWindow, CGWindowID(mine)) as? [[String: Any]],
+              !list.isEmpty else { return nil }
+        // Ordered out meanwhile: "above" a window not on screen would be every window.
+        let own = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(mine)) as? [[String: Any]]
+        guard own?.first?[kCGWindowIsOnscreen as String] as? Bool == true else { return nil }
         let me = ProcessInfo.processInfo.processIdentifier
-        var found: (id: Int, owner: String)?
         for w in list {                                 // front to back
-            let id = w[kCGWindowNumber as String] as? Int ?? 0
-            if id == mine { return found }
-            if found != nil || (w[kCGWindowOwnerPID as String] as? Int32) == me { continue }
+            if (w[kCGWindowOwnerPID as String] as? Int32) == me { continue }
             let owner = w[kCGWindowOwnerName as String] as? String ?? ""
             let alpha = w[kCGWindowAlpha as String] as? Double ?? 1
             let b = w[kCGWindowBounds as String] as? [String: Double] ?? [:]
             // Prompts are big; WindowServer's own windows (cursor, the recording indicator) are not prompts.
             if alpha < 0.05 || (b["Width"] ?? 0) <= 60 || (b["Height"] ?? 0) <= 40 || owner == "Window Server" { continue }
-            found = (id, owner)
+            return (w[kCGWindowNumber as String] as? Int ?? 0, owner)
         }
-        return nil                                      // the panel is not on screen
+        return nil
     }
 
     /// The cursor image as WindowServer has it (tests): top-left origin desktop bounds of the image,
