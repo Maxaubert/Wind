@@ -349,6 +349,116 @@ screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning o
 - `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
   game lock); `WIND_CURSOR=wind` runs any suite with it.
 
+### Screenshot mode and the colour sampler (owner report 2026-11-01)
+"One big crosshair in the centre and a small free one; highlighting an area is bugged when zoomed."
+Cmd+Shift+4/5, `screencapture -i` and NSColorSampler capture every event, track the pointer in desktop
+points and draw their own cursor: screencapture forces the real cursor visible (Wind's re-hide does not
+win), and `NSCursor.currentSystem` reports its 64x40 crosshair with the coordinate label baked in. Before
+the fix: render drew Wind's copy magnified at the view centre while the real one showed unzoomed at its
+desktop place, the selection band (owner screencapture, level 2147483631) stacked above the overlay at
+1x until the prompt watch handed over mid-drag (the view jumped); Transform showed both cursors on top
+of each other with a lagging label. On both, Wind's cursor went into the saved PNG, window mode (Space)
+highlighted and saved Wind's full-screen window, and the sampler picked Wind's cursor (magenta probe).
+- `PointerTakeover` polls 10 times a second while zoomed, off the main thread (SLSAreEventsCaptured
+  waits on WindowServer: p99 6 ms, max 11 ms): the launchd name
+  `com.apple.screencapture.interactive` (checked in only during an interactive capture), else
+  `SLSAreEventsCaptured` plus an on-screen window owned by screencapture or ColorSampler (events
+  captured alone might be a menu). While it is up Wind draws no cursor (the real one shows, magnified by
+  WindowServer like macOS Zoom does), render hands over to macOS's zoom at once (`DrawZoom.checkPrompts`),
+  caret hiding and the game-lock detector stand down. When it ends Wind hides the real cursor and reads
+  the shape at once, waking the idle display link (it lingered until the next pointer move, 7 s).
+- Every Wind window carries `IgnoreForScreencaptureWindowSelection` (`SkyLight.ignoreForWindowPicker`):
+  window mode picks the topmost window with visible pixels under the pointer, click-through or not;
+  `sharingType = .none` did not stop it.
+- Measured by `scripts/e2e_screenshot.py` (both engines, 3x, Wind's cursor as the magenta probe): no Wind
+  pixels on the zoomed screen during selection, drag and Cmd+Shift+5; the saved PNG starts exactly at the
+  point under the press (a `shotkit coords` window gives every desktop point its own colour); window
+  mode saves the test window; the sampler picks the 1x colour; render hands over 160 ms after the
+  hotkey; Wind's cursor is back 160 ms after the shot. Before: 17 of 26 checks failed.
+- macOS quirk: with tools/cursorcap running, the band END lands up to ~6% of a zoomed drag past or short
+  of the pointer (also without HID gain; never at 1x or without the capture). The test allows it.
+- **The view holds still while the mode is up** (owner 2026-11-01, on the hand-over build: "wobbly in free
+  mode, and when you select an area it becomes very choppy and lagging"). Following the pointer every tick,
+  the real crosshair (WindowServer draws it from the pointer of each composite) and the view (Wind's last
+  write) showed different pointer times, so the crosshair wobbled 10-30% of moving frames; the band (redrawn
+  by screencapture 1-2 frames after a zoom write) slid back on screen whenever the view moved first, and the
+  pointer read stepped back up to 6 pt right after view writes (baseline: research/wind-mac/re/2026-11-01-
+  screenshot-smooth-baseline.md). Now `Magnifier` holds the view where it was on entry (no jump) and glides
+  it only when the pointer enters a 15% margin, to 10% past the pointer, over 250 ms (`stillViewTarget`;
+  `WIND_STILL=margin,lead,glideMs` in test builds); a level change zooms about the pointer; no pointer
+  placement while held. When the mode ends the view glides back to the pointer (the caret return, 160 ms).
+  The crosshair then travels over a steady picture, as at 1x.
+- Measured by `scripts/screenshot_truth.py` (`cursor_screen`/`band_screen`: residual from a 5-frame line and
+  back-steps against the hand, valid whatever the view does), judged A/B in one session 2026-11-01, owner's
+  setup and Transform, before ; after: free-mode crosshair back-steps 2-17 of ~100 per run ; 0 at 3x and 6x,
+  pointer back-steps 0-7 ; 0, crosshair residual p95 at 3x 1.4-7.5 ; 3.0-3.2 px (1x: 3.6-6.5). Drag at 3x:
+  band back-steps 18-25 of ~45 ; 1, crosshair residual p95 9-12 ; 5-6 px. At 6x the test drag is longer
+  than the 320x180 pt view, so the view glides during it: band back-steps 17-21 ; 5-12, band residual p95
+  24-46 ; 14-29 px. Frames by eye (cursorcap PNGs): before, the band corner flips between two places 11 px
+  apart frame after frame behind a crosshair pinned at the centre; after, the corner stays on the crosshair.
+  Data and frame montages: research/wind-mac/re/2026-11-01-screenshot-smooth-judge/.
+- View write timing does not fix it (2026-11-01, `-smooth-ideaB.md`): inside the HID tap the zoom write and the
+  event fought (pointer flung corner to corner, or carried twice with keepPointer=false); right after the event
+  or 3-6 ms after the display link the view lagged and 50-96% of frames jumped; a view a tick behind while
+  dragging did not line up with the band; WindowServer's eased writes (speed > 0) restart on every target and
+  never catch a moving pointer. The display-link tick is the best write time found; a still view removes the chop.
+- Not handled: plain Cmd+Shift+3 or a recording while zoomed still contains Wind's cursor (and on render
+  the magnified overlay, by design: screenshots show what is seen). Mission Control briefly showed the
+  real cursor next to Wind's (survey 2026-11-01). Research: research/wind-mac/re/2026-11-01-crosshair-*.md
+  and 2026-11-01-cursor-modes-survey.md.
+
+### Wind's own screenshot selection (`ownScreenshot`, default on, 2026-11-02)
+Owner on the held-view build: "still choppy", the crosshair and box jump. Cause: screencapture draws its
+crosshair and band at whole desktop points (the real cursor under zoom too), so magnified they jump `level`
+screen pixels per point, and its windows (touchshield 1498, band 2147483631, real cursor 2147483630) sit
+above anything Wind can make. So while Wind is zoomed it runs the area shortcuts itself (`WindShot.swift`):
+- The event tap swallows the user's area shortcuts (com.apple.symbolichotkeys 30 = save, 31 = clipboard;
+  macOS's defaults Cmd+Shift+4 / Ctrl+Cmd+Shift+4 when absent, nothing when switched off; a Wind bind on the
+  same keys wins), so macOS's tool never starts (a swallowed hotkey at the HID tap starts nothing, measured).
+  Not with `ownScreenshot` off, not during a game lock or a macOS screenshot/sampler mode.
+- A macOS selection started from the shortcut some other way (`screencapture -pdin -z keyboard.selection`, `.clipboard`
+  for the copy one; e.g. while Wind was paused) is swapped for Wind's when Wind zooms in, before the press:
+  Wind ends it with SIGKILL (it ignores TERM, INT and HUP while its UI is up; WindowServer drops its cursor lock
+  with the connection) and PointerTakeover ignores it for 1.5 s while it goes. A drag already under way stays macOS's.
+- At 1x too (owner 2026-11-02): the shortcut starts Wind's selection at any level, drawn in Wind's panel over the
+  hidden real cursor while unzoomed, so a selection (and a drag under way) goes on unchanged when the zoom comes or goes.
+- While it is up: the button is the selection's (swallowed; drags reach apps as plain moves, since dropping
+  them would stop the pointer), Escape cancels, Space toggles window mode before the press (Wind picks the
+  topmost ordinary window under the crosshair, off the main thread) and moves the box while held during a
+  drag, Option grows the box from the press (its centre), Shift pressed while dragging keeps the edge the
+  hand moves first (the other axis stays where it was), Ctrl at the release copies, except a Ctrl still held
+  from a Ctrl+scroll zoom during the selection (the owner's wheel zoom; that Ctrl is the zoom's, so it saves).
+  Option and Shift act on their press, so the hotkey's own Shift is no lock. Wind's binds (zoom keys, mouse buttons, wheel) still work; other keys,
+  buttons and scrolls go nowhere, as in macOS's mode. Caret and focus tracking stand down.
+- Drawn from Wind's pointer model where Wind's cursor would be: render in its overlay (`ShotLayers` in the
+  cursor's commit, the anchor at its desktop point through the current view); Transform in a click-through
+  panel in desktop points, its crosshair moved before every view write (`SkyLight.beforeWrite`) like Wind's
+  cursor, whichever cursor is set (the real one is hidden meanwhile). The view follows the pointer as usual.
+  Sizes are desktop points, magnified (like macOS's crosshair under zoom). No coordinate or size label: macOS's at 1x shows none (owner 2026-11-02).
+- On release: `screencapture -p -R x,y,w,h` (`-c -R` for the clipboard, `-p -l id` for a window), so macOS
+  writes the file with the user's settings. `-p` reads `location-screenshot` (not the old `location` key,
+  macOS 27) and `show-thumbnail` (file 5.7 s later with it on, at once with it off), measured 2026-11-01.
+  `-R` takes whole points (a fractional rectangle grows outward), so each corner of the drawn box goes to the
+  nearest point (`shotRect`): the saved edges are within half a point of the drawn ones. Wind's click-through
+  windows, hidden ones too, get `sharingType = .none` until the tool exits (screencapture then leaves them
+  out, measured): Wind's cursor window comes back on the tick after the release, while the tool is still
+  capturing, and was in Transform's shots when only visible windows were excluded. No implicit animations on
+  the selection's layers: a new label text cross-faded over the old one. On render the floating thumbnail is captured and drawn magnified (no hand-over).
+- Chosen 2026-11-02 over covering macOS's own (branch `drawshot-cover`: render only, with the overlay's space
+  raised above screencapture's level 400 and macOS's crosshair left at its 1x size over the magnified picture,
+  the picture frozen while dragging; Transform not fixable, its cursor is magnified and locked to
+  screencapture). Report: research/wind-mac/re/2026-11-01-drawshot-cover.md, judge 2026-11-02-drawshot-judge.md.
+- Measured (`scripts/e2e_screenshot.py`, the own-selection checks on both engines; `scripts/drawshot_truth.py` with `tools/probecap`,
+  probes magenta crosshair, yellow far corner, cyan anchor), 3x/6x, against macOS's own (baseline above):
+  free-mode crosshair jumps over half a point 0% on render, 0-3.8% on Transform (macOS's: 10-28%); box corner
+  in the same frame as the crosshair (max 1.8 px off); corner back-steps on screen 0-3 of 38-57 moving frames
+  (macOS's band: 14-23 of 30-46). Behind the pointer: render 2.0 frames (3.8-4.6 pt), Transform 1.3 (macOS's
+  crosshair about 1); render's cursor has the same lag. On Transform the box's anchor still moves with the
+  content in whole points (the zoom itself). Report: research/wind-mac/re/2026-11-01-drawshot-own.md.
+- Not done: window mode's camera cursor (the crosshair stays); Cmd+Shift+5, a selection started from its
+  toolbar and the colour sampler keep the hand-over above, as does `screencapture -i` started by another app.
+  Render's crosshair is 2 frames behind the hand (its cursor's lag, not worked on).
+
 ### Seeing the zoomed screen (ground truth, 2026-10-31)
 Wind's model said its cursor was steady (0.00) while the owner saw it wobble a lot. The zoomed
 picture CAN be captured: a ScreenCaptureKit stream with `showsCursor = true` whose filter excludes

@@ -82,6 +82,20 @@ struct ViewTests {
         expect(moved == Pt(1020, 540))
     }
 
+    func stillViewHoldsThenRecentres() {
+        let cur = Pt(960, 540)
+        // at 3x the view is 640 x 360 (x 640...1280); a 15% margin leaves x 736...1184, y 414...666
+        expect(stillViewTarget(cur, cur: cur, ptr: Pt(1100, 600), level: 3, screen: screen, marginPct: 15) == cur)
+        expect(stillViewTarget(cur, cur: cur, ptr: Pt(1200, 600), level: 3, screen: screen, marginPct: 15) == Pt(1200, 540))
+        // a glide under way keeps its target while the pointer is back inside the band
+        expect(stillViewTarget(Pt(1200, 540), cur: Pt(1100, 540), ptr: Pt(1210, 560), level: 3, screen: screen, marginPct: 15) == Pt(1200, 540))
+        // at a screen edge the target stays on the clamp
+        expect(stillViewTarget(Pt(1600, 900), cur: Pt(1600, 900), ptr: Pt(1915, 1075), level: 3, screen: screen, marginPct: 15) == Pt(1600, 900))
+        // with a lead the view goes past the pointer, toward where it is heading
+        expect(stillViewTarget(cur, cur: cur, ptr: Pt(1200, 600), level: 3, screen: screen, marginPct: 15, leadPct: 20) == Pt(1328, 540))
+        expect(stillViewTarget(cur, cur: cur, ptr: Pt(900, 400), level: 3, screen: screen, marginPct: 15, leadPct: 20) == Pt(960, 328))
+    }
+
     func springConverges() {
         var v = 0.0, x = 0.0
         for _ in 0..<240 { x = springToward(x, 100, vel: &v, dtMs: 1000.0 / 120, glideMs: 200) }
@@ -336,5 +350,25 @@ enum DefaultsFixture {
         let have = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         if have != generate() { print("  Tests/fixtures/config_defaults.json is stale: run swift run wind-checks --write-defaults") }
         expect(have == generate())
+    }
+}
+
+struct ShotTests {
+    func hotkeysFollowTheUsersSettings() {
+        let def = screenshotAreaHotkeys(nil)
+        expect(def == [ShotHotkey(keyCode: 21, mods: [.cmd, .shift], clipboard: false), ShotHotkey(keyCode: 21, mods: [.cmd, .shift, .ctrl], clipboard: true)])
+        // 30 switched off, 31 moved to Cmd+Opt+5 (0x180000): Wind takes only what macOS would.
+        let t: [String: Any] = ["30": ["enabled": false, "value": ["parameters": [52, 21, 1179648], "type": "standard"]],
+                                "31": ["enabled": true, "value": ["parameters": [53, 23, 0x180000], "type": "standard"]]]
+        expect(screenshotAreaHotkeys(t) == [ShotHotkey(keyCode: 23, mods: [.cmd, .opt], clipboard: true)])
+    }
+
+    func rectRoundsToNearestPoints() {
+        let s = Sz(1920, 1080)
+        let r = shotRect(anchor: Pt(100.4, 200.6), end: Pt(50.2, 300.49), screen: s)
+        expect(r.map { [$0.x, $0.y, $0.w, $0.h] } == [50, 201, 50, 99])
+        expect(shotRect(anchor: Pt(10.2, 10.2), end: Pt(10.4, 40), screen: s) == nil)   // a click, not a drag
+        let e = shotRect(anchor: Pt(1900, 1000), end: Pt(1990, 1200), screen: s)          // clamped to the screen
+        expect(e.map { [$0.x, $0.y, $0.w, $0.h] } == [1900, 1000, 20, 80])
     }
 }

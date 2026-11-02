@@ -91,11 +91,11 @@ test('the sharp radii belong to High contrast only', async ({ page }) => {
   }
 });
 
-test('General holds the theme and the advanced switch; the macOS card is last', async ({ page }) => {
+test('General holds the theme, the screenshot and advanced switches; the macOS card is last', async ({ page }) => {
   await mockHost(page);
   await open(page);
   await go(page, 'prefs');
   const keys = await page.locator('main .row').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-key')));
-  expect(keys).toEqual(['uiPalette', 'showAdvanced', 'warmthPct', 'dimPct', '__accessibility', '__screenRecording',
+  expect(keys).toEqual(['uiPalette', 'ownScreenshot', 'showAdvanced', 'warmthPct', 'dimPct', '__accessibility', '__screenRecording',
     '__zoomShortcuts', '__loginItem', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
 });

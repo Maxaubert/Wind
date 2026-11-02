@@ -1,6 +1,7 @@
 // vmouse: real HID pointer motion through Karabiner's virtual HID device (test harness for Wind).
 // Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "wheel <notches> <count> <interval_ms>",
-// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab), "button <n> down|up", "quit".
+// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab), "button <n> down|up", "ctrl down|up",
+// "mod opt|shift down|up", "quit".
 #include <atomic>
 #include <iostream>
 #include <sstream>
@@ -84,6 +85,13 @@ int main() {
       std::string st; in >> st;
       kd::virtual_hid_device_driver::hid_report::keyboard_input kr;
       if (st == "down") kr.modifiers.insert(kd::virtual_hid_device_driver::hid_report::modifier::left_control);
+      client->async_post_report(kr);
+    } else if (cmd == "mod") {
+      // mod opt|shift down|up: hold a modifier on the virtual keyboard (screenshot selection tests)
+      std::string m, st; in >> m >> st;
+      kd::virtual_hid_device_driver::hid_report::keyboard_input kr;
+      if (st == "down") kr.modifiers.insert(m == "shift" ? kd::virtual_hid_device_driver::hid_report::modifier::left_shift
+                                                         : kd::virtual_hid_device_driver::hid_report::modifier::left_option);
       client->async_post_report(kr);
     } else if (cmd == "wheel") {
       // wheel <notches> <count> <interval_ms>: one report per notch step

@@ -137,6 +137,10 @@ export const groups = [
     cards: [
       { caption: 'General', rows: [
         { key: 'uiPalette', type: 'palette', label: 'Theme', keywords: ['palette', 'colour', 'color', 'colours', 'colors', 'appearance', 'look', 'dark', 'grey', 'gray', 'ember', 'ocean', 'high contrast', 'hicon', 'skin', 'style', 'accent', 'ui', 'interface'], desc: 'Pick the look of the app', def: 'grey' },
+        // ownScreenshot: Wind runs the screenshot-area shortcuts itself, at any level (WindShot.swift); the
+        // shot is still saved by macOS with the user's screenshot settings.
+        { key: 'ownScreenshot', type: 'toggle', label: 'Wind\'s screenshot crosshair', keywords: ['screenshot', 'screen shot', 'capture', 'selection', 'crosshair', 'area', 'cmd shift 4', 'command shift 4', 'snip', 'grab', 'smooth', 'choppy'],
+          desc: 'Wind draws the Cmd+Shift+4 crosshair and box, smooth at any zoom', def: 1 },
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', keywords: ['expert', 'extra', 'more', 'hidden', 'options', 'all settings', 'power user', 'developer', 'reveal', 'show all', 'additional', 'engine'], desc: 'Shows extra options on every page', def: 0 },
       ] },
       { caption: 'Screen light', rows: [

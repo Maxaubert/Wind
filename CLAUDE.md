@@ -31,8 +31,14 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   further); every movement start must be as smooth as its middle.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
+- `python3 scripts/e2e_screenshot.py`: screenshot mode (area, window, Cmd+Shift+5) and the colour sampler while
+  zoomed, both engines; clicks and Escape only while screencapture or the sampler holds the pointer.
+  It also covers Wind's own selection (Cmd+Shift+4 while zoomed: saved rect exact, Option, Shift, Escape,
+  clipboard, window mode, native at 1x and with `ownScreenshot` off); `python3 scripts/drawshot_truth.py`: its smoothness on the zoomed screen.
+  Both point the owner's `location-screenshot`/`show-thumbnail` at build/ and restore them (never the Desktop).
 - `python3 scripts/cursor_truth.py`: Wind's cursor and Inspect's crosshair measured on the ZOOMED screen
   (what the owner sees, frame by frame); run it after touching either or the write order.
+- `python3 scripts/screenshot_truth.py`: macOS screenshot mode on the ZOOMED screen (crosshair wobble, band lag, pacing); run it after touching the still view in screenshot mode.
 
 ## Gotchas
 - Never warp the pointer, rewrite event locations or use `CGAssociateMouseAndMouseCursorPosition`

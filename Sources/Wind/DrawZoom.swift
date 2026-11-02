@@ -46,6 +46,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private let crossRoot = CALayer(), crossOutline = CAShapeLayer(), crossLine = CAShapeLayer(), crossProbe = CALayer()
     /// Where Inspect's crosshair is (desktop point), nil when not in Inspect. Drawn with the view.
     var crosshair: CGPoint?
+    /// Wind's own screenshot selection (WindShot), drawn with the cursor while it is up.
+    var shot: WindShot?
+    private let shotLayers = ShotLayers()
     private var stream: SCStream?
     private var generation = 0                       // frames from older streams are dropped
     private var starting = false
@@ -110,6 +113,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             shownAt = CACurrentMediaTime()
             if stream == nil { startStream() }
             startPromptWatch()
+            // Zoomed in during a screenshot or sampler mode: hand over right away, not at the next poll.
+            if PointerTakeover.shared.active { DispatchQueue.main.async { self.checkPrompts() } }
             let gen = generation
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.visible, !self.haveFrame, self.generation == gen else { return }
@@ -261,31 +266,39 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// While the engine is wanted and Wind is zoomed, look for prompts 4 times a second.
     private func startPromptWatch() {
         guard promptTimer == nil else { return }
-        promptTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let zoomed = self.visible || DrawZoom.handedOver
-            if !zoomed { self.promptTimer?.invalidate(); self.promptTimer = nil; return }
-            // Handed over, wait for the window that caused it to close: with the overlay hidden, a
-            // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
-            // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
-            if DrawZoom.handedOver, let id = self.handoverWindow, DrawZoom.windowOnScreen(id) { return }
-            let blocking = DrawZoom.blockingWindow()
-            let prompt = blocking != nil
-            if prompt && !DrawZoom.handedOver {
-                Log.info("draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay); macOS zoom shows it")
-                DrawZoom.handedOver = true
-                self.handoverWindow = blocking
-                self.hide()
-                DrawZoom.enabled = false
-                self.onHandover?(true)
-            } else if !prompt && DrawZoom.handedOver {
-                Log.info("draw engine: it is gone; back to drawing")
-                DrawZoom.handedOver = false
-                self.handoverWindow = nil
-                SkyLight.resetCompositor()              // leave macOS's zoom before drawing again
-                DrawZoom.enabled = true
-                self.onHandover?(false)
-            }
+        promptTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkPrompts() }
+    }
+
+    /// Hand the view to macOS's zoom while something is up the overlay cannot show right, and take it
+    /// back after. Also called at once when a screenshot or colour-sampler mode starts or ends
+    /// (PointerTakeover): it forces the real cursor visible, which render never magnifies (the small
+    /// free crosshair beside Wind's big one), and its selection band stacks above the overlay. Handed
+    /// over only once the band appeared (0.25 s into a drag), the view jumped mid-drag (2026-11-01).
+    func checkPrompts() {
+        let zoomed = visible || DrawZoom.handedOver
+        if !zoomed { promptTimer?.invalidate(); promptTimer = nil; return }
+        let takeover = PointerTakeover.shared.active
+        // Handed over, wait for the window that caused it to close: with the overlay hidden, a
+        // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
+        // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
+        if DrawZoom.handedOver, let id = handoverWindow, DrawZoom.windowOnScreen(id) { return }
+        let blocking = takeover ? nil : DrawZoom.blockingWindow()
+        let prompt = takeover || blocking != nil
+        if prompt && !DrawZoom.handedOver {
+            Log.info(takeover ? "draw engine: screenshot or colour-sampler mode; macOS zoom shows it"
+                              : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay); macOS zoom shows it")
+            DrawZoom.handedOver = true
+            handoverWindow = blocking
+            hide()
+            DrawZoom.enabled = false
+            onHandover?(true)
+        } else if !prompt && DrawZoom.handedOver {
+            Log.info("draw engine: it is gone; back to drawing")
+            DrawZoom.handedOver = false
+            handoverWindow = nil
+            SkyLight.resetCompositor()                  // leave macOS's zoom before drawing again
+            DrawZoom.enabled = true
+            onHandover?(false)
         }
     }
 
@@ -367,7 +380,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if shapeDue { cursorShape() }
         let w = cursorSize.width * scale, h = cursorSize.height * scale
         if let p = pendingSurface { image.contents = p; pendingSurface = nil }
-        cursorLayer.isHidden = pointerHidden || lockHidden
+        let shooting = shot?.active ?? false
+        cursorLayer.isHidden = pointerHidden || lockHidden || shooting   // the selection's crosshair replaces it
+        // The selection in the same commit as the cursor: the crosshair at the pointer the view was placed
+        // for, the box's anchor where its desktop point is shown now.
+        shotLayers.update(shot, map: { CGPoint(x: W / 2 + ($0.x - self.center.x) * self.scale, y: H / 2 - ($0.y - self.center.y) * self.scale) },
+                          mag: scale, px: 1)
         crossRoot.isHidden = crosshair == nil           // also on ticks with no view write (at an edge)
         if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * scale, y: H - sy - (h - cursorHotSpot.y * scale), width: w, height: h)
@@ -425,7 +443,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         crossRoot.isHidden = true
         v.layer?.addSublayer(crossRoot)
         v.layer?.addSublayer(cursorLayer)
+        v.layer?.addSublayer(shotLayers.root)
         w.contentView = v
+        SkyLight.ignoreForWindowPicker(windowNumber: w.windowNumber)    // screenshot window mode picked it
         window = w
         if !observing {
             observing = true

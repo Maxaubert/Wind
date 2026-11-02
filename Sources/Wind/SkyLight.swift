@@ -66,6 +66,18 @@ enum SkyLight {
         return true
     }
 
+    private typealias SetWinPropFn = @convention(c) (Int32, UInt32, CFString, CFTypeRef) -> Int32
+    private static let setWinProp = sym("SLSSetWindowProperty", SetWinPropFn.self)
+
+    /// Screenshot window mode (Cmd+Shift+4, Space) skips this window. It picks the topmost window with
+    /// visible pixels under the pointer, click-through or not, and Wind's full-screen cursor panel or
+    /// render overlay always has some: it highlighted the whole screen and saved Wind's window
+    /// (2026-11-01). `sharingType = .none` did not stop it; screencapture reads this property.
+    static func ignoreForWindowPicker(windowNumber: Int) {
+        guard windowNumber > 0 else { return }
+        _ = setWinProp?(cid, UInt32(windowNumber), "IgnoreForScreencaptureWindowSelection" as CFString, kCFBooleanTrue)
+    }
+
     /// Whether the system cursor is shown, whichever app hid it (a game hides it for mouse-look).
     /// SLSCursorIsVisible also reports the "obscured while typing" flag, and that cached byte goes
     /// stale: a zoom write or a warp reveals the cursor without rewriting it, so it read hidden for

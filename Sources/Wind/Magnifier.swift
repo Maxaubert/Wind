@@ -17,6 +17,10 @@ final class Magnifier {
     private var askedRawAccess = false
     private let crosshair = Crosshair()
     let windCursor = WindCursor()
+    /// Wind's own screenshot selection (config ownScreenshot) and its Transform drawing.
+    let shot = WindShot()
+    private let shotPanel = ShotPanel()
+    private var shotSwallowLeftUp = false       // the selection took the press: its release is Wind's too
 
     private var tap: CFMachPort?
     private var link: CADisplayLink?
@@ -82,6 +86,10 @@ final class Magnifier {
     private var inspectLook = Pt(0, 0)          // the crosshair: where Inspect is looking
     private var pendingPlace: Pt?               // next tick: put the pointer here (leaving Inspect)
     private var returning = false               // the view is gliding back to the pointer
+    private var stillTarget: Pt?                // screenshot or sampler mode: where the held view is (gliding)
+    private var stillLevel = 1.0                // and the level it was held at
+    // The held view's margin and lead (% of the view) and glide; WIND_STILL="margin,lead,glideMs" in test builds.
+    nonisolated(unsafe) static var stillMarginPct = 15.0, stillLeadPct = 10.0, stillGlideMs = 250.0
     private var euroX = OneEuro(minCutoff: 1, beta: 0.02), euroY = OneEuro(minCutoff: 1, beta: 0.02)   // render pan smoothing
     /// Render pan smoothing: the pointer as drawn and as apps get it (nil when not smoothing).
     nonisolated(unsafe) private var smoothPointer: Pt?
@@ -152,6 +160,11 @@ final class Magnifier {
 
     func start() -> Bool {
         updateScreen()
+        #if WIND_TEST_CHANNEL
+        if let v = ProcessInfo.processInfo.environment["WIND_STILL"]?.split(separator: ",").compactMap({ Double($0) }), v.count == 3 {
+            (Magnifier.stillMarginPct, Magnifier.stillLeadPct, Magnifier.stillGlideMs) = (v[0], v[1], v[2])
+        }
+        #endif
         caret.onChange = { [weak self] in
             if let self, self.zoom.level > 1.0001 { self.wake() }
         }
@@ -161,6 +174,15 @@ final class Magnifier {
         // come before the frame's last write; a cursor moved only once per frame showed a frame of
         // the new view with the old cursor place, measured on the zoomed screen).
         SkyLight.beforeWrite = { [weak self] c, s in self?.cursorBeforeWrite(c, scale: s) }
+        // A screenshot or colour-sampler mode took the pointer: Wind's cursor goes (and comes back)
+        // and render hands over at once, also while the display link idles with the pointer still.
+        // Inspect ends: it holds the real pointer still and hides it, which a selection cannot use.
+        PointerTakeover.shared.onChange = { [weak self] on in
+            if on, let self, self.swapNativeSelection() { return }
+            if on, let self, self.inspect { self.endInspect() }
+            if on { self?.shot.cancel("macOS screenshot or colour-sampler mode") }
+            DrawZoom.shared.checkPrompts(); self?.wake()
+        }
         if let s = NSScreen.screens.first {
             let l = s.displayLink(target: self, selector: #selector(tick(_:)))
             l.add(to: .main, forMode: .common)
@@ -172,10 +194,30 @@ final class Magnifier {
         return true
     }
 
+    /// macOS's area selection was started by its shortcut (before zooming in, or while Wind's own is off
+    /// for a moment): before any drag, end it and run Wind's own, which keeps the crosshair smooth and
+    /// on the view. A drag already under way stays macOS's (its press point is not Wind's to know).
+    private func swapNativeSelection() -> Bool {
+        guard config.ownScreenshot, zoomedSession, zoom.level > 1.0001, !shot.active, !lock.locked,
+              !CGEventSource.buttonState(.combinedSessionState, button: .left),
+              let n = WindShot.nativeHotkeySelection() else { return false }
+        // Nothing saved, like Escape. While its UI is up it ignores TERM, INT and HUP (measured 2026-11-02);
+        // KILL ends it and WindowServer drops its cursor lock and windows with the connection.
+        kill(n.pid, SIGKILL)
+        PointerTakeover.shared.suppress()
+        if inspect { endInspect() }
+        shot.begin(clipboard: n.clipboard)
+        Log.info("macOS's screenshot selection swapped for Wind's own")
+        DrawZoom.shared.checkPrompts(); wake()
+        return true
+    }
+
     func stop() {
         link?.invalidate(); link = nil
         if let t = tap { CGEvent.tapEnable(tap: t, enable: false) }
         endInspect()
+        shot.cancel("stop"); shotPanel.show(nil, level: 1)
+        PointerTakeover.shared.watch(false)
         windCursor.show(at: nil, on: false)
         if pointerHiddenForCaret || userHidCursor { pointerHiddenForCaret = false; userHidCursor = false; SkyLight.setCursorHidden(false) }
         caret.stop()
@@ -189,6 +231,8 @@ final class Magnifier {
             _ = router.releaseAll()
             zoom.reset()
             endInspect()
+            shot.cancel("paused"); shotPanel.show(nil, level: 1)
+            PointerTakeover.shared.watch(false)
             windCursor.show(at: nil, on: false)
             SkyLight.reset(); lastWritten = nil; liveLevel = 1; zoomedSession = false; caret.zoomed = false
             clearSessionFlags()
@@ -250,6 +294,8 @@ final class Magnifier {
             e.location = CGPoint(x: sp.x, y: sp.y)
         }
         mods = Mods(rawValue: e.flags.rawValue).intersection(.all)
+        if let r = shotEvent(type, e) { return r }
+        let shooting = shot.active                  // keys, buttons and scrolls that are no bind stay Wind's
 
         switch type {
         case .keyDown, .keyUp:
@@ -260,12 +306,13 @@ final class Magnifier {
                 let (sw, ed) = router.triggerDown(.key(code), mods: mods,
                                                   isRepeat: e.getIntegerValueField(.keyboardEventAutorepeat) != 0)
                 if let ed { edge(ed) }
-                if !sw && zoom.level > 1.0001 && (config.trackCaret || config.trackFocus) { caret.pollSoon() }
-                return sw ? nil : pass
+                if !sw && zoom.level > 1.0001 && (config.trackCaret || config.trackFocus) && !shooting { caret.pollSoon() }
+                if !sw && shooting { shot.swallowedUps.insert(code) }
+                return sw || shooting ? nil : pass
             } else {
                 let (sw, ed) = router.triggerUp(.key(code))
                 if let ed { edge(ed) }
-                return sw ? nil : pass
+                return sw || shooting ? nil : pass
             }
 
         case .flagsChanged:
@@ -284,14 +331,14 @@ final class Magnifier {
             let n = Int(e.getIntegerValueField(.mouseEventButtonNumber))
             let (sw, ed) = router.triggerDown(.mouse(n), mods: mods)
             if let ed { edge(ed); return nil }
-            if sw { return nil }
+            if sw || shooting { return nil }
             lastButtonAt = now; keyAfterButton = false
             return pass
         case .otherMouseUp:
             let n = Int(e.getIntegerValueField(.mouseEventButtonNumber))
             let (sw, ed) = router.triggerUp(.mouse(n))
             if let ed { edge(ed) }
-            if sw { return nil }
+            if sw || shooting { return nil }
             lastButtonAt = now
             return pass
 
@@ -327,10 +374,10 @@ final class Magnifier {
                 let momentum = e.getIntegerValueField(CGEventField(rawValue: 123)!)   // momentum phase
                 if momentum != 0 { return scrollGestureZooms ? nil : pass }
                 if phase == 1 || phase == 128 || phase == 0 { scrollGestureZooms = modsOK }
-                guard scrollGestureZooms else { return pass }
+                guard scrollGestureZooms else { return shooting ? nil : pass }
                 steps = e.getDoubleValueField(.scrollWheelEventPointDeltaAxis1) / 12.0
             } else {
-                guard modsOK else { return pass }
+                guard modsOK else { return shooting ? nil : pass }
                 // One notch is one step, as in Wind on Windows. macOS accelerates wheel deltas
                 // (measured: a slow notch reports 0.1, quick notches ramp to 3.9), which made the
                 // zoom crawl on slow scrolls and leap on fast ones.
@@ -342,6 +389,7 @@ final class Magnifier {
             // Natural scrolling flips the reported direction; undo it so wheel/fingers up zooms in.
             if let ns = NSEvent(cgEvent: e), ns.isDirectionInvertedFromDevice { steps = -steps }
             if steps != 0 {
+                if shot.active && mods.contains(.ctrl) { shot.ctrlZoomed = true }   // that Ctrl is the zoom's, not a copy
                 zoom.wheelNotches(steps)
                 wake()
             }
@@ -352,6 +400,71 @@ final class Magnifier {
         }
     }
 
+    /// Wind's own screenshot selection in the tap: nil lets the event go on through `handle`, .some
+    /// is the answer (.some(nil) swallows). The area shortcuts start it while zoomed (macOS's tool then
+    /// never starts); while it is up the selection has the button, Escape, Space and the modifiers, Wind's binds
+    /// still work, and other keys, buttons and scrolls go nowhere, as in macOS's own mode.
+    private func shotEvent(_ type: CGEventType, _ e: CGEvent) -> Unmanaged<CGEvent>?? {
+        if shot.active { shot.modifiers(mods) }
+        switch type {
+        case .keyDown, .keyUp:
+            let code = UInt16(e.getIntegerValueField(.keyboardEventKeycode))
+            let down = type == .keyDown, rep = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if shot.active {
+                if code == 53 {                                  // Escape
+                    if down { shot.cancel("Escape"); shot.swallowedUps.insert(code); shotSwallowLeftUp = shotSwallowLeftUp || leftHeld; wake() }
+                    else { shot.swallowedUps.remove(code) }
+                    return .some(nil)
+                }
+                if code == 49 {                                  // Space: window mode, or move the box while dragging
+                    if !rep { shot.space(down: down) }
+                    if down { shot.swallowedUps.insert(code) } else { shot.swallowedUps.remove(code) }
+                    wake()
+                    return .some(nil)
+                }
+                if down, !rep, shot.hotkey(code: code, mods: mods) != nil { shot.swallowedUps.insert(code); return .some(nil) }
+            }
+            if !down, shot.swallowedUps.remove(code) != nil {
+                if code == 49 { shot.moving = false }
+                return .some(nil)
+            }
+            guard down, !shot.active, !rep, config.ownScreenshot, !paused, !lock.locked,   // at any level (owner 2026-11-02)
+                  !PointerTakeover.shared.active, !bindsSuspended,
+                  !router.binds.values.joined().contains(where: { $0.trigger == .key(code) && modsMatch(mods, $0.mods) }),
+                  let hk = shot.hotkey(code: code, mods: mods) else { return nil }
+            if inspect { endInspect() }
+            shot.begin(clipboard: hk.clipboard)
+            shot.swallowedUps.insert(code)
+            wake()
+            return .some(nil)
+        case .leftMouseDown:
+            guard shot.active else { return nil }
+            shot.press(); shotSwallowLeftUp = true
+            lastButtonAt = CACurrentMediaTime(); keyAfterButton = false
+            wake()
+            return .some(nil)
+        case .leftMouseUp:
+            if shot.active {
+                shot.release(ctrl: mods.contains(.ctrl), screen: screen)
+                shotSwallowLeftUp = false
+                wake()
+                return .some(nil)
+            }
+            if shotSwallowLeftUp { shotSwallowLeftUp = false; return .some(nil) }
+            return nil
+        case .leftMouseDragged:
+            // The press was the selection's: apps see a plain move (dropping the event would stop the
+            // pointer, which moves where the HID tap's event says).
+            if shot.active || shotSwallowLeftUp { e.type = .mouseMoved }
+            return nil
+        case .rightMouseDown, .rightMouseUp:
+            return shot.active ? .some(nil) : nil
+        default:
+            return nil
+        }
+    }
+    private var leftHeld: Bool { CGEventSource.buttonState(.combinedSessionState, button: .left) }
+
     private func edge(_ ed: InputRouter.Edge) {
         switch ed {
         case .down(.quickZoom):
@@ -359,7 +472,7 @@ final class Magnifier {
             storedQuickLevel = r.newStored
             zoom.glide(to: r.newLevel)
         case .down(.inspect):
-            inspect ? endInspect() : beginInspect()
+            if !shot.active { inspect ? endInspect() : beginInspect() }
         case .down(.hideCursor):
             // Like Wind's hideCursor hotkey: the pointer stays hidden until pressed again.
             userHidCursor.toggle()
@@ -519,11 +632,24 @@ final class Magnifier {
                 lastWritten = nil
                 endInspect()
                 windCursor.show(at: nil, on: false); windCursorAt = nil
+                PointerTakeover.shared.watch(false)
                 clearSessionFlags()
                 Log.info("zoom session end")
             }
             mouseDx = 0; mouseDy = 0
             reportLevel()
+            // Wind's screenshot selection at 1x: its crosshair is drawn in the panel over the real
+            // (hidden) cursor, and it goes on unchanged when the zoom comes or goes.
+            if shot.active {
+                shot.track(ptr)
+                windCursor.show(at: nil, on: true); windCursorAt = nil
+                shotPanel.show(shot, level: 1)
+                return
+            }
+            if shotPanel.visible {
+                shotPanel.show(nil, level: 1)
+                windCursor.show(at: nil, on: false)
+            }
             l.isPaused = true
             return
         }
@@ -539,6 +665,7 @@ final class Magnifier {
             lastPtr = Pt(ptr.x, ptr.y)
             resetViewOwnerForSession(&owner)
             lock.reset()
+            PointerTakeover.shared.watch(true)
             Log.info("zoom session start at \(Int(ptr.x)),\(Int(ptr.y))")
             onSessionStart?()
         }
@@ -599,7 +726,11 @@ final class Magnifier {
         // zoom a view shift drags the held pointer, sometimes late, and one such tick let go of a
         // game (Wind's own cursor, 2026-10-31).
         let heldFree = lock.locked ? drawFreeTicks >= 3 : drawHeldTicks < 6
-        if !inspect && !userHidCursor { lock.feed(cursorVisible: DrawZoom.enabled || SkyLight.forceHidden ? heldFree : SkyLight.cursorVisible, motion: atEdge && !lock.locked ? 0 : motion, pointerMoved: moved * max(lv, 1)) }  // Inspect hides it itself
+        // A screenshot or the colour sampler holds the pointer like a game (the sampler hides the cursor): not one.
+        let takeover = PointerTakeover.shared.active
+        if takeover { shot.cancel("macOS screenshot or colour-sampler mode") }
+        let shotOn = shot.active
+        if !inspect && !userHidCursor { lock.feed(cursorVisible: takeover || shotOn || (DrawZoom.enabled || SkyLight.forceHidden ? heldFree : SkyLight.cursorVisible), motion: atEdge && !lock.locked ? 0 : motion, pointerMoved: moved * max(lv, 1)) }  // Inspect hides it itself
         if config.logLevel >= 2 && (motion > 0 || lock.locked) {
             Log.verbose(String(format: "lockdbg vis %d motion %.0f moved %.2f shift %.2f locked %d", SkyLight.cursorVisible ? 1 : 0, motion, moved, lastShift.x, lock.locked ? 1 : 0))
         }
@@ -623,8 +754,8 @@ final class Magnifier {
         wasLocked = locked
         var oi = ViewOwnerInputs()
         oi.enabled = !locked && !inspect
-        oi.trackCaret = config.trackCaret
-        oi.trackFocus = config.trackFocus
+        oi.trackCaret = config.trackCaret && !shotOn       // the selection keeps the view on the pointer
+        oi.trackFocus = config.trackFocus && !shotOn
         oi.mouseDx = mouseDx; oi.mouseDy = mouseDy
         oi.buttonDown = [CGMouseButton.left, .right, .center].contains {
             CGEventSource.buttonState(.combinedSessionState, button: $0)
@@ -652,7 +783,7 @@ final class Magnifier {
             if !inspect && !userHidCursor { SkyLight.setCursorHidden(hideForCaret) }
         }
         // Text views (TextEdit) show the cursor again as they handle keys: hide it again.
-        if (pointerHiddenForCaret || userHidCursor) && !inspect && SkyLight.cursorVisible { SkyLight.setCursorHidden(true, force: true) }
+        if (pointerHiddenForCaret || userHidCursor) && !inspect && !takeover && SkyLight.cursorVisible { SkyLight.setCursorHidden(true, force: true) }
 
         var target = center
         if inspect {
@@ -690,10 +821,20 @@ final class Magnifier {
                 if owner.warpPointer { pointerToView = true }
                 else if prevOwner != .mouse { returning = true; returnOffset = nil }
                 virtualPtr = Pt(ptr.x, ptr.y)
+                // A screenshot or colour-sampler mode holds the view still (below); when it ends, the view
+                // glides back to the pointer like after the caret.
+                let still = takeover && lv > 1.0001
+                if !still && stillTarget != nil {
+                    stillTarget = nil
+                    if lv > 1.0001 { returning = true; returnOffset = nil; springVel = (0, 0) }
+                }
                 let onZoomedDisplay = ptr.x >= 0 && ptr.y >= 0 && ptr.x < screen.w && ptr.y < screen.h
                 if !onZoomedDisplay {
                     pointerToView = false               // never drag the pointer across displays
                     handTarget = nil
+                } else if still {
+                    // Never place the pointer under a selection: screencapture tracks it itself.
+                    pendingPlace = nil; pointerToView = false; handTarget = nil; returning = false
                 } else if let p = pendingPlace {
                     pendingPlace = nil
                     returning = false; returnOffset = nil
@@ -779,7 +920,35 @@ final class Magnifier {
                     if want.x > hw + 1e-6 && want.x < screen.w - hw - 1e-6 && abs(want.x - b.x) < 1 { want.x = b.x }
                     if want.y > hh + 1e-6 && want.y < screen.h - hh - 1e-6 && abs(want.y - b.y) < 1 { want.y = b.y }
                 }
-                if returning {
+                if still {
+                    // Screenshot or colour-sampler mode: macOS's cursor shows (Wind cannot draw it) and
+                    // WindowServer draws it at the pointer of each composite, while the view shows Wind's
+                    // last write; screencapture redraws its band a frame or two after a zoom write. A view
+                    // that follows the pointer every tick made the crosshair wobble around the centre and
+                    // the band slide back and forth behind it (owner 2026-11-01: "wobbly in free mode,
+                    // choppy and lagging when you select an area"; research/wind-mac/re/2026-11-01-
+                    // screenshot-smooth-*.md). So the view holds still and the cursor moves over a steady
+                    // picture, like at 1x; it glides (to a little past the pointer) only when the pointer
+                    // enters the margin.
+                    // Entered from the view shown now (no jump); a level change zooms about the pointer.
+                    resetSmooth()
+                    returnOffset = nil
+                    var t = stillTarget ?? center
+                    if stillTarget == nil { springVel = (0, 0); stillLevel = lv }
+                    if abs(lv - stillLevel) > 1e-5 {
+                        let k = stillLevel / lv
+                        t = clampCenter(Pt(virtualPtr.x - (virtualPtr.x - center.x) * k, virtualPtr.y - (virtualPtr.y - center.y) * k), level: lv, screen: screen)
+                        stillTarget = t; stillLevel = lv; springVel = (0, 0)
+                        target = t
+                    } else {
+                        t = stillViewTarget(t, cur: center, ptr: virtualPtr, level: lv, screen: screen, marginPct: Magnifier.stillMarginPct, leadPct: Magnifier.stillLeadPct)
+                        stillTarget = t
+                        var vx = springVel.x, vy = springVel.y
+                        target = Pt(springToward(center.x, t.x, vel: &vx, dtMs: dt * 1000, glideMs: Magnifier.stillGlideMs),
+                                    springToward(center.y, t.y, vel: &vy, dtMs: dt * 1000, glideMs: Magnifier.stillGlideMs))
+                        springVel = (vx, vy)
+                    }
+                } else if returning {
                     // The view glides back from where it was (the caret, keys, a game) by gliding the
                     // OFFSET between it and the pointer's view to zero, while that view follows the
                     // pointer directly. Springing the view itself toward a moving pointer lagged behind
@@ -844,16 +1013,27 @@ final class Magnifier {
             crosshair.show(at: crosshairAt, level: lv)
         }
         // Wind's own cursor (cursor = "wind"), moved before the write like the crosshair.
-        let ownCursor = config.cursor == "wind" && !DrawZoom.enabled
+        // Not while a screenshot or colour-sampler mode has the pointer: it shows the real cursor itself
+        // (WindowServer magnifies it), and Wind's copy doubled it and went into the shot (PointerTakeover).
+        // Wind's own screenshot selection draws its crosshair where Wind's cursor would be, whichever cursor is set.
+        let ownCursor = (config.cursor == "wind" || shotOn) && !DrawZoom.enabled && !takeover
         let pNow = owner.owner == .mouse && !locked && !inspect ? virtualPtr : Pt(ptr.x, ptr.y)
         // Following the pointer, the exact centre is the pointer's own (a placement tick writes it at
         // a .5 centre instead, which put the cursor half a point off every other frame).
         let follow = owner.owner == .mouse && !locked && !inspect && config.mouseAlign == 0
         let exact = follow ? clampCenter(mouseTarget(pNow, lv), level: lv, screen: screen) : center
-        let drawnAt = ownCursor && !inspect && !locked && !SkyLight.wantHidden ? cursorPoint(lv, centre: center, exact: exact, pointer: pNow) : nil
-        windCursorAt = drawnAt
+        let drawnAt = ownCursor && !inspect && !locked && (shotOn || !SkyLight.wantHidden) ? cursorPoint(lv, centre: center, exact: exact, pointer: pNow) : nil
         windCursorOffset = drawnAt == nil ? nil : Pt(pNow.x - exact.x, pNow.y - exact.y)
-        windCursor.show(at: drawnAt, on: ownCursor)
+        if shotOn && !DrawZoom.enabled, let d = drawnAt {
+            shot.track(d)
+            windCursorAt = nil
+            windCursor.show(at: nil, on: true)          // the real cursor stays hidden, the crosshair replaces it
+            shotPanel.show(shot, level: lv)
+        } else {
+            shotPanel.show(nil, level: lv)
+            windCursorAt = drawnAt
+            windCursor.show(at: drawnAt, on: ownCursor)
+        }
         if config.logLevel >= 2, let d = drawnAt {
             Log.verbose(String(format: "wcur %.4f %.4f ptr %.4f %.4f", d.x, d.y, pNow.x, pNow.y))
         }
@@ -867,7 +1047,11 @@ final class Magnifier {
         // since, and drew the cursor off the view centre by that much: 10-25% of frames jumped over half a
         // point while panning at 4x-12x (cursor_truth on render, 2026-11-01).
         let following = owner.owner == .mouse && !locked && !inspect
-        if DrawZoom.enabled, let e = smoothPointer ?? (following ? virtualPtr : endPtr) { DrawZoom.shared.lockHidden = locked; DrawZoom.shared.updateCursor(CGPoint(x: e.x, y: e.y)) }
+        DrawZoom.shared.shot = shot
+        if DrawZoom.enabled, let e = smoothPointer ?? (following ? virtualPtr : endPtr) {
+            if shotOn { shot.track(CGPoint(x: e.x, y: e.y)) }   // the crosshair at the cursor's place
+            DrawZoom.shared.lockHidden = locked; DrawZoom.shared.updateCursor(CGPoint(x: e.x, y: e.y))
+        }
         prevShift = lastShift
         lastShift = Pt(center.x - tickStartCenter.x, center.y - tickStartCenter.y)
         // Where Wind's writes left the pointer: this tick's read plus the whole points carried
@@ -889,7 +1073,7 @@ final class Magnifier {
 
         // Sleep while nothing changes; mouse moves, binds, the wheel and caret events wake it.
         let busy = wroteThisTick || moving || returning || oi.panning || abs(springVel.x) + abs(springVel.y) > 0.01
-            || held(.zoomIn) || held(.zoomOut)
+            || held(.zoomIn) || held(.zoomOut) || shotOn
         idleTicks = busy ? 0 : idleTicks + 1
         if idleTicks > 30 { idleTicks = 0; l.isPaused = true }
     }
@@ -922,11 +1106,15 @@ final class Magnifier {
             }
             crosshair.move(to: CGPoint(x: axis(c.x, inspectLook.x, screen.w), y: axis(c.y, inspectLook.y, screen.h)), level: lv)
         }
-        guard let o = windCursorOffset, windCursor.active, windCursor.drawnAt != nil else { return }
         func axis(_ c: Double, _ size: Double) -> Double {
             let half = size / lv / 2
             return min(max(floor(c), half), size - half)
         }
+        if shot.active, shotPanel.visible, let o = windCursorOffset {
+            shotPanel.move(cross: CGPoint(x: axis(c.x, screen.w) + o.x, y: axis(c.y, screen.h) + o.y))
+            return
+        }
+        guard let o = windCursorOffset, windCursor.active, windCursor.drawnAt != nil else { return }
         windCursor.move(to: CGPoint(x: axis(c.x, screen.w) + o.x, y: axis(c.y, screen.h) + o.y))
     }
 
@@ -951,6 +1139,7 @@ final class Magnifier {
         pointerToView = false
         pendingPlace = nil
         returning = false; returnOffset = nil
+        stillTarget = nil
         wasLocked = false
         inspectRef = nil
         idleTicks = 0

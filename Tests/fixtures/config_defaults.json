@@ -16,6 +16,7 @@
     "mouseAlign": { "type": "int", "def": "0", "min": 0, "max": 0 },
     "mouseMarginPct": { "type": "double", "def": "0", "min": 0, "max": 40 },
     "onboarded": { "type": "bool", "def": "0" },
+    "ownScreenshot": { "type": "bool", "def": "1" },
     "panDown": { "type": "list", "def": "ctrl+opt+down" },
     "panLeft": { "type": "list", "def": "ctrl+opt+left" },
     "panMaxLagPt": { "type": "double", "def": "24", "min": 0, "max": 40 },

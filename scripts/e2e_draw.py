@@ -108,6 +108,7 @@ ctl("level 1"); time.sleep(0.4)
 set_config(lockTracking=True)                      # off by default; the game-lock check switches it on
 # A game holding the pointer is still detected (the pointer stops while counts come).
 GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")
+if not os.path.exists(GAME): subprocess.run([os.path.join(ROOT, "tools/fakegame/build.sh")], check=True)   # a fresh worktree
 ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.5)
 g = subprocess.Popen(["open", "-W", GAME, "--args", "4"]); time.sleep(1.5)
 for _ in range(4): mv(10, 0); time.sleep(0.05)

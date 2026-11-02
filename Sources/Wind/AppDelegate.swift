@@ -366,6 +366,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return (app.localizedName ?? "") + ": " + ((t as? String) ?? "")
     }
 
+    /// Wind's own screenshot selection (its own function: inline, the state literal outgrew the type checker).
+    private func shotState() -> [String: Any] {
+        let sh = mag.shot
+        func pts(_ r: CGRect?) -> [Double] { r.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [] }
+        return ["mode": "\(sh.mode)", "anchor": sh.anchor.map { [$0.x, $0.y] } ?? [], "cross": sh.cross.map { [$0.x, $0.y] } ?? [],
+                "saving": sh.saving, "box": pts(sh.box), "picked": pts(sh.picked?.rect)]
+    }
+
     func writeState() {
         let z = SkyLight.get()
         let p = Magnifier.pointer() ?? .zero
@@ -381,6 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
+            "shot": shotState(),
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "config": (try? JSONSerialization.jsonObject(with: mag.config.encoded())) ?? NSNull(),   // what Wind runs on now
             "settings": ["open": settingsWindow.isOpen, "windowId": settingsWindow.testWindowId, "url": settingsWindow.testLoadedURL],

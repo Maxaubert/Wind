@@ -8,3 +8,6 @@ tools/fakegame/FakeGame.app/
 tools/fakeprompt/fakeprompt
 tools/cursorcap/cursorcap
 tools/viewcap/viewcap
+tools/shotkit/shotkit
+tools/shotcap/shotcap
+tools/probecap/probecap

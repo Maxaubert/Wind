@@ -44,7 +44,9 @@ final class WindCursor {
         if on != active {
             active = on
             SkyLight.forceHidden = on
-            if on { SkyLight.hideRealCursor() } else { SkyLight.restoreWanted() }
+            // Back on (after a screenshot mode, say): hide the real cursor and read the shape at once,
+            // not at the next 0.1 s check (the crosshair stayed until the pointer moved, 2026-11-01).
+            if on { SkyLight.hideRealCursor(); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
         }
         guard on, let p else { panel?.orderOut(nil); drawnAt = nil; return }
         let panel = self.panel ?? make()
@@ -163,6 +165,7 @@ final class WindCursor {
         image.magnificationFilter = .linear
         v.layer?.addSublayer(image)
         p.contentView = v
+        SkyLight.ignoreForWindowPicker(windowNumber: p.windowNumber)   // screenshot window mode picked it
         panel = p
         return p
     }

@@ -44,6 +44,23 @@ public func edgePanCenter(cur: Pt, ptr: Pt, level: Double, screen: Sz, marginPct
     return clampCenter(c, level: lv, screen: screen)
 }
 
+/// Screenshot or colour-sampler mode (macOS's zoom and its own cursor): the view holds still while the
+/// pointer is inside the band of the view shown now (`cur`), so the real cursor and the selection band move
+/// over a steady picture. Once the pointer enters the margin on an axis, the target on that axis moves past
+/// the pointer by `leadPct` of the view (the view glides there, leaving room ahead, so a long drag pans in
+/// few glides); otherwise the target is kept. Returns the new target.
+public func stillViewTarget(_ target: Pt, cur: Pt, ptr: Pt, level: Double, screen: Sz, marginPct: Double, leadPct: Double = 0) -> Pt {
+    let lv = max(1.0, level)
+    let vw = screen.w / lv, vh = screen.h / lv
+    func axis(_ t: Double, _ c: Double, _ p: Double, _ v: Double) -> Double {
+        let m = v * marginPct / 100, lead = v * leadPct / 100
+        if p < c - v / 2 + m { return p - lead }
+        if p > c + v / 2 - m { return p + lead }
+        return t
+    }
+    return clampCenter(Pt(axis(target.x, cur.x, ptr.x, vw), axis(target.y, cur.y, ptr.y, vh)), level: lv, screen: screen)
+}
+
 /// Critically damped spring (SmoothDamp form, stable at any dt). Carries its velocity across
 /// retargets, so a caret stepping per keystroke becomes one continuous glide. 95% in glideMs.
 public func springToward(_ cur: Double, _ target: Double, vel: inout Double, dtMs: Double, glideMs: Double) -> Double {

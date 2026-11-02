@@ -88,6 +88,7 @@ final class Crosshair {
         root.bounds = .zero
         v.layer?.addSublayer(root)
         p.contentView = v
+        SkyLight.ignoreForWindowPicker(windowNumber: p.windowNumber)
         panel = p
         return p
     }
