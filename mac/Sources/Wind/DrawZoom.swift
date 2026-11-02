@@ -63,6 +63,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var idleStop: DispatchWorkItem?
     private var lastCursorCheck = 0.0
     private var cursorKey: Data?
+    private var cursorGen = -2                      // ClearCursor's shape counter last drawn
     private var cursorHotSpot = CGPoint.zero
     private var cursorSize = CGSize.zero
     private var observing = false
@@ -320,7 +321,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
 
     /// The current system cursor's image and hotspot, if it changed.
     private func cursorShape() {
-        if let cur = NSCursor.currentSystem {
+        let (sys, gen) = ClearCursor.shared.shape()     // the app's cursor, not Wind's transparent one
+        cursorGen = gen
+        if let cur = sys {
             let img = cur.image
             // Same size and hotspot can still be another cursor (resize, badges): compare pixels.
             let key = img.tiffRepresentation
@@ -369,6 +372,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             lastCursorCheck = now
             shapeDue = true
         }
+        // An app set a new cursor (ClearCursor kept it): draw it this tick, not at the next 0.1 s check.
+        if SkyLight.forceHidden && ClearCursor.shared.generation != cursorGen { shapeDue = true }
         let W = screen.frame.width, H = screen.frame.height
         // Screen position of the pointer (top-left origin), then the layer frame (bottom-left).
         let sx = (p.x - center.x) * scale + W / 2, sy = (p.y - center.y) * scale + H / 2

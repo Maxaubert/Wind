@@ -332,8 +332,8 @@ With the view locked on the pointer, the real cursor still wobbles: the zoom sho
 centre, so the cursor sits `frac(pointer) * level` pixels off the screen centre and that changes
 every frame (owner: "zoom-pan still wobbles"). Measured as the per-frame change of the cursor's
 screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning or zooming.
-- Wind hides the real cursor (as the draw engine does) and draws the current one (`NSCursor.currentSystem`,
-  pixel-compared every 0.1 s) in a click-through window at `pointer - exact centre + shown centre`:
+- Wind makes the real cursor transparent (as the draw engine does, see "The real cursor while Wind
+  draws its own") and draws the app's current one (pixel-compared when it changes, and every 0.1 s) in a click-through window at `pointer - exact centre + shown centre`:
   where the cursor would be if the zoom showed the exact centre. Following the pointer, the exact
   centre is the pointer itself, so the cursor stays on the screen centre: 0.00 by the same measure.
   Clicks still land at the real pointer, under one desktop point from the drawn hotspot.
@@ -685,9 +685,31 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
 - **1x pointer**: macOS is not zoomed, so the pointer moves at its own speed (measured 68.8 pt at
   4x and 10x, the 1x distance). Speed compensation, carries, read guards and the whole-point tricks
   are all off in this engine; placement is a plain warp (exact at 1x).
-- **Cursor**: the real cursor is hidden (`SkyLight.forceHidden`) and the current system cursor
-  (`NSCursor.currentSystem`: arrow, I-beam, ...) is drawn, scaled by the level, at the pointer.
+- **Cursor**: the real cursor is made transparent (`SkyLight.forceHidden`, `ClearCursor`) and the app's
+  current cursor (arrow, I-beam, ...) is drawn, scaled by the level, at the pointer.
   Wind's other hide/show calls only decide whether the drawn cursor shows.
+
+### The real cursor while Wind draws its own: transparent, not hidden (2026-11-02)
+Owner: notification banners showed no hover (no close button) while zoomed, other hover did.
+Notification Center's banners are SwiftUI `onHover`, and SwiftUI ignores hover while
+`+[NSCursor _isHidden]` (= `!SLCursorIsVisible()`, the scoreboard's hide-count and obscured bytes) is
+true: one process hiding the cursor turns SwiftUI hover off in every app. AppKit tracking areas and
+mouse-moved hover (Terminal) keep working, so only some hover broke. The overlay, its level, its
+click-through tag (`ignoresMouseEvents` sets tag bit 0x200, which WindowServer's tracking walk passes
+through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02-notification-hover-re.md,
+-repro.md).
+- `ClearCursor` keeps the real cursor shown with a transparent 7x5 image set from the background
+  (`SetsCursorInBackground`). Apps set their own cursor on shape changes; each set bumps
+  `SLSCurrentCursorSeed` (a scoreboard read). A thread reads it every 2 ms; on a foreign change it keeps
+  the app's cursor (`NSCursor.currentSystem`) as the shape Wind draws and sets the transparent one again.
+  Measured against an app that sets a cursor on every mouse move: ~0.2 ms from its set to Wind's, its
+  cursor in none of ~580 captured frames.
+- Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
+  cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
+- Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
+  region/drag locks (apps could no longer set shapes, so Wind would not know them).
+- State: `realCursorShown` (scoreboard), `realCursorClear`, `realCursorVisible` = shown and not clear.
+  `scripts/e2e_hover.py`: banner, SwiftUI and AppKit hover and a click-through, every engine and cursor.
 - **Capture**: the overlay window is excluded from its own stream (`excludingWindows`), so normal
   screenshots still show it (useful for testing). Frames come only when the screen changes;
   measured delivery 1-2 ms after WindowServer composites them, so content is about one frame later

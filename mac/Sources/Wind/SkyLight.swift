@@ -89,7 +89,7 @@ enum SkyLight {
         return realCursorVisible
     }
 
-    /// The real cursor, also while Wind draws its own (tests).
+    /// The real cursor shown by the hide count (it may still be Wind's transparent one: ClearCursor).
     static var realCursorVisible: Bool {
         if let s = scoreboard?(), let page = s.pointee { return page.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 }
         return cursorVisibleFn?(cid) ?? true
@@ -175,18 +175,33 @@ enum SkyLight {
         realHide(hide, force: force)
     }
 
-    /// Draw engine: the real cursor stays hidden while Wind draws its own; re-hidden if macOS showed it.
+    /// Wind draws the cursor (render, Wind's cursor, Wind's selection): the real one stays shown with a
+    /// transparent image (ClearCursor), not hidden. Hiding it turns off SwiftUI hover in every app
+    /// (Notification Center's banners, 2026-11-02). Cheap to call every tick.
     static func hideRealCursor() {
-        let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
-        realHide(true, force: !cursorHidden || shown)
+        realHide(false)                                 // no hide count of Wind's own underneath
+        ClearCursor.shared.start()
     }
 
-    /// Draw engine off: the real cursor as Wind wants it.
-    static func restoreWanted() { realHide(wantHidden) }
+    /// Wind's cursor off: the real cursor as Wind wants it.
+    static func restoreWanted() {
+        ClearCursor.shared.stop()
+        realHide(wantHidden)
+    }
+
+    /// Let this background app set the system cursor (needed for any hide, show or set from Wind).
+    static func allowBackgroundCursor() {
+        _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+    }
+
+    private typealias SeedFn = @convention(c) () -> UInt32
+    private static let seedFn = sym("SLSCurrentCursorSeed", SeedFn.self)
+    /// Bumped by WindowServer whenever any process sets the cursor image (a scoreboard read, no message).
+    static var cursorSeed: UInt32 { seedFn?() ?? 0 }
 
     private static func realHide(_ hide: Bool, force: Bool = false) {
         if hide == cursorHidden && !force { return }
-        _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+        allowBackgroundCursor()
         if hide {
             // The Dock showed the real cursor over its icons and Wind could not hide it again (owner
             // 2026-11-02: a tiny real cursor over the zoomed Dock). Entering the Dock, the Dock takes the
