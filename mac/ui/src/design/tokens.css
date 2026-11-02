@@ -1,0 +1,83 @@
+/* Copyright (c) 2026 Max Aubert. All rights reserved.
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+/* Design tokens for the redesigned Settings window.
+   Source of truth: docs/design/settings-2026-10/FINAL-v10-grey.html (baseline + the v10 overrides
+   at the end of its stylesheet). Scoped to .wnd; the global theme.css keeps the page-wide rules
+   (selection, focus, reduced motion) and the root tokens used outside .wnd. Dark only
+   (light mode was removed in 0.20.0, #324). */
+:root {
+  /* Motion: calm and quick. Everything below is switched off by the prefers-reduced-motion rule in theme.css. */
+  --dur-fast: 120ms; --dur: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);
+}
+.wnd {
+  /* Mac: SF Pro for text, SF Mono for mono (the Windows Segoe and Cascadia stacks fell back to a monospace face). */
+  --s: -apple-system, system-ui, "Helvetica Neue", sans-serif;
+  --m: ui-monospace, "SF Mono", Menlo, monospace;
+  --nf: var(--m);
+  --w: 500;
+  --rad: 8px;
+  --srad: 6px;
+
+  --bg: #000; --side: #000;
+  --line: #151515; --line2: #1b1b1b; --outline: #5c5c5c; --rowline: #0f0f0f;
+  --hover: #121212; --card: #080808; --chip: #0e0e0e; --chipb: #212121;   /* card #080808: owner decision */
+  --cardb: #0e0e0e; --cshadow: none;
+  --fg: #f2f2f2; --fg2: #d0d0d0; --fg3: #8f8f8f; --glyph: #b0b0b0;
+  --track: #303030; --accent: #fff; --onaccent: #000;
+  --pill: rgba(24, 24, 24, .9); --pillb: #242424;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 14px 36px rgba(0, 0, 0, .9);
+  --prog: #f2f2f2;
+  --hlDim: #2e2e2e; --hlGrey: #313131;
+  --fill: #2fbfa5; --thumb: #f2f2f2; --ctl: #8c8c8c;
+  --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: owner decision */
+
+  /* Tokens the built-in themes (themes.css) set on top of the ones above. Defaults here keep the grey look. */
+  --sel: var(--hlGrey); --selfg: var(--fg); --onfill: #04201b; --fillline: transparent; --focus: var(--fg);
+  --hover2: #333; --scrim: rgba(0, 0, 0, .55);
+  --danger: #f0867e; --dangerbg: rgba(240, 134, 126, .12); --dangerbtn: #e0726a; --dangerbtnfg: #1a0605;
+  --bnfilter: none; --bntint: transparent; --bntop: 0;   /* banner image filter and colour wash */
+  --rc: 10px; --rp: 999px; --rsw: 11px; --rkn: 50%;   /* radii: card, pill, switch track, switch knob (--rad, --srad above) */
+
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 var(--s);
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+.wnd *, .wnd *::before, .wnd *::after { box-sizing: border-box; }
+.wnd svg.ic:not([width]) { width: 20px; height: 20px; }
+.wnd svg.ic {
+  flex: none; fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter;
+}
+.wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.wnd :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Scrollbars (#322, owner decision): a small rounded chip, no track and no arrow buttons. 10 px gutter,
+   6 px thumb (2 px transparent border each side), a little stronger on hover and while dragging. */
+.wnd ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+.wnd ::-webkit-scrollbar-track, .wnd ::-webkit-scrollbar-corner { background: transparent; }
+.wnd ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.wnd ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--fg) 16%, transparent); border-radius: 99px;
+  border: 2px solid transparent; background-clip: padding-box; min-height: 32px; }
+.wnd ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--fg) 28%, transparent); }
+.wnd ::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--fg) 36%, transparent); }
+
+/* Focus ring for the keyboard only: a mouse click (or a script moving focus after one) never draws a box. */
+.wnd :focus:not(:focus-visible) { outline: none; }
+/* Chromium still matches :focus-visible on a mouse-clicked <select> (and after a script moves focus
+   following a click), so the ring is also gated on the last input being the keyboard: main.js sets
+   data-kbd on <html> at the first key press and clears it on every pointer press. Text fields keep
+   their own ring either way. */
+html:not([data-kbd]) .wnd :focus-visible:not(input:is([type="text"], [type="search"], :not([type]))) { outline: none; }
+html:not([data-kbd]) .wnd input:focus-visible + .track { outline: none; }
+
+/* Hover and press feedback: short colour fades on every button, field and row; a 0.97 press on the
+   pill and chip buttons. No layout properties are animated. */
+.wnd button, .wnd select, .wnd .search, .wnd .kc {
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+.wnd :is(.btn, .chip, .link, .reset, .restart, .mbtns button, button.keycap:not(.split)):active:not(:disabled) {
+  transform: scale(.97);
+}

@@ -3,9 +3,12 @@
 name: build
 
 on:
+  # The Windows build; Wind for Mac (mac/) has its own checks.
   push:
     branches: [ main ]
+    paths-ignore: [ 'mac/**' ]
   pull_request:
+    paths-ignore: [ 'mac/**' ]
 
 jobs:
   windows-build:
