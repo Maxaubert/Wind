@@ -130,7 +130,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard !SkyLight.forceHidden else { return }
         pointerHidden = SkyLight.wantHidden             // carry Wind's own hide state over
         SkyLight.forceHidden = true
-        SkyLight.hideRealCursor()
+        SkyLight.hideRealCursor(clear: true)
         cursorTakenAt = CACurrentMediaTime()
     }
     private var cursorTakenAt = 0.0
@@ -367,7 +367,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // (one shared-memory byte), so it shows for a frame at most (it stayed up to 0.1 s, 2026-11-02).
         // Not in the 0.1 s after taking it: the scoreboard can still read shown then, and a forced
         // show+hide right after the order-in blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
-        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
+        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor(clear: true) }
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
             shapeDue = true

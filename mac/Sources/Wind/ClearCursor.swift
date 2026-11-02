@@ -30,12 +30,17 @@ final class ClearCursor: @unchecked Sendable {
     private var ours: UInt32 = 0            // the seed of Wind's own transparent set
     private var beat = 0.0                  // main thread alive (a timer while active)
     private var stalled = false
+    private var resetCount = 0              // transparent sets after another process's set (tests)
+    private var foreignCount = 0
     private var beatTimer: Timer?
     /// Wind's transparent cursor. Its size and hotspot are its signature: a read of the system cursor
     /// that shows them is Wind's own set, not an app's.
     private static let clearSize = NSSize(width: 7, height: 5)
     private static let clearHot = NSPoint(x: 3, y: 2)
     private let clear = NSCursor(image: NSImage(size: ClearCursor.clearSize, flipped: false) { _ in true }, hotSpot: ClearCursor.clearHot)
+
+    /// Seed changes seen and transparent re-sets so far (tests).
+    var counts: [Int] { lock.lock(); defer { lock.unlock() }; return [foreignCount, resetCount] }
 
     /// True while the real cursor is shown transparent.
     var isActive: Bool { lock.lock(); defer { lock.unlock() }; return active }
@@ -117,6 +122,7 @@ final class ClearCursor: @unchecked Sendable {
             last = seed
             if seed == mine && !wasStalled { continue }
             // Someone else set the cursor (or Wind's own set raced with it): keep theirs as the shape.
+            lock.lock(); foreignCount += 1; lock.unlock()
             if let c = NSCursor.currentSystem, !isClear(c) {
                 lock.lock()
                 if active && session == s { appCursor = c; shapeGen += 1 }
@@ -128,6 +134,7 @@ final class ClearCursor: @unchecked Sendable {
             lock.lock(); let still = active && session == s; lock.unlock()
             guard still else { return }
             setClear()
+            lock.lock(); resetCount += 1; lock.unlock()
             last = SkyLight.cursorSeed
         }
     }

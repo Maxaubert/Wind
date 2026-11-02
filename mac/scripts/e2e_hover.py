@@ -5,12 +5,14 @@
 
 Owner 2026-11-02: notification banners showed no hover (no close button) while zoomed. Notification
 Center's banners are SwiftUI `onHover`, and SwiftUI ignores hover while any process hides the cursor;
-Wind hid the real one whenever it drew its own (render, Wind's cursor). Wind now keeps it shown with a
-transparent image (ClearCursor). Per case (engine x cursor, at 3x and at 1x):
+Wind hid the real one whenever it drew its own (render, Wind's cursor). Render now keeps it shown with a
+transparent image (ClearCursor). Wind's cursor on macOS zoom still hides it (a shown cursor made Wind's
+cursor jump there, scripts/cursor_truth.py), so zoom/wind at 3x reports SwiftUI hover as KNOWN, not a
+check. Per case (engine x cursor, at 3x and at 1x):
   - a Notification Center banner: the pointer onto it, then its Close button (AX `xmark`) must appear;
   - tools/hoverprobe's panel (a background app): SwiftUI onHover and an AppKit tracking area both fire
     on a sweep, and a click on it goes through Wind's windows (click-through);
-  - while Wind draws the cursor, the real one is shown (scoreboard) but transparent, and at 1x it is back.
+  - while render draws the cursor, the real one is shown (scoreboard) but transparent; at 1x it is back.
 The banner: an existing one is reused (never clicked), else one is posted (osascript, then Hammerspoon).
 Zooms the real screen; needs sudo (vmouse), Accessibility for the terminal (AX), the screen lock
 (windtest.take_screen). usage: e2e_hover.py [--cases draw:wind,draw:system,zoom:wind,zoom:system]"""
@@ -85,6 +87,15 @@ def zoom_at(x, y, engine, lv):
         if abs((s.get("sky") or {}).get("scale", 1) - lv) < 0.05 and (engine != "draw" or s.get("drawn")): return True
     return False
 
+current = {"cursor": c0}
+
+def swiftui_expected(engine, lv):
+    return not (engine == "zoom" and current["cursor"] == "wind" and lv > 1)
+
+def report(name, ok, detail, expected=True):
+    if expected: check(name, ok, detail)
+    else: print(f"KNOWN {name}: {'works' if ok else 'off'} (Wind's cursor on macOS zoom hides the real cursor)  ({detail})")
+
 def banner_case(tag, engine, lv):
     b, _ = banner()
     if not b: check(f"{tag}: a banner is up", False); return
@@ -96,16 +107,16 @@ def banner_case(tag, engine, lv):
     mv(1, 0, 3, 30); time.sleep(0.8)                    # settle inside, like a hand would
     _, on = banner()
     s = ctl("state")
-    check(f"{tag}: banner hover (close button) appears", ok and reached and not before and on,
-          f"zoomed {ok}, reached {reached}, hovered before {before}, on {on}, pointer {s['pointer']}")
-    if engine == "draw" or s.get("windCursor"):
-        # Wind draws the cursor: the real one is shown for SwiftUI but transparent for the eye.
+    report(f"{tag}: banner hover (close button) appears", ok and reached and not before and on,
+           f"zoomed {ok}, reached {reached}, hovered before {before}, on {on}, pointer {s['pointer']}", swiftui_expected(engine, lv))
+    if engine == "draw":
+        # Render draws the cursor: the real one is shown for SwiftUI but transparent for the eye.
         if lv > 1:
             check(f"{tag}: real cursor shown but transparent", s.get("realCursorShown") and s.get("realCursorClear") and not s.get("realCursorVisible"),
                   f"shown {s.get('realCursorShown')} clear {s.get('realCursorClear')}")
     go(cx - 60, cy + 180); mv(0, 2, 3, 20); time.sleep(0.6)
     _, off = banner()
-    check(f"{tag}: banner hover ends when the pointer leaves", not off)
+    report(f"{tag}: banner hover ends when the pointer leaves", not off, "", swiftui_expected(engine, lv))
 
 def panel_case(tag, engine, lv):
     y = py + ph // 2
@@ -116,7 +127,7 @@ def panel_case(tag, engine, lv):
     time.sleep(0.4)
     sui = "SUI hover true" in events and "SUI hover false" in events
     ak = "AK entered" in events and "AK exited" in events
-    check(f"{tag}: SwiftUI hover in a background app", ok and reached and sui, f"events {sorted(set(events))}")
+    report(f"{tag}: SwiftUI hover in a background app", ok and reached and sui, f"events {sorted(set(events))}", swiftui_expected(engine, lv))
     check(f"{tag}: AppKit tracking-area hover", ak, f"events {sorted(set(events))}")
     # A click on the probe's AppKit half lands there: Wind's windows stay click-through.
     go(px + pw // 4, y, tol=6); time.sleep(0.3)
@@ -131,6 +142,7 @@ def panel_case(tag, engine, lv):
 try:
     for engine, cursor in cases:
         W.set_config(engine=engine, cursor=cursor); time.sleep(1.0)
+        current["cursor"] = cursor
         for lv in (a.level, 1):
             tag = f"{engine}/{cursor} {lv:g}x"
             banner_case(tag, engine, lv)

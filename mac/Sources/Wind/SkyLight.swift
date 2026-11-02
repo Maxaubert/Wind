@@ -171,16 +171,30 @@ enum SkyLight {
 
     static func setCursorHidden(_ hide: Bool, force: Bool = false) {
         wantHidden = hide
-        if forceHidden { DrawZoom.shared.pointerHidden = hide; return }   // decides the drawn cursor only
+        if forceHidden {                                // decides the drawn cursor; the real one is transparent
+            DrawZoom.shared.pointerHidden = hide
+            if ClearCursor.shared.isActive { realHide(hide, force: force) }   // render: hidden too when Wind wants it (hideRealCursor)
+            return
+        }
         realHide(hide, force: force)
     }
 
-    /// Wind draws the cursor (render, Wind's cursor, Wind's selection): the real one stays shown with a
-    /// transparent image (ClearCursor), not hidden. Hiding it turns off SwiftUI hover in every app
-    /// (Notification Center's banners, 2026-11-02). Cheap to call every tick.
-    static func hideRealCursor() {
-        realHide(false)                                 // no hide count of Wind's own underneath
-        ClearCursor.shared.start()
+    /// Wind draws the cursor. Render (`clear`): the real one stays shown with a transparent image
+    /// (ClearCursor), not hidden: hiding it turns off SwiftUI hover in every app (Notification Center's
+    /// banners, 2026-11-02). Wind's cursor on macOS zoom keeps hiding it: a shown cursor, even a
+    /// transparent one, made Wind's cursor jump on the zoomed screen (cursor_truth: jumps over 3% in 9 of
+    /// 18 runs, twice, against 1 on main), so SwiftUI hover stays off there. Cheap to call every tick.
+    /// While Wind itself wants the cursor hidden (Inspect, caret tracking, the hide-cursor bind) it is
+    /// hidden in render too: nobody points then, and Inspect's crosshair, which moves by how far the
+    /// frozen pointer got each tick, moved 20-30% too far with the cursor shown (e2e_draw).
+    static func hideRealCursor(clear: Bool) {
+        if clear && !wantHidden {
+            realHide(false)                             // no hide count of Wind's own underneath
+        } else {
+            let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
+            realHide(true, force: !cursorHidden || shown)   // re-hidden if macOS showed it (Dock, app switch)
+        }
+        if clear { ClearCursor.shared.start() } else { ClearCursor.shared.stop() }
     }
 
     /// Wind's cursor off: the real cursor as Wind wants it.

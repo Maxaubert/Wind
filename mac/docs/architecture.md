@@ -332,8 +332,8 @@ With the view locked on the pointer, the real cursor still wobbles: the zoom sho
 centre, so the cursor sits `frac(pointer) * level` pixels off the screen centre and that changes
 every frame (owner: "zoom-pan still wobbles"). Measured as the per-frame change of the cursor's
 screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning or zooming.
-- Wind makes the real cursor transparent (as the draw engine does, see "The real cursor while Wind
-  draws its own") and draws the app's current one (pixel-compared when it changes, and every 0.1 s) in a click-through window at `pointer - exact centre + shown centre`:
+- Wind hides the real cursor and draws the current one (`NSCursor.currentSystem`, pixel-compared
+  every 0.1 s; render makes it transparent instead, see "The real cursor while Wind draws its own") in a click-through window at `pointer - exact centre + shown centre`:
   where the cursor would be if the zoom showed the exact centre. Following the pointer, the exact
   centre is the pointer itself, so the cursor stays on the screen centre: 0.00 by the same measure.
   Clicks still land at the real pointer, under one desktop point from the drawn hotspot.
@@ -698,6 +698,10 @@ mouse-moved hover (Terminal) keep working, so only some hover broke. The overlay
 click-through tag (`ignoresMouseEvents` sets tag bit 0x200, which WindowServer's tracking walk passes
 through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02-notification-hover-re.md,
 -repro.md).
+- Render only. Wind's cursor on macOS zoom keeps hiding it, so SwiftUI hover stays off there: a shown
+  cursor, transparent or not, made Wind's cursor jump on the zoomed screen (`cursor_truth.py`: jumps over
+  3% in 9 of 18 runs, twice, against 1 on main). While Wind itself wants the cursor hidden (Inspect, caret
+  tracking, the hide-cursor bind) render hides it too: Inspect's crosshair moved 20-30% too far otherwise.
 - `ClearCursor` keeps the real cursor shown with a transparent 7x5 image set from the background
   (`SetsCursorInBackground`). Apps set their own cursor on shape changes; each set bumps
   `SLSCurrentCursorSeed` (a scoreboard read). A thread reads it every 2 ms; on a foreign change it keeps
@@ -709,7 +713,8 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
   region/drag locks (apps could no longer set shapes, so Wind would not know them).
 - State: `realCursorShown` (scoreboard), `realCursorClear`, `realCursorVisible` = shown and not clear.
-  `scripts/e2e_hover.py`: banner, SwiftUI and AppKit hover and a click-through, every engine and cursor.
+  `scripts/e2e_hover.py`: banner, SwiftUI and AppKit hover and a click-through, every engine and cursor
+  (zoom with Wind's cursor at 3x reported as KNOWN). Main failed it in render and zoom/wind at 3x.
 - **Capture**: the overlay window is excluded from its own stream (`excludingWindows`), so normal
   screenshots still show it (useful for testing). Frames come only when the screen changes;
   measured delivery 1-2 ms after WindowServer composites them, so content is about one frame later

@@ -47,14 +47,14 @@ final class WindCursor {
             SkyLight.forceHidden = on
             // Back on (after a screenshot mode, say): hide the real cursor and read the shape at once,
             // not at the next 0.1 s check (the crosshair stayed until the pointer moved, 2026-11-01).
-            if on { SkyLight.hideRealCursor(); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
+            if on { SkyLight.hideRealCursor(clear: false); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
         }
         guard on, let p else { panel?.orderOut(nil); drawnAt = nil; return }
         let panel = self.panel ?? make()
         let now = CACurrentMediaTime()
         // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
         // (one shared-memory byte), not every 0.1 s, so it never shows for more than a frame.
-        SkyLight.hideRealCursor()
+        SkyLight.hideRealCursor(clear: false)
         // The shape (arrow, I-beam, ...) changes rarely; an app's new cursor is drawn at once.
         if now - lastCheck > 0.1 || ClearCursor.shared.generation != shapeGen {
             lastCheck = now
