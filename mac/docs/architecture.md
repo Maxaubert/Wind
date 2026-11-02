@@ -771,7 +771,7 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
     If the space cannot be placed, prompts at or above the screen-saver level count as above it again.
   - **Handed over, render's capture stops** (`stopStream` in `checkPrompts`), and the hand back waits for
     a fresh frame from a restarted stream (~100 ms; the first frame calls `checkPrompts` again), so the
-    overlay shows the zoom at once. `handover_truth.py --tier 250` (the old space, alerts above it): the
+    overlay shows the zoom at once. Another such window coming up while it warms stops it again and is waited for instead (review 2026-11-02). `handover_truth.py --tier 250` (the old space, alerts above it): the
     handed-over mode now pans like macOS's zoom with the alert up (3x: jerks 8.9% vs 8.5%, skipped 5.1% vs
     5.7%; 6x 10.7% and 8.1%, before 14-37%). Switching the engine to Transform also stops render's idle
     capture at once (it ran a minute at 1x and made Transform choppy meanwhile).

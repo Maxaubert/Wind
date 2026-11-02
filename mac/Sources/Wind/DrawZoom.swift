@@ -316,6 +316,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             stopStream()
             DrawZoom.enabled = false
             onHandover?(true)
+        } else if prompt && DrawZoom.handedOver && (stream != nil || starting) {
+            // Something else came up while the hand back warmed the capture: stay with macOS's zoom
+            // for it, without the capture (review 2026-11-02), and wait for that window instead.
+            Log.info("draw engine: another window the capture cannot show is up; macOS zoom keeps showing it")
+            handoverWindow = blocking?.id
+            handoverAbove = blocking?.above == true ? blocking?.id : nil
+            idleStop?.cancel(); idleStop = nil
+            stopStream()
         } else if !prompt && DrawZoom.handedOver {
             // Back only with a fresh frame at hand, so the overlay shows the zoom at once (a cold start
             // takes ~100 ms; the first frame calls this again).

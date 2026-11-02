@@ -144,11 +144,11 @@ final class Magnifier {
             } else { self.lastWritten = nil; self.liveLevel = 1 }
             self.handTarget = nil; self.lastPtr = nil; self.wake()
         }
-        if c.engine != "draw" { DrawZoom.handedOver = false }
+        // Switched to Transform: also stop a capture a hand back was warming (it ran under macOS's zoom).
+        if c.engine != "draw" { DrawZoom.handedOver = false; DrawZoom.shared.stopCapture() }
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw
-            if !draw && !DrawZoom.handedOver { DrawZoom.shared.stopCapture() }
             lastWritten = nil
             Log.info("engine: \(draw ? "draw (capture and draw, experimental)" : "zoom (macOS)")")
         }
