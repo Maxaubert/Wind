@@ -4,8 +4,9 @@ import AppKit
 // like sit above ordinary windows). For scripts/e2e_draw.py: `fakeprompt <seconds> [noshare|alert]`;
 // noshare opts the window out of screen capture (as password managers do).
 // alert: a real system alert instead, shown by UserNotificationCenter (CFUserNotification, the way
-// permission prompts and other system alerts come up); it sits on a space above Wind's overlay and
-// cursor panel. It closes itself after <seconds> (its timeout), or on SIGTERM (cancelled).
+// permission prompts and other system alerts come up); it sits on a space above Wind's cursor panel on
+// Transform (render's overlay space is above it). It closes itself after <seconds> (its timeout), or on SIGTERM (cancelled), and prints
+// "clicked" when its OK button was pressed, else "closed".
 let args = CommandLine.arguments
 let secs = Double(args.dropFirst().first ?? "3") ?? 3
 if args.contains("alert") {
@@ -19,7 +20,9 @@ if args.contains("alert") {
     s.setEventHandler { CFUserNotificationCancel(n); exit(0) }
     s.resume()
     var r: CFOptionFlags = 0
-    _ = CFUserNotificationReceiveResponse(n, secs + 1, &r)
+    let got = CFUserNotificationReceiveResponse(n, secs + 1, &r)
+    // Which way it closed, for tests that click its button: "clicked" (OK) or "closed" (timed out).
+    print(got == 0 && r & 3 == CFOptionFlags(kCFUserNotificationDefaultResponse) ? "clicked" : "closed"); fflush(stdout)
     exit(0)
 }
 let app = NSApplication.shared

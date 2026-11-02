@@ -145,6 +145,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var lastTickAt = 0.0                      // the last updateCursor (one per zoom tick)
     private var pendingSurface: IOSurface?            // a captured frame for the next tick's commit
 
+    /// The capture stream is running (tests).
+    var capturing: Bool { stream != nil }
     /// A captured frame is at hand, so the overlay can show the zoom from its first frame.
     var hasFrame: Bool { latest != nil }
     /// The overlay shows a picture and Wind draws the cursor in it (the real one is render's).
@@ -296,6 +298,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if DrawZoom.handedOver, let id = handoverWindow, DrawZoom.windowOnScreen(id) { return }
         let blocking = takeover ? nil : DrawZoom.blockingWindow()
         let prompt = takeover || blocking != nil
+        if DrawZoom.handedOver && DrawZoom.failed {     // the capture failed meanwhile: macOS's zoom stays
+            DrawZoom.handedOver = false; handoverWindow = nil; handoverAbove = nil
+            return
+        }
         if prompt && !DrawZoom.handedOver {
             Log.info(takeover ? "draw engine: screenshot or colour-sampler mode; macOS zoom shows it"
                               : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay\(blocking?.above == true ? ", over Wind's cursor too" : "")); macOS zoom shows it")
@@ -303,10 +309,26 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             handoverWindow = blocking?.id
             handoverAbove = blocking?.above == true ? blocking?.id : nil
             hide()
+            // No capture while macOS's zoom shows the screen: a 4K stream running under it made the
+            // handed-over zoom choppy (with a system alert up, 28% of pan refreshes skipped and 32% of
+            // steps uneven, against 3% and 6% on plain Transform; owner 2026-11-02). Restarted for the
+            // hand back, which waits for its first frame.
+            stopStream()
             DrawZoom.enabled = false
             onHandover?(true)
         } else if !prompt && DrawZoom.handedOver {
-            Log.info("draw engine: it is gone; back to drawing")
+            // Back only with a fresh frame at hand, so the overlay shows the zoom at once (a cold start
+            // takes ~100 ms; the first frame calls this again).
+            if latest == nil {
+                if stream == nil && !starting {
+                    Log.info("draw engine: it is gone; capturing again before drawing")
+                    scheduleIdleStop()                  // lets startStream keep the stream while not drawing
+                    handbackSince = CACurrentMediaTime()
+                    startStream()
+                }
+                return
+            }
+            Log.info(String(format: "draw engine: it is gone; back to drawing (capture warm after %.0f ms)", (CACurrentMediaTime() - handbackSince) * 1000))
             DrawZoom.handedOver = false
             handoverWindow = nil; handoverAbove = nil
             SkyLight.resetCompositor()                  // leave macOS's zoom before drawing again
@@ -314,6 +336,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             onHandover?(false)
         }
     }
+
+    private var handbackSince = 0.0
 
     /// Switch the engine off for this run and let macOS's zoom take over.
     private func fail(_ why: String) {
@@ -323,6 +347,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         stopStream()
         DrawZoom.enabled = false
         onFailure?()
+    }
+
+    /// The engine was switched to macOS's zoom: stop the idle capture now, not after its minute at 1x
+    /// (a 4K stream running under macOS's zoom makes it choppy; see checkPrompts).
+    func stopCapture() {
+        guard !visible else { return }
+        idleStop?.cancel(); idleStop = nil
+        if stream != nil || starting { stopStream(); Log.info("draw engine: capture stopped (engine switched)") }
     }
 
     private func stopStream() {
@@ -542,7 +574,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 Log.info(String(format: "draw engine: capture warm %.0f ms after the zoom was asked for", (CACurrentMediaTime() - self.warmingSince) * 1000))
                 self.warmingSince = 0
             }
+            let first = self.latest == nil
             self.latest = surf
+            if first && DrawZoom.handedOver { self.checkPrompts() }   // the hand back waited for this frame
             guard self.visible else { return }
             self.frames += 1
             // While the zoom ticks, a captured frame goes up with the tick's own commit: committed

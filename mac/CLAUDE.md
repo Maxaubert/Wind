@@ -33,6 +33,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
 - `python3 scripts/pan_truth.py`: stutter while zoomed on the zoomed screen (pan, stop, pan again; zooming
   further); every movement start must be as smooth as its middle.
+- `python3 scripts/handover_truth.py`: panning with a system alert up on the zoomed screen (Transform, Render drawing
+  it, `--states zoomalert,handover --tier 250` the hand-over to macOS's zoom); run it after touching `DrawZoom` prompts or the capture.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
 - `python3 scripts/e2e_screenshot.py`: screenshot mode (area, window, Cmd+Shift+5) and the colour sampler while

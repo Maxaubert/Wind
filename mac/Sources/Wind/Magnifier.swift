@@ -148,6 +148,7 @@ final class Magnifier {
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw
+            if !draw && !DrawZoom.handedOver { DrawZoom.shared.stopCapture() }
             lastWritten = nil
             Log.info("engine: \(draw ? "draw (capture and draw, experimental)" : "zoom (macOS)")")
         }

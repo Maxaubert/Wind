@@ -45,6 +45,12 @@ enum SkyLight {
     private static var promptTier: UInt64 = 0
 
     /// Keep a window on top while a system prompt is up. True when it took effect.
+    /// The space sits just below the lock screen (ScreenLock - 1, 299 on macOS 27.2): above password prompts
+    /// (SecurityAgent, 200) and above the space of UserNotificationCenter's system alerts (permission and TCC
+    /// prompts, CFUserNotification), which is at that same level and was created at login, so a newer space
+    /// at the level stacks above it (window list order, measured 2026-11-02 with the alert shown before and
+    /// after the space; at 250 or 298 the alert stayed above). Render then draws the alert magnified instead
+    /// of handing over to macOS's zoom. If an alert still lists above the overlay, DrawZoom hands over as before.
     static func placeAbovePrompts(windowNumber: Int) -> Bool {
         guard let create = spaceCreate, let setAbs = spaceSetAbs, let getAbs = spaceGetAbs,
               let add = spaceAddWindows, let show = showSpaces, windowNumber > 0 else { return false }
@@ -53,7 +59,11 @@ enum SkyLight {
             return p.load(as: Int32.self)
         }
         let agent = const("SecurityAgent", 200), lock = const("ScreenLock", 300)
-        let level = min(agent + 50, lock - 1)
+        var level = lock - 1
+        #if WIND_TEST_CHANNEL
+        // Tests: the old tier (250, below system alerts) measures the hand-over to macOS's zoom with an alert up.
+        if let v = ProcessInfo.processInfo.environment["WIND_PROMPT_TIER"].flatMap({ Int32($0) }) { level = v }
+        #endif
         guard level > agent, level < 750 else { return false }
         if promptTier == 0 {
             promptTier = create(cid, 1, nil)
