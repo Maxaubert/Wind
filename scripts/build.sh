@@ -53,7 +53,8 @@ PLIST
 
 KC="$HOME/Library/Keychains/windmac-dev.keychain-db"
 if [[ -f "$KC" ]]; then
-  security unlock-keychain -p "$PW" "$KC" 2>/dev/null || true
+  # The keychain's password lives in the login keychain (item windmac-dev-keychain), never in the repo.
+  security unlock-keychain -p "$(security find-generic-password -s windmac-dev-keychain -w 2>/dev/null)" "$KC" 2>/dev/null || true
   codesign --force --options runtime --keychain "$KC" -s "Wind Mac Dev" "$APP"
 else
   codesign --force -s - "$APP"

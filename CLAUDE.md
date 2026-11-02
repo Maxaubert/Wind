@@ -8,7 +8,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `swift run wind-checks`: unit checks for `Sources/WindCore` (no XCTest/swift-testing in CLT).
 - `scripts/build.sh` builds `build/Wind.app`; `scripts/build.sh install` installs to /Applications
   and relaunches. Signs with the local "Wind Mac Dev" identity (keychain
-  `~/Library/Keychains/windmac-dev.keychain-db`, password in the login keychain) so the Accessibility grant survives rebuilds.
+  `~/Library/Keychains/windmac-dev.keychain-db`; its password is the login keychain item `windmac-dev-keychain`) so the
+  Accessibility grant survives rebuilds. Without that keychain it signs ad hoc.
 - `scripts/build.sh test`: `build/test/Wind.app` with the e2e command channel compiled in.
 - App icon: `assets/Wind.icon` (Icon Composer) compiled by `scripts/make_icon.sh` (needs Xcode) into the
   committed `assets/icon/` (Assets.car: no grey plate on macOS 26+; Wind.icns for older macOS).
