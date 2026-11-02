@@ -38,9 +38,18 @@ Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved. Ported 
 in `src/render/upscale_nis.h` (the render engine's NVIDIA Image Scaling) via agyild's mpv port.
 https://github.com/NVIDIAGameWorks/NVIDIAImageScaling
 
+## Shipped in Wind for Mac (Wind-mac-<version>.zip)
+
+### Svelte 5 (MIT)
+Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `mac/ui/dist`, which ships
+inside `Wind.app/Contents/Resources/ui`. https://github.com/sveltejs/svelte
+
+Wind for Mac links only Apple's system frameworks. This file and the licence ship inside the app
+(`Contents/Resources`).
+
 ## Build and test only, not shipped
 
-doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary.
+doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary. On the Mac, the test tool `mac/tools/vmouse` uses the Karabiner-DriverKit-VirtualHIDDevice headers (public domain), and is never shipped.
 
 ---
 

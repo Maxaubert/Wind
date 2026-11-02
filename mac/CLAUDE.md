@@ -10,6 +10,9 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   and relaunches. Signs with the local "Wind Mac Dev" identity (keychain
   `~/Library/Keychains/windmac-dev.keychain-db`; its password is the login keychain item `windmac-dev-keychain`) so the
   Accessibility grant survives rebuilds. Without that keychain it signs ad hoc.
+- `scripts/release.sh`: the public release zip (`dist/Wind-mac-<version>.zip`, ad hoc signed, licence inside, refuses a
+  build with the test channel). `.github/workflows/mac.yml` runs the checks on PRs and publishes `mac-v<VERSION>` on main
+  (never the repo's latest release). Bump `VERSION` in the PR, like the Windows version.
 - `scripts/build.sh test`: `build/test/Wind.app` with the e2e command channel compiled in.
 - App icon: `assets/Wind.icon` (Icon Composer) compiled by `scripts/make_icon.sh` (needs Xcode) into the
   committed `assets/icon/` (Assets.car: no grey plate on macOS 26+; Wind.icns for older macOS).

@@ -1,0 +1,74 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Wind for Mac (mac/): checks on every PR and push that touches it, and on main the release
+# mac-v<version> (mac/VERSION) with Wind-mac-<version>.zip. Never the repo's "latest" release, so
+# releases/latest/download/Wind-Setup-x64.exe keeps serving the Windows installer. Unsigned (ad hoc)
+# until there is an Apple Developer ID: the notes say how to open it.
+name: mac
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'mac/**'
+      - '!mac/**.md'
+      - '!mac/docs/**'
+      - 'LICENSE'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/workflows/mac.yml'
+  pull_request:
+    paths: [ 'mac/**', '.github/workflows/mac.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit checks
+        run: swift run wind-checks
+      - name: Settings UI (rules and Playwright, WebKit + Chromium)
+        run: |
+          cd ui && npm ci
+          npm run test:rules
+          npx playwright install --with-deps webkit chromium
+          npx playwright test
+      - name: Build the release zip
+        run: scripts/release.sh
+      - name: Publish or refresh mac-v<version>
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          v=$(cat VERSION)
+          tag="mac-v$v"
+          zip="dist/Wind-mac-$v.zip"
+          sha=$(shasum -a 256 "$zip" | cut -d' ' -f1)
+          cat > notes.md <<NOTES
+          Wind for Mac $v: fullscreen magnifier for macOS. Tested on macOS 27 on Apple silicon.
+
+          **Install:** unzip, move Wind.app to Applications, then right-click it and choose Open (it is not signed with an Apple Developer ID yet, so macOS asks once). If macOS still refuses, run \`xattr -dr com.apple.quarantine /Applications/Wind.app\`.
+          Wind then asks for Accessibility (needed to zoom), and the Render engine asks for Screen Recording.
+
+          SHA-256 of Wind-mac-$v.zip: \`$sha\` (commit ${GITHUB_SHA::7}).
+          NOTES
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file notes.md --latest=false
+            gh release upload "$tag" "$zip" --clobber
+          else
+            gh release create "$tag" "$zip" --target "$GITHUB_SHA" --title "Wind for Mac $v" --notes-file notes.md --latest=false
+          fi
