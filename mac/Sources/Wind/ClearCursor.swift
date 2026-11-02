@@ -96,14 +96,24 @@ final class ClearCursor: @unchecked Sendable {
         c.image.size == ClearCursor.clearSize && c.hotSpot == ClearCursor.clearHot
     }
 
-    private func setClear() {
+    /// Set the transparent cursor. From the poll thread (`session`) only while that session is still
+    /// the active one, checked under the lock held across the set: otherwise stop() could put the app's
+    /// cursor back between the check and the set, leaving the real cursor transparent at 1x.
+    @discardableResult
+    private func setClear(session s: Int? = nil) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if let s, !(active && session == s) { return false }
         clear.set()
-        let s = SkyLight.cursorSeed
-        lock.lock(); ours = s; lock.unlock()
+        let seed = SkyLight.cursorSeed
+        // An app's set can land between Wind's set and the seed read: then that seed is the app's, and
+        // taking it as Wind's would leave the app's cursor showing unzoomed until its next set. 0 never
+        // matches, so the poll handles it as an app's set.
+        ours = NSCursor.currentSystem.map(isClear) == true ? seed : 0
+        return true
     }
 
     private func poll(session s: Int) {
-        var last = SkyLight.cursorSeed
+        lock.lock(); var last = ours; lock.unlock()     // 0 (start's set raced with an app's): look at once
         while true {
             usleep(2000)
             lock.lock()
@@ -131,11 +141,8 @@ final class ClearCursor: @unchecked Sendable {
                 lock.lock(); ours = seed; lock.unlock()   // it is Wind's own transparent cursor
                 continue
             }
-            lock.lock(); let still = active && session == s; lock.unlock()
-            guard still else { return }
-            setClear()
-            lock.lock(); resetCount += 1; lock.unlock()
-            last = SkyLight.cursorSeed
+            guard setClear(session: s) else { return }
+            lock.lock(); resetCount += 1; last = ours; lock.unlock()
         }
     }
 }
