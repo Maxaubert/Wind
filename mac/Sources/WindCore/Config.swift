@@ -31,7 +31,7 @@ public struct Config: Codable, Equatable {
     public var zoomEaseOutMs = 115.0
     public var quickZoomDefault = 4.0
     public var smoothImages = false               // false = nearest (sharp pixels), true = smoothed
-    public var engine = "draw"                    // "draw" = Wind captures and draws (sub-pixel, issue #8, the default); "zoom" = macOS's zoom
+    public var engine = "zoom"                    // "zoom" = macOS's zoom (Transform, the default since 2026-11-02, owner); "draw" = Wind captures and draws (Render)
 
     // Mouse tracking.
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges
@@ -134,7 +134,7 @@ public struct Config: Codable, Equatable {
         warmthPct = min(100, max(0, warmthPct))
         dimPct = min(100, max(10, dimPct))
         logLevel = min(3, max(0, logLevel))
-        if engine != "zoom" { engine = "draw" }
+        if engine != "draw" { engine = "zoom" }
         if cursor != "wind" { cursor = "system" }
         if !Config.palettes.contains(uiPalette) { uiPalette = "grey" }
     }

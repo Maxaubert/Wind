@@ -4,7 +4,7 @@
   "keys": {
     "cursor": { "type": "string", "def": "wind", "fallback": "system" },
     "dimPct": { "type": "double", "def": "100", "min": 10, "max": 100 },
-    "engine": { "type": "string", "def": "draw", "fallback": "draw" },
+    "engine": { "type": "string", "def": "zoom", "fallback": "zoom" },
     "fullPointerSpeed": { "type": "bool", "def": "1" },
     "hideCursor": { "type": "list", "def": "" },
     "hidePointerWhileTracking": { "type": "bool", "def": "1" },

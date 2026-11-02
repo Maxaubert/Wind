@@ -17,7 +17,7 @@
   const group = groups.find((g) => g.id === q.get('group')) || groups[0];
   const calls = (window.__calls = []);
 
-  let values = $state({ ...schemaDefaults(), engine: q.get('engine') || 'draw' });
+  let values = $state({ ...schemaDefaults(), engine: q.get('engine') || 'zoom' });
   const visible = (r) => !r.showIf || (r.showIf.ne !== undefined ? String(values[r.showIf.key]) !== String(r.showIf.ne) : String(values[r.showIf.key]) === String(r.showIf.eq));
   const set = (key, val) => { values[key] = val; calls.push([key, val]); };
   const extra = {

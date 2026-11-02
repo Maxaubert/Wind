@@ -91,7 +91,7 @@ export const groups = [
           desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0' },
         // Switches live; Wind falls back to Transform (macOS's zoom) when it cannot capture the screen.
         { key: 'engine', type: 'select', label: 'Engine', keywords: ['renderer', 'render', 'transform', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
-          desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'Transform' }, def: 'draw' },
+          desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'Transform' }, def: 'zoom' },
       ] },
     ] },
 

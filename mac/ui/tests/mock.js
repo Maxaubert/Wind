@@ -27,10 +27,10 @@ export async function mockHost(page, opts = {}) {
     window.__refuse = refuse || [];
     window.__hostSend = (msg) => window.__windReceive && window.__windReceive(msg);
     const send = (msg) => queueMicrotask(() => window.__hostSend(msg));
-    if (init) window.__windInit = { values: { ...values }, runningModel: values.engine || 'draw', mac: { ...mac }, resume: !!resume };
+    if (init) window.__windInit = { values: { ...values }, runningModel: values.engine || 'zoom', mac: { ...mac }, resume: !!resume };
     window.__windMock = (msg) => {
       window.__msgs.push(msg);
-      if (msg.type === 'getConfig') send({ type: 'config', values: { ...window.__live }, runningModel: window.__live.engine || 'draw' });
+      if (msg.type === 'getConfig') send({ type: 'config', values: { ...window.__live }, runningModel: window.__live.engine || 'zoom' });
       else if (msg.type === 'setConfig') {
         if (window.__refuse.includes(msg.key)) send({ type: 'configWriteFailed', key: msg.key });
         else window.__live[msg.key] = msg.value;

@@ -14,7 +14,7 @@ const grant = (page, m) => page.evaluate((x) => window.__hostSend({ type: 'macSt
 const actions = async (page) => (await sent(page, 'macAction')).map((m) => m.action);
 
 test('steps on the render engine: welcome, Accessibility, Screen Recording, keys, done', async ({ page }) => {
-  await mockHost(page, { init: true, mac: NONE });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: NONE });
   await page.goto('/?mode=onboard');
   await expect(page.locator('h1')).toHaveText('Welcome to Wind');
   await expect(page.locator('.wizdots i')).toHaveCount(5);
@@ -65,7 +65,7 @@ test('on the macOS zoom engine there is no Screen Recording step', async ({ page
 });
 
 test('the macOS Zoom shortcuts step shows only when some were on, and turns them off', async ({ page }) => {
-  await mockHost(page, { init: true, mac: { ...ALL, zoomShortcuts: ['Scroll gesture'] } });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: { ...ALL, zoomShortcuts: ['Scroll gesture'] } });
   await page.goto('/?mode=onboard');
   await expect(page.locator('.wizdots i')).toHaveCount(6);
   for (let i = 0; i < 3; i++) await primary(page).click();
@@ -79,7 +79,7 @@ test('the macOS Zoom shortcuts step shows only when some were on, and turns them
 });
 
 test('Skip this step moves on without the permission; Back goes back', async ({ page }) => {
-  await mockHost(page, { init: true, mac: NONE });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: NONE });
   await page.goto('/?mode=onboard');
   await primary(page).click();
   await page.getByRole('button', { name: 'Skip this step' }).click();
@@ -89,7 +89,7 @@ test('Skip this step moves on without the permission; Back goes back', async ({ 
 });
 
 test('Skip setup writes onboarded and opens Settings', async ({ page }) => {
-  await mockHost(page, { init: true, mac: NONE });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: NONE });
   await page.goto('/?mode=onboard');
   await page.getByRole('button', { name: 'Skip setup' }).click();
   await expect.poll(() => live(page, 'onboarded')).toBe('1');
@@ -98,7 +98,7 @@ test('Skip setup writes onboarded and opens Settings', async ({ page }) => {
 });
 
 test('the zoom keys step shows the Mac binds and records a new one', async ({ page }) => {
-  await mockHost(page, { init: true, mac: ALL });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: ALL });
   await page.goto('/?mode=onboard');
   for (let i = 0; i < 3; i++) await primary(page).click();
   await expect(step(page)).toHaveAttribute('data-step', 'keys');
@@ -140,7 +140,7 @@ test('setup uses the chosen theme, and Wind grey on a first run', async ({ page 
 });
 
 test('the step is announced to screen readers', async ({ page }) => {
-  await mockHost(page, { init: true, mac: ALL });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: ALL });
   await page.goto('/?mode=onboard');
   await expect(page.locator('.sr-only[role=status]')).toHaveText(/Step 1 of 5: Welcome to Wind/);
   await primary(page).click();
@@ -150,17 +150,17 @@ test('the step is announced to screen readers', async ({ page }) => {
 // macOS's "Quit & Reopen" after the Screen Recording grant quits Wind mid-setup; the host reopens the
 // setup with resume, and it continues at the first step not done (owner 2026-11-01).
 test('a resumed setup starts at the first step not done yet', async ({ page }) => {
-  await mockHost(page, { init: true, mac: ALL, resume: true });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: ALL, resume: true });
   await page.goto('/?mode=onboard');
   await expect(step(page)).toHaveAttribute('data-step', 'keys');
 });
 test('a resumed setup still missing Screen Recording starts there', async ({ page }) => {
-  await mockHost(page, { init: true, mac: { ...NONE, accessibility: true }, resume: true });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: { ...NONE, accessibility: true }, resume: true });
   await page.goto('/?mode=onboard');
   await expect(step(page)).toHaveAttribute('data-step', 'screen');
 });
 test('a first setup starts at the welcome page even with every permission granted', async ({ page }) => {
-  await mockHost(page, { init: true, mac: ALL });
+  await mockHost(page, { init: true, values: { engine: 'draw' }, mac: ALL });
   await page.goto('/?mode=onboard');
   await expect(page.locator('h1')).toHaveText('Welcome to Wind');
 });

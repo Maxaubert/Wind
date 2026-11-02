@@ -114,7 +114,7 @@ test('the banner shows on every page while Accessibility is missing and opens it
 });
 
 test('Screen Recording matters only on the render engine', async ({ page }) => {
-  await mockHost(page, { mac: { screenRecording: false } });
+  await mockHost(page, { values: { engine: 'draw' }, mac: { screenRecording: false } });
   await open(page);
   await expect(page.locator('main .pb .h')).toHaveText('Wind needs Screen Recording');
   await expect(page.locator('main .pb')).toHaveAttribute('data-missing', 'screenRecording');
@@ -124,7 +124,7 @@ test('Screen Recording matters only on the render engine', async ({ page }) => {
 });
 
 test('two missing permissions: one banner naming both, the button opens Accessibility first', async ({ page }) => {
-  await mockHost(page, { mac: { accessibility: false, screenRecording: false } });
+  await mockHost(page, { values: { engine: 'draw' }, mac: { accessibility: false, screenRecording: false } });
   await open(page);
   await expect(page.locator('main .pb .h')).toHaveText('Wind needs two permissions');
   await expect(page.locator('main .pb .d')).toContainText('Accessibility and Screen Recording');
