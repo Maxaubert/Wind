@@ -142,6 +142,74 @@ check("draw engine: the handover is logged both ways, once", sum("macOS zoom sho
       f"{sum('macOS zoom shows it' in l for l in L)} handovers, {sum('back to drawing' in l for l in L)} returns")
 check("draw engine: drawing again after it is gone", a["drawn"] and a["sky"]["scale"] == 4, f"drawn {a['drawn']} {a['sky']}")
 
+# Hovering the Dock while zoomed (owner 2026-11-02: a tiny real cursor over the Dock). Entering it, macOS
+# showed the real cursor and refused Wind's re-hide while the pointer stayed in the Dock; Wind now holds
+# AlwaysOwnsCursor while it hides the cursor (research/wind-mac/re/2026-11-02-dock-cursor.md). Only hovers:
+# nothing in the Dock is clicked. The real cursor is sampled from the state (every ~50 ms) along the icons.
+def dock_list():
+    r = subprocess.run(["osascript", "-e", 'tell application "System Events" to tell process "Dock" to get {position, size} of list 1'],
+                       capture_output=True, text=True)
+    try:
+        x, y, w, h = [float(v) for v in r.stdout.replace(",", " ").split()]
+        return x, y, w, h
+    except ValueError: return None
+
+def dock_hover(label):
+    d = dock_list()
+    if not d or d[1] < 500:
+        check(f"{label}: Dock hover (Dock at the bottom)", False, f"Dock list {d}: needs the Dock at the bottom"); return
+    x, y, w, h = d
+    ctl("level 1"); time.sleep(0.4); ctl(f"warp {x + w / 3:.0f} {y - 40:.0f}"); time.sleep(0.3); ctl("level 3"); time.sleep(1.0)
+    for _ in range(20):                                         # down onto the icons, past the Dock's middle
+        if ctl("state")["pointer"][1] > y + h / 2: break
+        mv(0, 2)
+    time.sleep(0.4)
+    seen, inside = [], 0
+    for i in range(40):
+        if i % 4 == 0: mv(3 if i < 20 else -3, 0, 5, 8)        # along the icons, never clicking
+        s = ctl("state"); seen.append(s["realCursorVisible"]); inside += s["pointer"][1] > y
+    shown = sum(seen)
+    check(f"{label}: no real cursor over the Dock while zoomed", inside >= 36 and shown <= 1,
+          f"real cursor shown in {shown}/{len(seen)} samples, pointer in the Dock in {inside}")
+    check(f"{label}: Wind's cursor stays drawn over the Dock", s["cursorVisible"], f"visible {s['cursorVisible']}")
+    ctl("level 1"); time.sleep(0.6); s = ctl("state")                 # zoomed out with the pointer still in the Dock
+    check(f"{label}: zoomed out over the Dock, the real cursor shows", s["realCursorVisible"], f"real {s['realCursorVisible']}")
+    # Given back in order (shown or the app's cursor set while still owning it, then AlwaysOwnsCursor
+    # dropped), and not left transparent.
+    check(f"{label}: zoomed out, Wind no longer owns the cursor", not s.get("ownsCursor") and not s.get("realCursorClear"),
+          f"owns {s.get('ownsCursor')} clear {s.get('realCursorClear')}")
+    for _ in range(4): mv(0, -6)
+    time.sleep(0.4); s = ctl("state")
+    check(f"{label}: out of the Dock at 1x, the real cursor shows", s["realCursorVisible"], f"real {s['realCursorVisible']}")
+dock_hover("draw engine")
+
+
+# An app switch shows the real cursor again; with the pointer still Wind's display link slept, so it stayed
+# (a tiny real cursor for as long as the pointer did not move, Cmd+Tab 2026-11-02). Two plain windows of
+# Wind's own tools (tools/twin), switched with Cmd+Tab, the pointer still: sampled 0.4 s after each switch.
+TWIN = os.path.join(ROOT, "tools/twin")
+def app_switch(label):
+    if not os.path.exists(TWIN + "/TwinB.app"): subprocess.run([TWIN + "/build.sh"], check=True, stdout=subprocess.DEVNULL)
+    ps = []
+    for n, x in (("A", "300"), ("B", "900")):
+        ps.append(subprocess.Popen([f"{TWIN}/Twin{n}.app/Contents/MacOS/Twin", f"Twin{n}", x, "40"])); time.sleep(1.2)
+    ctl("level 1"); time.sleep(0.3); ctl("warp 1000 600"); time.sleep(0.3); ctl("level 3"); time.sleep(1.0)
+    fronts, shown = [], 0
+    for _ in range(4):
+        subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 48 using command down'])
+        time.sleep(0.4)
+        fronts.append(subprocess.run(["osascript", "-e", 'tell application "System Events" to get bundle identifier of first process whose frontmost is true'],
+                                     capture_output=True, text=True).stdout.strip()[-5:])
+        for _ in range(5): shown += ctl("state")["realCursorVisible"]; time.sleep(0.05)
+    switched = all(f.startswith("twin") for f in fronts) and len(set(fronts)) == 2
+    check(f"{label}: Cmd+Tab between test windows switched", switched, f"front {fronts}")
+    check(f"{label}: no real cursor after an app switch, pointer still", shown == 0, f"real cursor shown in {shown}/20 samples")
+    ctl("level 1"); time.sleep(0.5)
+    for p in ps: p.kill()
+    time.sleep(0.5)
+app_switch("draw engine")
+
+
 # A real password prompt (SecurityAgent): render stays on and the prompt is drawn magnified once. The prompt asks for nothing: it is closed
 # by ending the osascript that asked (nothing is typed or clicked in it).
 ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)
@@ -153,6 +221,11 @@ o.kill(); o.wait(); time.sleep(1.5); a = ctl("state")
 check("draw engine: render stays on with a password prompt up", b["drawn"] and d["drawn"] and a["drawn"], f"drawn {b['drawn']} {d['drawn']} {a['drawn']}")
 check("draw engine: the overlay is above the password prompt", "SecurityAgent" not in d["aboveOverlay"], f"above the overlay: {d['aboveOverlay']} (screenshot build/e2e-draw-prompt.png)")
 ctl("level 1"); time.sleep(0.5)
+
+# The same Dock hover on Transform (macOS zoom) with Wind's cursor, which also hides the real one.
+relaunch_with_channel(direct=True, extra={"engine": "zoom", "cursor": "wind", "logLevel": 2})
+dock_hover("Transform, Wind's cursor")
+app_switch("Transform, Wind's cursor")
 
 # Capture failing (no Screen Recording permission) falls back to macOS's zoom (simulated).
 os.environ["WIND_DRAW_FAIL"] = "1"

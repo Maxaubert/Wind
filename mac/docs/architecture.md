@@ -221,7 +221,7 @@ followed by its own switch.
   entering, and on leaving the pointer is placed on the crosshair, so it does not move then either.
 - The real pointer stays frozen and hidden. Hiding it from a background app needs the
   `SetsCursorInBackground` connection property, then `CGDisplayHideCursor`. Wind re-hides it if
-  something such as the Dock shows it again.
+  something such as the Dock shows it again (see "The real cursor over the Dock").
 - The crosshair moves by raw mouse counts (`RawMouse`), like Wind's Inspect on Windows. Re-placing
   the hidden pointer every tick makes pointer readback timing unreliable for measuring the hand.
 - While Inspect hides the pointer, game-lock detection is paused, so Wind's own hiding is never
@@ -332,8 +332,8 @@ With the view locked on the pointer, the real cursor still wobbles: the zoom sho
 centre, so the cursor sits `frac(pointer) * level` pixels off the screen centre and that changes
 every frame (owner: "zoom-pan still wobbles"). Measured as the per-frame change of the cursor's
 screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning or zooming.
-- Wind hides the real cursor (as the draw engine does) and draws the current one (`NSCursor.currentSystem`,
-  pixel-compared every 0.1 s) in a click-through window at `pointer - exact centre + shown centre`:
+- Wind hides the real cursor and draws the current one (`NSCursor.currentSystem`, pixel-compared
+  every 0.1 s; render makes it transparent instead, see "The real cursor while Wind draws its own") in a click-through window at `pointer - exact centre + shown centre`:
   where the cursor would be if the zoom showed the exact centre. Following the pointer, the exact
   centre is the pointer itself, so the cursor stays on the screen centre: 0.00 by the same measure.
   Clicks still land at the real pointer, under one desktop point from the drawn hotspot.
@@ -348,6 +348,32 @@ screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning o
   following the hand (a view shift drags the held pointer, sometimes a tick late).
 - `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
   game lock); `WIND_CURSOR=wind` runs any suite with it.
+
+### The real cursor over the Dock (owner report 2026-11-02)
+Zoomed (render, or Transform with Wind's cursor), hovering the Dock showed the real, unmagnified cursor
+("a tiny version of the cursor"). Entering the Dock, WindowServer shows the cursor again, and while the
+pointer is in the Dock it refused Wind's re-hide: `CGXCanConnectionSetCursor` is false there for a
+background app, even with `SetsCursorInBackground` (the hide only bumped Wind's own count). Measured:
+the real cursor showed for 89% of a Dock hover, one 8 s run.
+- While Wind owns the cursor image, hidden (Transform with Wind's cursor, Inspect) or shown transparent
+  (render, `ClearCursor`), it also sets the connection property `AlwaysOwnsCursor`
+  (WindowServer's `zoomwindow-owns-cursor`, what macOS's zoom window uses): WindowServer then accepts
+  Wind's hide, show and cursor set anywhere. Render needs it too: over the Dock the same gate refuses
+  the transparent set, and the Dock's own arrow would show unmagnified. `SkyLight.setOwnsCursor` /
+  `updateOwnsCursor`: set before the hide or the transparent set; dropped only once Wind neither hides
+  the cursor nor shows it transparent, and after the show (`realHide`) or the app's cursor put back
+  (`ClearCursor.stop`); the give-back must come first, or a show over the Dock is refused and the cursor
+  stays hidden at 1x (measured). State: `ownsCursor`. Without it for the transparent cursor, `e2e_draw`'s
+  render Dock check saw the real cursor in 40 of 40 samples (2026-11-02); with it 0.
+- The shown state is checked every frame (one byte of the shared scoreboard), not every 0.1 s: the
+  real cursor now shows for at most one frame at the Dock edge (0.7-6.8 ms measured, all engines).
+- An app switch (Cmd+Tab) also shows it. With the pointer still the display link sleeps, so the
+  re-hide waited for the next mouse move (about 0.7 s per switch in the test, as long as the pointer
+  stays still in real use). Wind wakes the link on `didActivateApplication`: 2-15 ms now.
+- `e2e_draw.py` hovers the Dock icons at 3x on render and on Transform with Wind's cursor (never
+  clicks there) and checks the real cursor stays invisible (hidden, or the system cursor reads as
+  Wind's transparent one), and shows at 1x with the pointer still in the Dock, `ownsCursor` dropped. It also Cmd+Tabs between two windows of `tools/twin` with the pointer still.
+  Research: research/wind-mac/re/2026-11-02-dock-cursor.md.
 
 ### Screenshot mode and the colour sampler (owner report 2026-11-01)
 "One big crosshair in the centre and a small free one; highlighting an area is bugged when zoomed."
@@ -665,9 +691,40 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
 - **1x pointer**: macOS is not zoomed, so the pointer moves at its own speed (measured 68.8 pt at
   4x and 10x, the 1x distance). Speed compensation, carries, read guards and the whole-point tricks
   are all off in this engine; placement is a plain warp (exact at 1x).
-- **Cursor**: the real cursor is hidden (`SkyLight.forceHidden`) and the current system cursor
-  (`NSCursor.currentSystem`: arrow, I-beam, ...) is drawn, scaled by the level, at the pointer.
+- **Cursor**: the real cursor is made transparent (`SkyLight.forceHidden`, `ClearCursor`) and the app's
+  current cursor (arrow, I-beam, ...) is drawn, scaled by the level, at the pointer.
   Wind's other hide/show calls only decide whether the drawn cursor shows.
+
+### The real cursor while Wind draws its own: transparent, not hidden (2026-11-02)
+Owner: notification banners showed no hover (no close button) while zoomed, other hover did.
+Notification Center's banners are SwiftUI `onHover`, and SwiftUI ignores hover while
+`+[NSCursor _isHidden]` (= `!SLCursorIsVisible()`, the scoreboard's hide-count and obscured bytes) is
+true: one process hiding the cursor turns SwiftUI hover off in every app. AppKit tracking areas and
+mouse-moved hover (Terminal) keep working, so only some hover broke. The overlay, its level, its
+click-through tag (`ignoresMouseEvents` sets tag bit 0x200, which WindowServer's tracking walk passes
+through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02-notification-hover-re.md,
+-repro.md).
+- Render only. Wind's cursor on macOS zoom keeps hiding it, so SwiftUI hover stays off there: a shown
+  cursor, transparent or not, made Wind's cursor jump on the zoomed screen (`cursor_truth.py`: jumps over
+  3% in 9 of 18 runs, twice, against 1 on main). While Wind itself wants the cursor hidden (Inspect, caret
+  tracking, the hide-cursor bind) render hides it too: Inspect's crosshair moved 20-30% too far otherwise.
+- `ClearCursor` keeps the real cursor shown with a transparent 7x5 image set from the background
+  (`SetsCursorInBackground`). Apps set their own cursor on shape changes; each set bumps
+  `SLSCurrentCursorSeed` (a scoreboard read). A thread reads it every 2 ms; on a foreign change it keeps
+  the app's cursor (`NSCursor.currentSystem`) as the shape Wind draws and sets the transparent one again.
+  Measured against an app that sets a cursor on every mouse move: ~0.2 ms from its set to Wind's, its
+  cursor in none of ~580 captured frames.
+- Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
+  cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
+- Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
+  region/drag locks (apps could no longer set shapes, so Wind would not know them).
+- Over the Dock Wind's transparent set is refused unless Wind holds `AlwaysOwnsCursor` (see "The real
+  cursor over the Dock"); `ClearCursor.start` takes it, `stop` puts the app's cursor back first, then
+  `SkyLight.updateOwnsCursor` drops it unless Wind still hides the cursor.
+- State: `realCursorShown` (scoreboard), `realCursorClear` (ClearCursor active), `realCursorVisible` =
+  shown and the system cursor not reading as the transparent one (so a refused set counts as visible).
+  `scripts/e2e_hover.py`: banner, SwiftUI and AppKit hover and a click-through, every engine and cursor
+  (zoom with Wind's cursor at 3x reported as KNOWN). Main failed it in render and zoom/wind at 3x.
 - **Capture**: the overlay window is excluded from its own stream (`excludingWindows`), so normal
   screenshots still show it (useful for testing). Frames come only when the screen changes;
   measured delivery 1-2 ms after WindowServer composites them, so content is about one frame later

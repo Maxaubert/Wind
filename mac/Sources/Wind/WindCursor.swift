@@ -17,6 +17,7 @@ final class WindCursor {
     private let image = CALayer()
     private var lastCheck = 0.0
     private var key: Data?
+    private var shapeGen = -2                       // ClearCursor's shape counter last read
     private var hotSpot = CGPoint.zero
     private var size = CGSize(width: 1, height: 1)
     private var pendingShape: CGImage??
@@ -46,20 +47,23 @@ final class WindCursor {
             SkyLight.forceHidden = on
             // Back on (after a screenshot mode, say): hide the real cursor and read the shape at once,
             // not at the next 0.1 s check (the crosshair stayed until the pointer moved, 2026-11-01).
-            if on { SkyLight.hideRealCursor(); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
+            if on { SkyLight.hideRealCursor(clear: false); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
         }
         guard on, let p else { panel?.orderOut(nil); drawnAt = nil; return }
         let panel = self.panel ?? make()
         let now = CACurrentMediaTime()
-        if now - lastCheck > 0.1 {                      // the shape (arrow, I-beam, ...) changes rarely
+        // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
+        // (one shared-memory byte), not every 0.1 s, so it never shows for more than a frame.
+        SkyLight.hideRealCursor(clear: false)
+        // The shape (arrow, I-beam, ...) changes rarely; an app's new cursor is drawn at once.
+        if now - lastCheck > 0.1 || ClearCursor.shared.generation != shapeGen {
             lastCheck = now
-            SkyLight.hideRealCursor()                   // macOS can show it again (Dock, app switch)
             if WindCursor.probe {
                 if key == nil {
                     key = Data([1]); size = CGSize(width: 12, height: 12); hotSpot = CGPoint(x: 6, y: 6)
                     image.contents = nil; image.backgroundColor = CGColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
                 }
-            } else if let cur = NSCursor.currentSystem {
+            } else if let cur = currentShape() {
                 let img = cur.image
                 let k = img.tiffRepresentation          // same size and hotspot can be another cursor
                 if k != key {
@@ -85,6 +89,13 @@ final class WindCursor {
         place(p, panel: panel)
         if !panel.isVisible { panel.orderFrontRegardless() }
         commit()
+    }
+
+    /// The cursor to draw: the app's (ClearCursor keeps it while the real one is transparent).
+    private func currentShape() -> NSCursor? {
+        let (cur, gen) = ClearCursor.shared.shape()
+        shapeGen = gen
+        return cur
     }
 
     /// Move the drawn cursor only (it must be showing) and commit at once: called just before a

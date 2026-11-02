@@ -89,7 +89,7 @@ enum SkyLight {
         return realCursorVisible
     }
 
-    /// The real cursor, also while Wind draws its own (tests).
+    /// The real cursor shown by the hide count (it may still be Wind's transparent one: ClearCursor).
     static var realCursorVisible: Bool {
         if let s = scoreboard?(), let page = s.pointee { return page.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 }
         return cursorVisibleFn?(cid) ?? true
@@ -171,29 +171,85 @@ enum SkyLight {
 
     static func setCursorHidden(_ hide: Bool, force: Bool = false) {
         wantHidden = hide
-        if forceHidden { DrawZoom.shared.pointerHidden = hide; return }   // decides the drawn cursor only
+        if forceHidden {                                // decides the drawn cursor; the real one is transparent
+            DrawZoom.shared.pointerHidden = hide
+            if ClearCursor.shared.isActive { realHide(hide, force: force) }   // render: hidden too when Wind wants it (hideRealCursor)
+            return
+        }
         realHide(hide, force: force)
     }
 
-    /// Draw engine: the real cursor stays hidden while Wind draws its own; re-hidden if macOS showed it.
-    static func hideRealCursor() {
-        let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
-        realHide(true, force: !cursorHidden || shown)
+    /// Wind draws the cursor. Render (`clear`): the real one stays shown with a transparent image
+    /// (ClearCursor), not hidden: hiding it turns off SwiftUI hover in every app (Notification Center's
+    /// banners, 2026-11-02). Wind's cursor on macOS zoom keeps hiding it: a shown cursor, even a
+    /// transparent one, made Wind's cursor jump on the zoomed screen (cursor_truth: jumps over 3% in 9 of
+    /// 18 runs, twice, against 1 on main), so SwiftUI hover stays off there. Cheap to call every tick.
+    /// While Wind itself wants the cursor hidden (Inspect, caret tracking, the hide-cursor bind) it is
+    /// hidden in render too: nobody points then, and Inspect's crosshair, which moves by how far the
+    /// frozen pointer got each tick, moved 20-30% too far with the cursor shown (e2e_draw).
+    static func hideRealCursor(clear: Bool) {
+        if clear && !wantHidden {
+            realHide(false)                             // no hide count of Wind's own underneath
+        } else {
+            let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
+            realHide(true, force: !cursorHidden || shown)   // re-hidden if macOS showed it (Dock, app switch)
+        }
+        if clear { ClearCursor.shared.start() } else { ClearCursor.shared.stop() }
     }
 
-    /// Draw engine off: the real cursor as Wind wants it.
-    static func restoreWanted() { realHide(wantHidden) }
+    /// Wind's cursor off: the real cursor as Wind wants it.
+    static func restoreWanted() {
+        ClearCursor.shared.stop()
+        realHide(wantHidden)
+        updateOwnsCursor()                              // gives the cursor back once neither needs it
+    }
+
+    /// Let this background app set the system cursor (needed for any hide, show or set from Wind).
+    static func allowBackgroundCursor() {
+        _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+    }
+
+    /// Wind owns the cursor image while it hides the real cursor or shows it transparent (ClearCursor).
+    /// Over the Dock (a universal-owner connection) WindowServer refuses a background app's hide, show
+    /// and set (CGXCanConnectionSetCursor), even with SetsCursorInBackground: the re-hide failed there,
+    /// and the transparent cursor would be replaced by the Dock's arrow, unmagnified. AlwaysOwnsCursor
+    /// ("zoomwindow-owns-cursor", what macOS's zoom window uses) lets Wind's sets through, and with
+    /// SetsCursorInBackground it also stops the Dock's take of the cursor environment from force-showing
+    /// a hidden cursor. research/wind-mac/re/2026-11-02-dock-cursor.md
+    ///
+    /// Giving it back: the show or the app cursor's set first, while Wind still owns the cursor, then
+    /// the flag (cleared first, over the Dock the show was refused and the cursor stayed hidden at 1x,
+    /// measured). So `true` is set before Wind takes the cursor, and `false` only through
+    /// updateOwnsCursor() after the show (realHide) or the app's cursor (ClearCursor.stop). Main thread.
+    nonisolated(unsafe) private(set) static var ownsCursor = false
+    static func setOwnsCursor(_ own: Bool) {
+        if own == ownsCursor { return }
+        _ = setConnProp?(cid, cid, "AlwaysOwnsCursor" as CFString, own ? kCFBooleanTrue : kCFBooleanFalse)
+        ownsCursor = own
+    }
+    /// Keep the flag while Wind hides the cursor or shows it transparent; drop it once neither.
+    static func updateOwnsCursor() { setOwnsCursor(cursorHidden || ClearCursor.shared.isActive) }
+
+    private typealias SeedFn = @convention(c) () -> UInt32
+    private static let seedFn = sym("SLSCurrentCursorSeed", SeedFn.self)
+    /// Bumped by WindowServer whenever any process sets the cursor image (a scoreboard read, no message).
+    static var cursorSeed: UInt32 { seedFn?() ?? 0 }
 
     private static func realHide(_ hide: Bool, force: Bool = false) {
         if hide == cursorHidden && !force { return }
-        _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+        allowBackgroundCursor()
         if hide {
-            if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()) }   // re-hide after the Dock showed it
+            // The Dock showed the real cursor over its icons and Wind could not hide it again (owner
+            // 2026-11-02: a tiny real cursor over the zoomed Dock): owning the cursor lets the re-hide
+            // through and keeps the hide through the Dock's take (setOwnsCursor).
+            setOwnsCursor(true)
+            if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()); Log.verbose("real cursor shown again: re-hidden") }   // after something showed it
             CGDisplayHideCursor(CGMainDisplayID())
         } else {
-            CGDisplayShowCursor(CGMainDisplayID())
+            CGDisplayShowCursor(CGMainDisplayID())      // shown while still owning the cursor
         }
         cursorHidden = hide
+        if !hide { updateOwnsCursor() }                 // kept while ClearCursor shows it transparent
     }
 
     /// macOS's own zoom back to 1x, whichever engine is selected (draw engine handover).

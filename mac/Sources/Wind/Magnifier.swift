@@ -168,6 +168,14 @@ final class Magnifier {
         caret.onChange = { [weak self] in
             if let self, self.zoom.level > 1.0001 { self.wake() }
         }
+        // An app switch shows the real cursor again; with the pointer still the display link sleeps, so
+        // the per-frame re-hide waited for the next mouse move (Cmd+Tab: a tiny real cursor for as long
+        // as the pointer stayed still, 2026-11-02). Wake it: the next frames re-hide it.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            if let self, self.zoom.level > 1.0001 { self.wake() }
+        }
         if SkyLight.isZoomed { SkyLight.reset() }
         guard installTap() else { return false }
         // Wind's own cursor moves to match each view write just before it (carries and level writes

@@ -63,6 +63,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var idleStop: DispatchWorkItem?
     private var lastCursorCheck = 0.0
     private var cursorKey: Data?
+    private var cursorGen = -2                      // ClearCursor's shape counter last drawn
     private var cursorHotSpot = CGPoint.zero
     private var cursorSize = CGSize.zero
     private var observing = false
@@ -129,7 +130,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard !SkyLight.forceHidden else { return }
         pointerHidden = SkyLight.wantHidden             // carry Wind's own hide state over
         SkyLight.forceHidden = true
-        SkyLight.hideRealCursor()
+        SkyLight.hideRealCursor(clear: true)
         cursorTakenAt = CACurrentMediaTime()
     }
     private var cursorTakenAt = 0.0
@@ -320,7 +321,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
 
     /// The current system cursor's image and hotspot, if it changed.
     private func cursorShape() {
-        if let cur = NSCursor.currentSystem {
+        let (sys, gen) = ClearCursor.shared.shape()     // the app's cursor, not Wind's transparent one
+        cursorGen = gen
+        if let cur = sys {
             let img = cur.image
             // Same size and hotspot can still be another cursor (resize, badges): compare pixels.
             let key = img.tiffRepresentation
@@ -360,14 +363,17 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard visible, let screen = NSScreen.screens.first else { return }
         let now = CACurrentMediaTime()
         var shapeDue = false
+        // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
+        // (one shared-memory byte), so it shows for a frame at most (it stayed up to 0.1 s, 2026-11-02).
+        // Not in the 0.1 s after taking it: the scoreboard can still read shown then, and a forced
+        // show+hide right after the order-in blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
+        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor(clear: true) }
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
-            // macOS can show it again (Dock, app switch). Not in the 0.1 s after taking it: the
-            // scoreboard can still read shown then, and a forced show+hide right after the order-in
-            // blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
-            if now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
             shapeDue = true
         }
+        // An app set a new cursor (ClearCursor kept it): draw it this tick, not at the next 0.1 s check.
+        if SkyLight.forceHidden && ClearCursor.shared.generation != cursorGen { shapeDue = true }
         let W = screen.frame.width, H = screen.frame.height
         // Screen position of the pointer (top-left origin), then the layer frame (bottom-left).
         let sx = (p.x - center.x) * scale + W / 2, sy = (p.y - center.y) * scale + H / 2
