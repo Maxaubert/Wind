@@ -385,10 +385,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "focusedWindow": focusedWindowTitle(),
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
             "drawn": DrawZoom.shared.visible, "aboveOverlay": DrawZoom.ownersAboveOverlay(),
-            // Visible = what the owner sees: shown by the hide count and not Wind's transparent cursor.
+            // Visible = what the owner sees: shown by the hide count and the system cursor not Wind's
+            // transparent one (read back, so a set refused over the Dock shows up as visible).
             // Shown alone = what SwiftUI hover checks (it must stay true while Wind draws the cursor).
-            "realCursorVisible": SkyLight.realCursorVisible && !ClearCursor.shared.isActive,
+            "realCursorVisible": SkyLight.realCursorVisible && !ClearCursor.shared.systemIsClear,
             "realCursorShown": SkyLight.realCursorVisible, "realCursorClear": ClearCursor.shared.isActive,
+            "ownsCursor": SkyLight.ownsCursor,
             "clearCursorCounts": ClearCursor.shared.counts,
             "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],

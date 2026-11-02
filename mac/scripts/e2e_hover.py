@@ -149,8 +149,8 @@ try:
             panel_case(tag, engine, lv)
         ctl("level 1"); time.sleep(0.6)
         s = ctl("state")
-        check(f"{engine}/{cursor}: at 1x the real cursor is back (not transparent)", s.get("realCursorVisible") and not s.get("realCursorClear"),
-              f"visible {s.get('realCursorVisible')} clear {s.get('realCursorClear')}")
+        check(f"{engine}/{cursor}: at 1x the real cursor is back (not transparent)", s.get("realCursorVisible") and not s.get("realCursorClear") and not s.get("ownsCursor"),
+              f"visible {s.get('realCursorVisible')} clear {s.get('realCursorClear')} owns {s.get('ownsCursor')}")
 finally:
     ctl("level 1")
     pp.terminate()

@@ -174,6 +174,10 @@ def dock_hover(label):
     check(f"{label}: Wind's cursor stays drawn over the Dock", s["cursorVisible"], f"visible {s['cursorVisible']}")
     ctl("level 1"); time.sleep(0.6); s = ctl("state")                 # zoomed out with the pointer still in the Dock
     check(f"{label}: zoomed out over the Dock, the real cursor shows", s["realCursorVisible"], f"real {s['realCursorVisible']}")
+    # Given back in order (shown or the app's cursor set while still owning it, then AlwaysOwnsCursor
+    # dropped), and not left transparent.
+    check(f"{label}: zoomed out, Wind no longer owns the cursor", not s.get("ownsCursor") and not s.get("realCursorClear"),
+          f"owns {s.get('ownsCursor')} clear {s.get('realCursorClear')}")
     for _ in range(4): mv(0, -6)
     time.sleep(0.4); s = ctl("state")
     check(f"{label}: out of the Dock at 1x, the real cursor shows", s["realCursorVisible"], f"real {s['realCursorVisible']}")

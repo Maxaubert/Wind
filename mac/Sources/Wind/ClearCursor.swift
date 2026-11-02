@@ -63,6 +63,7 @@ final class ClearCursor: @unchecked Sendable {
         if active { beat = CACurrentMediaTime(); lock.unlock(); return }
         lock.unlock()
         SkyLight.allowBackgroundCursor()
+        SkyLight.setOwnsCursor(true)                    // over the Dock Wind's sets are refused otherwise
         let first = NSCursor.currentSystem
         lock.lock()
         active = true; stalled = false; session += 1
@@ -89,8 +90,12 @@ final class ClearCursor: @unchecked Sendable {
         let app = appCursor
         lock.unlock()
         beatTimer?.invalidate(); beatTimer = nil
-        (app ?? NSCursor.arrow).set()
+        (app ?? NSCursor.arrow).set()                   // while Wind still owns the cursor (over the Dock)
+        SkyLight.updateOwnsCursor()                     // then give it back, unless Wind still hides it
     }
+
+    /// The system cursor reads as Wind's transparent one (what the owner sees: tests).
+    var systemIsClear: Bool { NSCursor.currentSystem.map(isClear) ?? false }
 
     private func isClear(_ c: NSCursor) -> Bool {
         c.image.size == ClearCursor.clearSize && c.hotSpot == ClearCursor.clearHot

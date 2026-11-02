@@ -355,18 +355,24 @@ Zoomed (render, or Transform with Wind's cursor), hovering the Dock showed the r
 pointer is in the Dock it refused Wind's re-hide: `CGXCanConnectionSetCursor` is false there for a
 background app, even with `SetsCursorInBackground` (the hide only bumped Wind's own count). Measured:
 the real cursor showed for 89% of a Dock hover, one 8 s run.
-- While Wind hides the cursor it also sets the connection property `AlwaysOwnsCursor`
+- While Wind owns the cursor image, hidden (Transform with Wind's cursor, Inspect) or shown transparent
+  (render, `ClearCursor`), it also sets the connection property `AlwaysOwnsCursor`
   (WindowServer's `zoomwindow-owns-cursor`, what macOS's zoom window uses): WindowServer then accepts
-  Wind's hide and show anywhere. Cleared after the show; the show must come first, or a show over the
-  Dock is refused and the cursor stays hidden at 1x (measured).
+  Wind's hide, show and cursor set anywhere. Render needs it too: over the Dock the same gate refuses
+  the transparent set, and the Dock's own arrow would show unmagnified. `SkyLight.setOwnsCursor` /
+  `updateOwnsCursor`: set before the hide or the transparent set; dropped only once Wind neither hides
+  the cursor nor shows it transparent, and after the show (`realHide`) or the app's cursor put back
+  (`ClearCursor.stop`); the give-back must come first, or a show over the Dock is refused and the cursor
+  stays hidden at 1x (measured). State: `ownsCursor`. Without it for the transparent cursor, `e2e_draw`'s
+  render Dock check saw the real cursor in 40 of 40 samples (2026-11-02); with it 0.
 - The shown state is checked every frame (one byte of the shared scoreboard), not every 0.1 s: the
   real cursor now shows for at most one frame at the Dock edge (0.7-6.8 ms measured, all engines).
 - An app switch (Cmd+Tab) also shows it. With the pointer still the display link sleeps, so the
   re-hide waited for the next mouse move (about 0.7 s per switch in the test, as long as the pointer
   stays still in real use). Wind wakes the link on `didActivateApplication`: 2-15 ms now.
 - `e2e_draw.py` hovers the Dock icons at 3x on render and on Transform with Wind's cursor (never
-  clicks there) and checks the real cursor stays hidden, and shows at 1x with the pointer still in the
-  Dock. It also Cmd+Tabs between two windows of `tools/twin` with the pointer still.
+  clicks there) and checks the real cursor stays invisible (hidden, or the system cursor reads as
+  Wind's transparent one), and shows at 1x with the pointer still in the Dock, `ownsCursor` dropped. It also Cmd+Tabs between two windows of `tools/twin` with the pointer still.
   Research: research/wind-mac/re/2026-11-02-dock-cursor.md.
 
 ### Screenshot mode and the colour sampler (owner report 2026-11-01)
@@ -712,7 +718,11 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
   region/drag locks (apps could no longer set shapes, so Wind would not know them).
-- State: `realCursorShown` (scoreboard), `realCursorClear`, `realCursorVisible` = shown and not clear.
+- Over the Dock Wind's transparent set is refused unless Wind holds `AlwaysOwnsCursor` (see "The real
+  cursor over the Dock"); `ClearCursor.start` takes it, `stop` puts the app's cursor back first, then
+  `SkyLight.updateOwnsCursor` drops it unless Wind still hides the cursor.
+- State: `realCursorShown` (scoreboard), `realCursorClear` (ClearCursor active), `realCursorVisible` =
+  shown and the system cursor not reading as the transparent one (so a refused set counts as visible).
   `scripts/e2e_hover.py`: banner, SwiftUI and AppKit hover and a click-through, every engine and cursor
   (zoom with Wind's cursor at 3x reported as KNOWN). Main failed it in render and zoom/wind at 3x.
 - **Capture**: the overlay window is excluded from its own stream (`excludingWindows`), so normal
