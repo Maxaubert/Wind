@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Draw engine (engine = "draw", issue #8) end-to-end checks with real HID motion (tools/vmouse).
 The test build is started from this shell so it inherits the terminal's Screen Recording
 permission. The screen visibly zooms while it runs; the display must be awake."""

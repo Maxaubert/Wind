@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """End-to-end checks of the Settings window (the ui/ page in a WKWebView) in the test build.
 Drives the real page through the test-only channel command `settings js <base64>` (runs JavaScript in
 the page, result in js.json), then checks config.json and the config Wind runs on (state.json).

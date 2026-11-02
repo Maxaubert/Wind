@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Pointer end-to-end checks with REAL HID motion (tools/vmouse, Karabiner's virtual mouse).
 Measures how far the pointer travels per hand movement at 1x and zoomed, with and without
 keepPointerSpeed and fullPointerSpeed (the HID gain), and sweeps across the screen looking for snaps. Needs sudo (vmouse) and

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Stress explorer: drives the real-HID virtual mouse (tools/vmouse) through corners, edges, moves
 along edges, edge -> centre and centre -> edge, at several zoom levels and while zooming in and out,
 then reads Wind's per-frame log and flags what a person would see as a bug:

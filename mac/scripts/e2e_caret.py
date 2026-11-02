@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Caret-following end-to-end checks with REAL key presses (tools/vmouse, Karabiner's virtual
 keyboard) in several apps. For each app: open a dedicated window, zoom in with the pointer parked
 far away, type, and check after every key that the view follows the caret (spaces included).

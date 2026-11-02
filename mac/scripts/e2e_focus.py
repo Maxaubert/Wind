@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Keyboard focus tracking end to end (config trackFocus; caret following off so focus is tested on
 its own). A throwaway Chrome instance shows a page with four buttons in its corners; Tab moves
 the focus from button to button, and after each Tab the view must show the newly focused one.

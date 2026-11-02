@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """macOS screenshot mode while zoomed, as the owner SEES it, measured frame by frame on the zoomed screen
 (owner 2026-11-01: "the screenshot cursor works now, but it's both wobbly while just in free mode, and when
 you select an area it becomes very choppy and lagging, like you drag an area but the area needs time to

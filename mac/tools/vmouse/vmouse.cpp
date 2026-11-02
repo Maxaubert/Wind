@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // vmouse: real HID pointer motion through Karabiner's virtual HID device (test harness for Wind).
 // Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "wheel <notches> <count> <interval_ms>",
 // "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab), "button <n> down|up", "ctrl down|up",

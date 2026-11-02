@@ -27,12 +27,13 @@ $Marker = 'SPDX-License-Identifier: LicenseRef-Wind-Proprietary'
 $Extensions = '.cpp', '.h', '.rc', '.svelte', '.js', '.mjs', '.cjs', '.ts', '.css', '.ps1', '.py',
               '.nsi', '.nsh', '.bat'
 $ExcludedPrefixes = 'third_party/', 'docs/', 'tests/fixtures/', 'build/', 'dist/', 'ui/dist/',
-                    'node_modules/', 'ui/node_modules/'
+                    'node_modules/', 'ui/node_modules/', 'mac/docs/', 'mac/build/', 'mac/ui/dist/', 'mac/ui/node_modules/'
 # Ports of third-party code that keep the upstream copyright (THIRD-PARTY-NOTICES.md).
 $ThirdParty = 'src/render/upscale_nis.h', 'src/render/upscale_shaders.h'
 # Written by a generator; the header would be lost on the next regeneration.
 $Generated = 'src/tray_app/flyout_palettes.h', 'ui/src/design/themes.css',
-             'ui/src/design/themes.js', 'installer/over.nsh'
+             'ui/src/design/themes.js', 'installer/over.nsh',
+             'mac/ui/src/design/themes.css', 'mac/ui/src/design/themes.js'
 
 function Test-Covered([string]$path) {
     foreach ($p in $ExcludedPrefixes) { if ($path.StartsWith($p)) { return $false } }

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """The Settings window with REAL input (owner 2026-11-01): a select opens Wind's list below the button,
 not macOS's native menu over it, and after a slider is dragged the arrow keys step it by its increment.
 Synthetic page events cannot show either (the native menu and WebKit's click focus only follow real

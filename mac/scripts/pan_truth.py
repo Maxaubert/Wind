@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Frame stutter while ZOOMED, as the owner sees it (owner 2026-11-01: a stutter going from 1x to zoomed
 is fine, but once zoomed, zooming further or panning again after a stop must not stutter; it should be
 warm). tools/viewcap captures the zoomed screen

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Edge shake as the owner SEES it: the view on the zoomed screen while the view is pinned to a screen
 edge and the pointer moves back toward the centre (owner report 2026-10-31: "the window wants to start
 moving right immediately but isn't allowed"). tools/viewcap captures the zoomed screen and per frame a

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Print the main display's transfer formula maxima (red green blue) - used by e2e.py to check the colour filter."""
 import ctypes as C
 CG = C.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")

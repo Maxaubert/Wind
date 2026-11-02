@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Wind's own cursor and Inspect's crosshair as the owner SEES them: measured on the zoomed screen.
 
 The log and Wind's state only show Wind's model; they cannot see whether the cursor move and the

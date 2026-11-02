@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Zoom-step coarseness on the RENDER (draw) engine, measured on the zoomed screen.
 
 Holds zoom-in, zoom-out and a few ctrl+wheel notches with the pointer at the screen centre, records

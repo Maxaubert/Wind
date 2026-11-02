@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Cursor wobble from Wind's own log (logLevel 2), e.g. after the owner used it for real:
     python3 scripts/wobble_from_log.py [HH:MM:SS]   (frames from that time on, today's wind.log)
 Wobble = per-frame change of the cursor's offset on screen from the shown view, divided by the

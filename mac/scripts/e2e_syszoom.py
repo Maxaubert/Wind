@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """macOS Zoom clash checks (issue #1) with real HID input. Switches macOS Zoom's shortcuts on
 through System Settings, engages macOS Zoom with a real Ctrl+scroll, and checks that Wind detects
 it, that zooming in with Wind releases it, and that Wind's fix leaves every shortcut off. Opens System Settings; needs

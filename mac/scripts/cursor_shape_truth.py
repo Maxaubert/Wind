@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """The drawn cursor (render, or Wind's cursor on Transform with --engine zoom) never shows big for a frame when its shape changes (owner report
 2026-10-31: moving across a window's edge, I-beam -> scroll bar -> resize cursor, the cursor showed big
 for about a frame at each change). The test build draws the cursor as a magenta silhouette

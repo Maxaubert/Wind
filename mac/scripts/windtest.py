@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Shared helpers for Wind's end-to-end scripts: relaunch Wind with its test command channel,
 send commands, read state, edit the config, and record checks."""
 import atexit, json, os, subprocess, sys, time

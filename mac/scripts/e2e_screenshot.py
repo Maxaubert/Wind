@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """macOS screenshot mode and the colour sampler while Wind is zoomed, as the owner sees them (owner 2026-11-01:
 "one crosshair in the centre that's big and another small one that's free; highlighting an area is bugged
 when zoomed"). Both engines at 3x with Wind's own cursor; the test build draws it as a magenta block

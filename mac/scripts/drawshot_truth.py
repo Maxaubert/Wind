@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Wind's own screenshot selection (WindShot) as the owner SEES it, frame by frame on the zoomed screen: the
 crosshair before the press, the box while dragging, pacing. The counterpart of scripts/screenshot_truth.py
 (macOS's own selection under zoom) with the same hand motion, so the numbers compare.

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """The zoom-in START on the render engine (engine = "draw") as the owner SEES it (owner report 2026-10-31:
 "a jump at the start, as if there's a stutter and some push back when starting up").
 

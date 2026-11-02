@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """End-to-end checks against the running, installed Wind (it must have the Accessibility grant).
 Drives it through the command channel: synthetic input goes through Wind's real event tap.
 The screen visibly zooms while this runs. Exit 0 = every check passed."""
