@@ -393,6 +393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "ownsCursor": SkyLight.ownsCursor,
             "clearCursorCounts": ClearCursor.shared.counts,
             "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
+            "cursorCovered": mag.cursorCovered ?? 0, "handedOver": DrawZoom.handedOver,
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
             "shot": shotState(),

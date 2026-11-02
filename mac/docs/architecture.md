@@ -348,6 +348,8 @@ screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning o
   following the hand (a view shift drags the held pointer, sometimes a tick late).
 - `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
   game lock); `WIND_CURSOR=wind` runs any suite with it.
+- A window of another process stacked above its panel (a system alert, a password prompt) would cover it:
+  the real cursor shows instead until that window closes (`Magnifier.cursorCovered`, see "System prompts").
 
 ### The real cursor over the Dock (owner report 2026-11-02)
 Zoomed (render, or Transform with Wind's cursor), hovering the Dock showed the real, unmagnified cursor
@@ -755,6 +757,23 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
     UserNotificationCenter (layer 8) sit above the overlay's space; judged by level once the overlay was
     hidden, they looked gone and the engine flipped 4 times a second (2026-11-01).
   - Both ways the other engine shows the same view at once.
+  - **The cursor during and after a prompt** (owner 2026-11-02, a permission prompt on render with Wind's
+    cursor). (1) Handed over, Transform drew Wind's cursor in its panel (level screenSaver+1), and the alert
+    sits on a space above every app window (UserNotificationCenter, layer 8, listed first; TCC prompts are
+    such alerts, measured with a throwaway app): the cursor went BEHIND the prompt. Now a handover for a
+    window above the overlay sets `Magnifier.cursorCovered`, and on macOS's zoom a 0.25 s check
+    (`WindCursor.windowAbove`: a big window of another process listed before Wind's cursor panel; SecurityAgent
+    too; the window list is read off the main thread, on it `cursor_truth` showed longmed and hold at 4x over
+    3% jumps) sets it: Wind's cursor goes, the real one shows, magnified by Transform and above the prompt, until
+    that same window closes. (2) Back to render, `DrawZoom.takeCursor` returned early because Wind's cursor
+    still held the shared `SkyLight.forceHidden`; Wind's cursor going off a tick later cleared it and showed
+    the real cursor: the drawn cursor plus a tiny real one until a zoom-out. Now Wind's cursor goes off before
+    the handback, leaves the cursor alone while render draws it (`DrawZoom.drawsCursor`), and render re-takes
+    it on any tick it finds `forceHidden` cleared. Measured with `fakeprompt alert` at 3x, the pointer still:
+    before, no cursor on the alert (Wind's under it, the real one hidden) and after it the real cursor opaque
+    (`realCursorVisible`, not `realCursorClear`) in every sample until 1x; after, the real cursor magnified on
+    the alert (zoomed-screen capture) and 0 of 6 samples with the real cursor once it closed. `e2e_draw.py`
+    checks it on render (system and Wind's cursor) and Transform with Wind's cursor (alert and password prompt).
   - Dead ends: the cursor plane (a screen-sized cursor image) is above prompts but changes a frame late;
     a CGDisplayCapture shield and a displayable CAContext stay under them.
 - **Drawn cursor shape changes** (owner 2026-10-31: the cursor showed big for a moment at every shape

@@ -44,10 +44,12 @@ final class WindCursor {
     func show(at p: CGPoint?, on: Bool) {
         if on != active {
             active = on
-            SkyLight.forceHidden = on
             // Back on (after a screenshot mode, say): hide the real cursor and read the shape at once,
             // not at the next 0.1 s check (the crosshair stayed until the pointer moved, 2026-11-01).
-            if on { SkyLight.hideRealCursor(clear: false); lastCheck = 0; key = nil } else { SkyLight.restoreWanted() }
+            if on { SkyLight.forceHidden = true; SkyLight.hideRealCursor(clear: false); lastCheck = 0; key = nil }
+            // Off while render already draws the cursor (back from a handover): the real cursor is
+            // render's now; giving it back here left it showing next to the drawn one (owner 2026-11-02).
+            else if !DrawZoom.shared.drawsCursor { SkyLight.forceHidden = false; SkyLight.restoreWanted() }
         }
         guard on, let p else { panel?.orderOut(nil); drawnAt = nil; return }
         let panel = self.panel ?? make()
@@ -147,6 +149,31 @@ final class WindCursor {
         let q = NSPoint(x: p.x, y: primaryH - p.y)
         let s = NSScreen.screens.first { NSMouseInRect(q, $0.frame, false) } ?? NSScreen.screens.first
         return s?.frame ?? NSRect(x: 0, y: 0, width: 1, height: 1)
+    }
+
+    /// A window of another process stacked above the cursor panel (a system prompt: UserNotificationCenter
+    /// alerts and permission prompts sit on a space above every app window, SecurityAgent above any level):
+    /// Wind's cursor would be drawn under it. Its window number and owner, or nil (also while the panel is not shown).
+    /// The panel's window number while it is shown (main thread), for `windowAbove`.
+    var shownWindow: Int? { panel.flatMap { $0.isVisible ? $0.windowNumber : nil } }
+
+    /// Any thread (the window list costs a few ms: off the main thread, it delayed zoom ticks).
+    static func windowAbove(_ mine: Int) -> (id: Int, owner: String)? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        let me = ProcessInfo.processInfo.processIdentifier
+        var found: (id: Int, owner: String)?
+        for w in list {                                 // front to back
+            let id = w[kCGWindowNumber as String] as? Int ?? 0
+            if id == mine { return found }
+            if found != nil || (w[kCGWindowOwnerPID as String] as? Int32) == me { continue }
+            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            let alpha = w[kCGWindowAlpha as String] as? Double ?? 1
+            let b = w[kCGWindowBounds as String] as? [String: Double] ?? [:]
+            // Prompts are big; WindowServer's own windows (cursor, the recording indicator) are not prompts.
+            if alpha < 0.05 || (b["Width"] ?? 0) <= 60 || (b["Height"] ?? 0) <= 40 || owner == "Window Server" { continue }
+            found = (id, owner)
+        }
+        return nil                                      // the panel is not on screen
     }
 
     /// The cursor image as WindowServer has it (tests): top-left origin desktop bounds of the image,

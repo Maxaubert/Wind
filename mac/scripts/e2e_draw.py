@@ -123,7 +123,7 @@ ctl("level 1"); time.sleep(0.4)
 # once and clicks land on them where drawn (tools/fakeprompt stands in at layer 1500). A window that
 # opts out of capture (noshare) would be hidden: the zoom goes to macOS until it is gone.
 PROMPT = os.path.join(ROOT, "tools/fakeprompt/fakeprompt")
-subprocess.run([os.path.join(ROOT, "tools/fakeprompt/build.sh")], check=True, stdout=subprocess.DEVNULL)
+subprocess.run([os.path.join(ROOT, "tools/fakeprompt/build.sh")], check=True, stdout=subprocess.DEVNULL)   # also its alert mode
 def prompt_run(*args):
     ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 4"); time.sleep(1.0)
     n0 = nlines(); before = ctl("state")
@@ -141,6 +141,29 @@ check("draw engine: the handover keeps the view and the pointer", d["sky"]["cent
 check("draw engine: the handover is logged both ways, once", sum("macOS zoom shows it" in l for l in L) == 1 and sum("back to drawing" in l for l in L) == 1,
       f"{sum('macOS zoom shows it' in l for l in L)} handovers, {sum('back to drawing' in l for l in L)} returns")
 check("draw engine: drawing again after it is gone", a["drawn"] and a["sky"]["scale"] == 4, f"drawn {a['drawn']} {a['sky']}")
+
+# A system alert above Wind's cursor (owner 2026-11-02, a permission prompt on render with Wind's cursor):
+# 1. Wind's cursor was drawn UNDER it (UserNotificationCenter alerts sit on a space above every app window,
+#    Wind's overlay and cursor panel included); now the real cursor shows, magnified by macOS's zoom, until
+#    it closes. 2. After it closed, render drew its cursor AND left the real one opaque (a tiny unmagnified
+#    cursor) until a zoom-out. tools/fakeprompt's alert is a real CFUserNotification of its own that closes
+#    itself; nothing is clicked or typed. The pointer stays still: the timers alone must do both changes.
+def prompt_cursor(label, engine):
+    ctl("level 1"); time.sleep(0.4); ctl("warp 960 300"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)
+    p = subprocess.Popen([PROMPT, "3", "alert"]); time.sleep(1.2)
+    d = ctl("state")
+    check(f"{label}: an alert above Wind's cursor shows the real cursor (macOS zoom magnifies it)",
+          d["cursorCovered"] and d["realCursorVisible"] and not d["windCursor"] and d["sky"]["scale"] == 3,
+          f"covered {d['cursorCovered']} real {d['realCursorVisible']} wind cursor {d['windCursor']} drawn {d['drawn']} sky {d['sky']}")
+    p.wait(); time.sleep(1.0)
+    seen = []
+    for _ in range(6): a = ctl("state"); seen.append(a["realCursorVisible"]); time.sleep(0.1)
+    drawn = a["drawn"] and a["realCursorClear"] if engine == "draw" else bool(a["windCursor"])
+    check(f"{label}: after the alert, no real cursor next to Wind's", not any(seen) and drawn and not a["cursorCovered"],
+          f"real cursor in {sum(seen)}/6 samples, drawn {a['drawn']} clear {a['realCursorClear']} wind cursor {a['windCursor']} covered {a['cursorCovered']}")
+    ctl("level 1"); time.sleep(0.6); a = ctl("state")
+    check(f"{label}: at 1x after the alert, the real cursor is back", a["realCursorVisible"] and not a["realCursorClear"] and not a["ownsCursor"],
+          f"visible {a['realCursorVisible']} clear {a['realCursorClear']} owns {a['ownsCursor']}")
 
 # Hovering the Dock while zoomed (owner 2026-11-02: a tiny real cursor over the Dock). Entering it, macOS
 # showed the real cursor and refused Wind's re-hide while the pointer stayed in the Dock; Wind now holds
@@ -221,11 +244,27 @@ o.kill(); o.wait(); time.sleep(1.5); a = ctl("state")
 check("draw engine: render stays on with a password prompt up", b["drawn"] and d["drawn"] and a["drawn"], f"drawn {b['drawn']} {d['drawn']} {a['drawn']}")
 check("draw engine: the overlay is above the password prompt", "SecurityAgent" not in d["aboveOverlay"], f"above the overlay: {d['aboveOverlay']} (screenshot build/e2e-draw-prompt.png)")
 ctl("level 1"); time.sleep(0.5)
+prompt_cursor("draw engine", "draw")
+
+# The owner's setup: render with Wind's cursor (macOS's zoom shows Wind's cursor during a handover).
+relaunch_with_channel(direct=True, extra={"engine": "draw", "cursor": "wind", "logLevel": 2})
+prompt_cursor("draw engine, Wind's cursor", "draw")
 
 # The same Dock hover on Transform (macOS zoom) with Wind's cursor, which also hides the real one.
 relaunch_with_channel(direct=True, extra={"engine": "zoom", "cursor": "wind", "logLevel": 2})
 dock_hover("Transform, Wind's cursor")
 app_switch("Transform, Wind's cursor")
+prompt_cursor("Transform, Wind's cursor", "zoom")
+# A password prompt (SecurityAgent) is stacked above any app window: on macOS's zoom it covered Wind's cursor.
+ctl("level 1"); time.sleep(0.4); ctl("warp 960 450"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)
+o = subprocess.Popen(["osascript", "-e", 'do shell script "true" with administrator privileges'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(2.0); d = ctl("state")
+o.kill(); o.wait(); time.sleep(1.5); a = ctl("state")
+check("Transform, Wind's cursor: a password prompt shows the real cursor", d["cursorCovered"] and d["realCursorVisible"] and not d["windCursor"],
+      f"covered {d['cursorCovered']} real {d['realCursorVisible']} wind cursor {d['windCursor']}")
+check("Transform, Wind's cursor: Wind's cursor again once it is gone", a["windCursor"] and not a["realCursorVisible"] and not a["cursorCovered"],
+      f"covered {a['cursorCovered']} real {a['realCursorVisible']} wind cursor {a['windCursor']}")
+ctl("level 1"); time.sleep(0.5)
 
 # Capture failing (no Screen Recording permission) falls back to macOS's zoom (simulated).
 os.environ["WIND_DRAW_FAIL"] = "1"

@@ -42,7 +42,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   Both point the owner's `location-screenshot`/`show-thumbnail` at build/ and restore them (never the Desktop).
 - `python3 scripts/e2e_hover.py`: hover in other apps while zoomed (a notification banner, SwiftUI and AppKit
   hover, click-through), every engine and cursor, plus the cursor given back at 1x; run it (and `e2e_draw.py`'s
-  Dock and app-switch checks) after touching how Wind hides the real cursor or `AlwaysOwnsCursor`.
+  Dock, app-switch and prompt checks) after touching how Wind hides the real cursor or `AlwaysOwnsCursor`.
 - `python3 scripts/cursor_truth.py`: Wind's cursor and Inspect's crosshair measured on the ZOOMED screen
   (what the owner sees, frame by frame); run it after touching either or the write order.
 - `python3 scripts/screenshot_truth.py`: macOS screenshot mode on the ZOOMED screen (crosshair wobble, band lag, pacing); run it after touching the still view in screenshot mode.
