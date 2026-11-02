@@ -360,12 +360,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard visible, let screen = NSScreen.screens.first else { return }
         let now = CACurrentMediaTime()
         var shapeDue = false
+        // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
+        // (one shared-memory byte), so it shows for a frame at most (it stayed up to 0.1 s, 2026-11-02).
+        // Not in the 0.1 s after taking it: the scoreboard can still read shown then, and a forced
+        // show+hide right after the order-in blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
+        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
-            // macOS can show it again (Dock, app switch). Not in the 0.1 s after taking it: the
-            // scoreboard can still read shown then, and a forced show+hide right after the order-in
-            // blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
-            if now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
             shapeDue = true
         }
         let W = screen.frame.width, H = screen.frame.height

@@ -188,10 +188,21 @@ enum SkyLight {
         if hide == cursorHidden && !force { return }
         _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
         if hide {
-            if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()) }   // re-hide after the Dock showed it
+            // The Dock showed the real cursor over its icons and Wind could not hide it again (owner
+            // 2026-11-02: a tiny real cursor over the zoomed Dock). Entering the Dock, the Dock takes the
+            // cursor environment and WindowServer force-shows the cursor (hide count to 0) unless some
+            // connection has both SetsCursorInBackground and AlwaysOwnsCursor ("zoomwindow-owns-cursor",
+            // what macOS's zoom window uses); and while the pointer stays over the Dock (a universal-owner
+            // connection), only the foreground app may hide or show it, so the re-hide below is refused
+            // (not a region lock: measured). AlwaysOwnsCursor lets Wind set it there and keeps the hide
+            // through the Dock's take. Held only while Wind hides the cursor.
+            // research/wind-mac/re/2026-11-02-dock-cursor.md
+            _ = setConnProp?(cid, cid, "AlwaysOwnsCursor" as CFString, kCFBooleanTrue)
+            if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()); Log.verbose("real cursor shown again: re-hidden") }   // after something showed it
             CGDisplayHideCursor(CGMainDisplayID())
         } else {
             CGDisplayShowCursor(CGMainDisplayID())
+            _ = setConnProp?(cid, cid, "AlwaysOwnsCursor" as CFString, kCFBooleanFalse)
         }
         cursorHidden = hide
     }

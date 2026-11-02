@@ -51,9 +51,11 @@ final class WindCursor {
         guard on, let p else { panel?.orderOut(nil); drawnAt = nil; return }
         let panel = self.panel ?? make()
         let now = CACurrentMediaTime()
+        // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
+        // (one shared-memory byte), not every 0.1 s, so it never shows for more than a frame.
+        SkyLight.hideRealCursor()
         if now - lastCheck > 0.1 {                      // the shape (arrow, I-beam, ...) changes rarely
             lastCheck = now
-            SkyLight.hideRealCursor()                   // macOS can show it again (Dock, app switch)
             if WindCursor.probe {
                 if key == nil {
                     key = Data([1]); size = CGSize(width: 12, height: 12); hotSpot = CGPoint(x: 6, y: 6)

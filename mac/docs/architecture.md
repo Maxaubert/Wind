@@ -221,7 +221,7 @@ followed by its own switch.
   entering, and on leaving the pointer is placed on the crosshair, so it does not move then either.
 - The real pointer stays frozen and hidden. Hiding it from a background app needs the
   `SetsCursorInBackground` connection property, then `CGDisplayHideCursor`. Wind re-hides it if
-  something such as the Dock shows it again.
+  something such as the Dock shows it again (see "The real cursor over the Dock").
 - The crosshair moves by raw mouse counts (`RawMouse`), like Wind's Inspect on Windows. Re-placing
   the hidden pointer every tick makes pointer readback timing unreliable for measuring the hand.
 - While Inspect hides the pointer, game-lock detection is paused, so Wind's own hiding is never
@@ -348,6 +348,26 @@ screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning o
   following the hand (a view shift drags the held pointer, sometimes a tick late).
 - `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
   game lock); `WIND_CURSOR=wind` runs any suite with it.
+
+### The real cursor over the Dock (owner report 2026-11-02)
+Zoomed (render, or Transform with Wind's cursor), hovering the Dock showed the real, unmagnified cursor
+("a tiny version of the cursor"). Entering the Dock, WindowServer shows the cursor again, and while the
+pointer is in the Dock it refused Wind's re-hide: `CGXCanConnectionSetCursor` is false there for a
+background app, even with `SetsCursorInBackground` (the hide only bumped Wind's own count). Measured:
+the real cursor showed for 89% of a Dock hover, one 8 s run.
+- While Wind hides the cursor it also sets the connection property `AlwaysOwnsCursor`
+  (WindowServer's `zoomwindow-owns-cursor`, what macOS's zoom window uses): WindowServer then accepts
+  Wind's hide and show anywhere. Cleared after the show; the show must come first, or a show over the
+  Dock is refused and the cursor stays hidden at 1x (measured).
+- The shown state is checked every frame (one byte of the shared scoreboard), not every 0.1 s: the
+  real cursor now shows for at most one frame at the Dock edge (0.7-6.8 ms measured, all engines).
+- An app switch (Cmd+Tab) also shows it. With the pointer still the display link sleeps, so the
+  re-hide waited for the next mouse move (about 0.7 s per switch in the test, as long as the pointer
+  stays still in real use). Wind wakes the link on `didActivateApplication`: 2-15 ms now.
+- `e2e_draw.py` hovers the Dock icons at 3x on render and on Transform with Wind's cursor (never
+  clicks there) and checks the real cursor stays hidden, and shows at 1x with the pointer still in the
+  Dock. It also Cmd+Tabs between two windows of `tools/twin` with the pointer still.
+  Research: research/wind-mac/re/2026-11-02-dock-cursor.md.
 
 ### Screenshot mode and the colour sampler (owner report 2026-11-01)
 "One big crosshair in the centre and a small free one; highlighting an area is bugged when zoomed."
