@@ -722,6 +722,16 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   the app's cursor (`NSCursor.currentSystem`) as the shape Wind draws and sets the transparent one again.
   Measured against an app that sets a cursor on every mouse move: ~0.2 ms from its set to Wind's, its
   cursor in none of ~580 captured frames.
+- Wind's own windows (Settings, a WKWebView that is foreground while open) set the cursor in Wind's own
+  process: WebKit on every hover change (about 30 sets a second sweeping the page), AppKit's cursor rects.
+  Left to the poll, each showed the real, unmagnified cursor until the re-set: zoomed over Settings the real
+  arrow or pointing hand was the system cursor in 5% of 5 ms samples, about 20 glimpses a second (owner
+  2026-11-03, "in settings the tiny cursor reappears"). `ClearCursor` replaces `-[NSCursor set]` in Wind's
+  process once (`hookOwnSets`): while active (and the main thread not stalled) a set's cursor becomes the
+  shape Wind draws and the transparent one is set instead; otherwise it passes through (stop() clears
+  `active` before putting the app's cursor back). After: 0 of ~1100 samples, both cursors on render.
+  `e2e_settings_mouse.py` sweeps the zoomed page with an outside sampler. Transform with Wind's cursor
+  hides the real cursor, so it never showed there (0 before and after).
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor

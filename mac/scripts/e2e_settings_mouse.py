@@ -62,6 +62,46 @@ def click(): vmc("button 1 down"); time.sleep(0.05); vmc("button 1 up"); time.sl
 def key(k): ctl(f"post key {k} down"); ctl(f"post key {k} up"); time.sleep(0.25)
 RECT = "const r = document.querySelector(%r).getBoundingClientRect(); return [r.x, r.y, r.width, r.height]"
 
+# ---- the real cursor over the zoomed Settings window (owner 2026-11-03: "in settings the tiny cursor
+# reappears") ----
+# Render draws the cursor and keeps the real one transparent. The Settings page (Wind's own WKWebView,
+# foreground) sets the cursor in Wind's own process on every hover change; each set showed the real,
+# unmagnified cursor until ClearCursor's 2 ms poll set the transparent one again: 5% of 5 ms samples, about
+# 20 glimpses a second. A sampler outside Wind reads the system cursor every 5 ms while the virtual mouse
+# sweeps the page at 3x; Wind's transparent cursor is 7x5 with its hotspot at 3,2. Before any key press: typing
+# obscures the cursor and SLSCursorIsVisible then reads hidden while it is drawn.
+SAMP = os.path.join(ROOT, "build/cursamp")
+SAMP_SRC = r'''import AppKit
+typealias VisFn = @convention(c) () -> Bool
+let h = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW)
+let vis = unsafeBitCast(dlsym(h, "SLSCursorIsVisible"), to: VisFn.self)
+let secs = Double(CommandLine.arguments[1])!, t0 = CFAbsoluteTimeGetCurrent()
+var shown = 0, real = 0, n = 0
+print("ready"); fflush(stdout)
+while CFAbsoluteTimeGetCurrent() - t0 < secs {
+    if vis() { shown += 1; if let c = NSCursor.currentSystem, !(c.image.size == NSSize(width: 7, height: 5) && c.hotSpot == NSPoint(x: 3, y: 2)) { real += 1 } }
+    n += 1; usleep(5000)
+}
+print(n, shown, real)'''
+if not os.path.exists(SAMP):
+    with open(SAMP + ".swift", "w") as f: f.write(SAMP_SRC)
+    subprocess.run(["swiftc", "-O", SAMP + ".swift", "-o", SAMP], check=True, capture_output=True)
+ctl("level 1"); time.sleep(0.3); ctl(f"warp {wx + 40:.0f} {top + 60:.0f}"); time.sleep(0.3); ctl("level 3"); time.sleep(1.2)
+own0 = (ctl("state").get("clearCursorCounts", []) + [0, 0, 0])[:3]
+sp = subprocess.Popen([SAMP, "5"], stdout=subprocess.PIPE, text=True); sp.stdout.readline()
+t0 = time.time(); k = 0
+while time.time() - t0 < 4.8:                     # across the sidebar and the rows, never clicking
+    vmc(f"move {4 if (k // 25) % 2 == 0 else -4} 1 5 8"); k += 1
+n, shown, real = map(int, sp.stdout.read().split())
+s = ctl("state"); own1 = (s.get("clearCursorCounts", []) + [0, 0, 0])[:3]
+check("render: no real cursor over the zoomed Settings window", n > 400 and shown > n * 0.9 and real <= 2 and s["drawn"],
+      f"real cursor in {real}/{n} samples (shown transparent {shown - real}), drawn {s['drawn']}")
+check("render: the page's cursor sets are taken by Wind", own1[2] > own0[2], f"own sets {own0[2]} -> {own1[2]}")
+ctl("level 1"); time.sleep(0.5)
+s = ctl("state")
+check("render: zoomed out over Settings, the real cursor shows", s["realCursorVisible"] and not s.get("realCursorClear"),
+      f"real {s['realCursorVisible']} clear {s.get('realCursorClear')}")
+
 # ---- select ----
 at(js(RECT % '[data-key="engine"] select')); click()
 menus = [w for w in wind_windows() if w[1] >= 100 and w[0] != "Wind_Settings"]

@@ -1,4 +1,5 @@
 import AppKit
+import ObjectiveC
 import QuartzCore
 
 // The real cursor while Wind draws its own (render, and Wind's cursor on macOS zoom): shown, but with a
@@ -32,6 +33,7 @@ final class ClearCursor: @unchecked Sendable {
     private var stalled = false
     private var resetCount = 0              // transparent sets after another process's set (tests)
     private var foreignCount = 0
+    private var ownCount = 0                // Wind's own windows' cursor sets turned transparent at the source (tests)
     private var beatTimer: Timer?
     /// Wind's transparent cursor. Its size and hotspot are its signature: a read of the system cursor
     /// that shows them is Wind's own set, not an app's.
@@ -40,7 +42,7 @@ final class ClearCursor: @unchecked Sendable {
     private let clear = NSCursor(image: NSImage(size: ClearCursor.clearSize, flipped: false) { _ in true }, hotSpot: ClearCursor.clearHot)
 
     /// Seed changes seen and transparent re-sets so far (tests).
-    var counts: [Int] { lock.lock(); defer { lock.unlock() }; return [foreignCount, resetCount] }
+    var counts: [Int] { lock.lock(); defer { lock.unlock() }; return [foreignCount, resetCount, ownCount] }
 
     /// True while the real cursor is shown transparent.
     var isActive: Bool { lock.lock(); defer { lock.unlock() }; return active }
@@ -64,6 +66,7 @@ final class ClearCursor: @unchecked Sendable {
         lock.unlock()
         SkyLight.allowBackgroundCursor()
         SkyLight.setOwnsCursor(true)                    // over the Dock Wind's sets are refused otherwise
+        ClearCursor.hookOwnSets()
         let first = NSCursor.currentSystem
         lock.lock()
         active = true; stalled = false; session += 1
@@ -115,6 +118,39 @@ final class ClearCursor: @unchecked Sendable {
         // matches, so the poll handles it as an app's set.
         ours = NSCursor.currentSystem.map(isClear) == true ? seed : 0
         return true
+    }
+
+    // Wind's own windows (Settings, a WKWebView, foreground while open) set the cursor in THIS process:
+    // WebKit on every hover change (the pointing hand over links and controls), AppKit's cursor rects.
+    // Caught only by the seed poll, each set showed the real, unmagnified cursor until the poll's re-set
+    // (up to 2 ms), so it reached the screen in a frame now and then: over the zoomed Settings window
+    // the real cursor showed in 5% of 5 ms samples, about 20 glimpses a second (owner 2026-11-03: "in
+    // settings the tiny cursor reappears"). Here such a set is taken at the source while active: its
+    // cursor becomes the shape Wind draws and the transparent one is set instead, so it never shows.
+    private typealias SetIMP = @convention(c) (NSCursor, Selector) -> Void
+    nonisolated(unsafe) private static var originalSet: SetIMP?
+    private static let setSel = #selector(NSCursor.set)
+
+    /// Replace -[NSCursor set] in Wind's process once (main thread).
+    private static func hookOwnSets() {
+        guard originalSet == nil, let m = class_getInstanceMethod(NSCursor.self, setSel) else { return }
+        let block: @convention(block) (NSCursor) -> Void = { c in ClearCursor.shared.ownSet(c) }
+        originalSet = unsafeBitCast(method_setImplementation(m, imp_implementationWithBlock(block)), to: SetIMP.self)
+    }
+
+    private func ownSet(_ c: NSCursor) {
+        guard let orig = ClearCursor.originalSet else { return }
+        if c === clear { orig(c, ClearCursor.setSel); return }   // Wind's own transparent set (setClear, under the lock)
+        lock.lock()
+        // Passed through when not active (stop() puts the app's cursor back after clearing `active`) or
+        // while the main thread is stalled (the poll thread puts the app's cursor back).
+        guard active && !stalled else { lock.unlock(); orig(c, ClearCursor.setSel); return }
+        appCursor = c; shapeGen += 1; ownCount += 1
+        orig(clear, ClearCursor.setSel)
+        // Not taken as Wind's seed without a read of the system cursor (a WindowServer round trip, too
+        // slow for every hover change on the main thread): 0 lets the poll check it off the main thread.
+        ours = 0
+        lock.unlock()
     }
 
     private func poll(session s: Int) {
