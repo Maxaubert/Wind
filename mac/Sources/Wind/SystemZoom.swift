@@ -30,12 +30,6 @@ enum SystemZoom {
     static let keyboardLabel = "Use keyboard shortcuts to zoom"
     static let trackpadLabel = "Use trackpad gesture to zoom"
     static let scrollLabel = "Use scroll gesture with modifier keys to zoom"
-    static let shakeLabel = "Shake mouse pointer to locate"
-
-    /// Shake-to-locate enlarges the pointer on fast movement, which zoomed panning triggers a lot.
-    static var shakeToLocateOn: Bool {
-        bool("CGDisableCursorLocationMagnification", kCFPreferencesAnyApplication) != true
-    }
 
     /// Release an engaged macOS Zoom: its own toggle shortcut (Option-Command-8) works when posted
     /// by Wind, but only while "Use keyboard shortcuts to zoom" is on (measured 2026-10-29).
@@ -127,14 +121,6 @@ enum SystemZoom {
             }
         }
         next(0)
-    }
-
-    static func setShakeToLocate(_ on: Bool, completion: @escaping (Bool) -> Void) {
-        let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").isEmpty
-        SettingsToggle.set(pane: SettingsToggle.displayPane, label: shakeLabel, on: on) { r in
-            if !wasRunning { closeSettings() }
-            if case .notFound = r { completion(false) } else { completion(true) }
-        }
     }
 
     private static func closeSettings() {

@@ -139,7 +139,7 @@ test.describe('the Hotkeys page', () => {
   });
 
   test('recording pauses Wind\'s hotkeys and resumes them after', async ({ page }) => {
-    await row(page, 'quit').locator('.kchg').first().click();
+    await row(page, 'inspect').locator('.kchg').first().click();
     await page.keyboard.press('Escape');
     const on = (await sent(page, 'captureBinds')).map((m) => m.on);
     expect(on).toContain('1');
@@ -147,7 +147,7 @@ test.describe('the Hotkeys page', () => {
   });
 
   test('while recording, Cmd+F and Cmd+Q are captured, not run', async ({ page }) => {
-    const r = row(page, 'quit');
+    const r = row(page, 'inspect');
     await r.locator('.kchg').first().click();
     await page.keyboard.press('Meta+KeyQ');
     await expect(r.locator('.refusal')).toContainText('used by app shortcuts');

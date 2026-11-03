@@ -145,12 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func toggleShake() {
-        SystemZoom.setShakeToLocate(!SystemZoom.shakeToLocateOn) { ok in
-            if !ok { Log.error("shake to locate: switch not found") }
-        }
-    }
-
     // MARK: config
 
     private func loadConfig(force: Bool) {
@@ -213,71 +207,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item("Wind needs the Accessibility permission", nil))
             menu.addItem(item("Open Privacy & Security…", #selector(openPrivacy)))
             menu.addItem(.separator())
-        } else {
-            let st = item(String(format: "Zoom %.1fx%@", mag.level, mag.isLocked ? " (game lock)" : ""), nil)
-            menu.addItem(st)
-            menu.addItem(.separator())
         }
         if !zoomShortcuts.isEmpty {
             menu.addItem(item("⚠︎ macOS Zoom shortcuts are on and clash with Wind", nil))
             menu.addItem(item("Turn off macOS Zoom shortcuts", #selector(turnOffSystemZoom)))
             menu.addItem(.separator())
         }
-        menu.addItem(item("Enabled", #selector(togglePaused), on: !mag.isPaused))
+        // A short menu (owner 2026-11-03: too many items, bad order): the engine, what the view follows,
+        // then the app. Everything else is in Settings; the two items Settings has no row for sit in More.
+        let engines = NSMenu()
+        for (id, label) in [("draw", "Render"), ("zoom", "Transform")] {
+            let e = item(label, #selector(setEngine(_:)), on: c.engine == id); e.representedObject = id
+            engines.addItem(e)
+        }
+        let ei = item("Engine", nil); ei.submenu = engines
+        menu.addItem(ei)
+        menu.addItem(.separator())
         menu.addItem(item("Follow text caret", #selector(toggleCaret), on: c.trackCaret))
         menu.addItem(item("Follow keyboard focus", #selector(toggleFocus), on: c.trackFocus))
-        menu.addItem(item("Mouse within edges (instead of centred)", #selector(toggleEdge), on: c.mouseAlign == 1))
-        if c.engine == "draw" {                         // Render's own filters (renderScaling)
-            let sc = NSMenu()
-            for r in RenderScaling.menuOrder {
-                sc.addItem(item(r.label, #selector(setScaling(_:)), on: c.renderScaling == r.rawValue, tag: r.rawValue))
-            }
-            let si = item("Scaling", nil); si.submenu = sc
-            menu.addItem(si)
-        } else {
-            menu.addItem(item("Smooth images", #selector(toggleSmooth), on: c.smoothImages))   // macOS's zoom: nearest or bilinear
-        }
-
-        let warm = NSMenu()
-        for p in [0, 25, 50, 75, 100] {
-            warm.addItem(item(p == 0 ? "Off" : "\(p)%", #selector(setWarmth(_:)), on: Int(c.warmthPct) == p, tag: p))
-        }
-        let wi = item("Warmth", nil); wi.submenu = warm
-        menu.addItem(wi)
-        let speed = NSMenu()
-        for (i, s) in [1.0, 1.75, 2.5, 3.5].enumerated() {
-            speed.addItem(item(["Slow", "Normal", "Fast", "Fastest"][i], #selector(setSpeed(_:)), on: abs(c.zoomInSpeed - s) < 0.01, tag: Int(s * 100)))
-        }
-        let si = item("Zoom speed", nil); si.submenu = speed
-        menu.addItem(si)
-
+        menu.addItem(item("Mouse within edges", #selector(toggleEdge), on: c.mouseAlign == 1))
         menu.addItem(.separator())
-        let binds = NSMenu()
-        let (b, problems) = c.binds()
-        for a in Action.allCases {
-            let txt = (b[a] ?? []).map { $0.description }.joined(separator: ", ")
-            binds.addItem(item("\(a.rawValue): \(txt.isEmpty ? "unbound" : txt)", nil))
-        }
-        if let w = c.wheelMods { binds.addItem(item("wheel zoom: \(formatBind(Bind(mods: w, trigger: .none)))+scroll", nil)) }
-        for p in problems { binds.addItem(item("⚠︎ \(p)", nil)) }
-        let bi = item("Binds", nil); bi.submenu = binds
-        menu.addItem(bi)
-        menu.addItem(item("macOS: enlarge pointer when shaken", #selector(toggleShake), on: SystemZoom.shakeToLocateOn))
         menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(item("Settings…", #selector(openSettings)))
-        menu.addItem(item("Edit settings file…", #selector(openConfig)))
-        menu.addItem(item("Show log", #selector(openLog)))
+        let more = NSMenu()
+        more.addItem(item("Edit settings file…", #selector(openConfig)))
+        more.addItem(item("Show log", #selector(openLog)))
+        let mi = item("More", nil); mi.submenu = more
+        menu.addItem(mi)
         menu.addItem(.separator())
         let q = item("Quit Wind", #selector(quit))
         menu.addItem(q)
     }
 
-    @objc private func togglePaused() { mag.setPaused(!mag.isPaused) }
     @objc private func toggleCaret() { saveConfig { $0.trackCaret.toggle() } }
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
-    @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
-    @objc private func setScaling(_ i: NSMenuItem) { saveConfig { $0.renderScaling = i.tag } }
+    @objc private func setEngine(_ i: NSMenuItem) { if let e = i.representedObject as? String { saveConfig { $0.engine = e } } }
     @objc private func openSettings() { showSettings(onboard: false) }
 
     func showSettings(onboard: Bool) {
@@ -325,10 +290,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }
-    @objc private func setSpeed(_ s: NSMenuItem) {
-        saveConfig { $0.zoomInSpeed = Double(s.tag) / 100; $0.zoomOutSpeed = Double(s.tag) / 100 }
-    }
     @objc private func openConfig() { NSWorkspace.shared.open(Paths.config) }
     @objc private func openLog() { NSWorkspace.shared.open(Paths.log) }
     @objc private func openPrivacy() {

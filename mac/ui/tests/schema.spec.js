@@ -47,7 +47,7 @@ test('copy: no em-dash, no "Enable", no trailing period, no description restatin
 
 test('keybind rows follow the builders\' contract', () => {
   const binds = allRows.filter((r) => r.type === 'keybind');
-  expect(binds.map((r) => r.key)).toEqual(['zoomIn', 'zoomOut', 'wheelZoomMods', 'quickZoom', '__pan', 'hideCursor', 'inspect', 'quit']);
+  expect(binds.map((r) => r.key)).toEqual(['zoomIn', 'zoomOut', 'wheelZoomMods', 'quickZoom', '__pan', 'hideCursor', 'inspect']);
   for (const r of binds) {
     if (r.panArrows) expect(r.panKeys).toEqual(['panLeft', 'panUp', 'panRight', 'panDown']);
     else if (r.wheelMods) expect(r.max).toBeUndefined();
