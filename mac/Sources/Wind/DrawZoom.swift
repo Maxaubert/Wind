@@ -500,7 +500,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let W = screen.frame.width, H = screen.frame.height
         if visible { publishCapView(Upscaler.view(center: center, scale: scale, size: screen.frame.size), size: screen.frame.size, px: Double(latest?.width ?? Int(W * screen.backingScaleFactor)) / W) }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        cursorLayer.magnificationFilter = scaling == .nearest ? .nearest : .linear
+        cursorLayer.magnificationFilter = activeScaling == .nearest ? .nearest : .linear   // xBR without its pass is Nearest
         metal.frame = CGRect(x: 0, y: 0, width: W, height: H)
         if gpu {
             // Wind's own pass draws a screen-sized picture into the Metal layer (shown by show()). The view
