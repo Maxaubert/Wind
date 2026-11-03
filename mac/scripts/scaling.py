@@ -3,7 +3,7 @@
 """Render scaling (renderScaling) image checks, shared by scripts/e2e_draw.py and scripts/scaling_truth.py.
 A test card of Wind's own (tools/scalecard) is grabbed at 1x, then zoomed on with each filter and grabbed
 from the screen (Render's overlay included); tools/upscaleref computes, from the 1x grab, what each filter
-must show for the view Wind reports. xBR and NIS there are the Windows HLSL itself (gen_ported.py)."""
+must show for the view Wind reports. xBR there is the Windows HLSL itself (gen_ported.py)."""
 import os, subprocess, time
 import numpy as np
 
@@ -11,8 +11,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CARD = os.path.join(ROOT, "tools/scalecard/scalecard")
 UP = os.path.join(ROOT, "tools/upscaleref/up")
 OUT = os.path.join(ROOT, "build/scaling"); os.makedirs(OUT, exist_ok=True)
-# renderScaling value -> the CPU reference filter it must match (Sharp is Core Animation's cubic)
-MODES = {0: ("Nearest", "nearest"), 3: ("Smooth", "bilinear"), 4: ("Sharp", "catmull"), 2: ("NIS", "nis"), 1: ("xBR", "xbr")}
+# renderScaling value -> the CPU reference filter it must match
+MODES = {0: ("Nearest", "nearest"), 1: ("xBR", "xbr")}
 CARD_RECT = (300, 200, 400, 240)                 # desktop points: x y w h
 CARD_CENTRE = (CARD_RECT[0] + CARD_RECT[2] // 2, CARD_RECT[1] + CARD_RECT[3] // 2)
 
@@ -63,11 +63,11 @@ def save_png(a, path):
         Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).save(path)
     except ImportError: pass
 
-ALL_REFS = ("nearest", "bilinear", "catmull", "nis", "xbr")
+ALL_REFS = ("nearest", "xbr")
 
 def card_checks(W, check, levels=(3, 6), modes=None, label="render scaling"):
     """Per mode and level: the overlay draws with that filter, and the card on the zoomed screen matches
-    the CPU reference for it (mean difference under 1.5 levels, and closer to it than to any other filter).
+    the CPU reference for it (mean difference under 1.5 levels, and closer to it than to the other filter).
     Leaves renderScaling as WIND_SCALING (or Nearest). W is windtest, check its check()."""
     build()
     card = show_card(60 + 25 * len(levels) * len(modes or MODES))
@@ -99,7 +99,7 @@ def card_checks(W, check, levels=(3, 6), modes=None, label="render scaling"):
     finally:
         card.kill()
 
-def change_checks(W, check, mv, modes=(0, 2), level=4):
+def change_checks(W, check, mv, modes=(0, 1), level=4):
     """A still view shows a change inside it, and a change outside it once the view pans onto it (frames that
     change nothing in the view are skipped, changedInView). mv(dx, dy, n, ms) moves the virtual mouse."""
     build()

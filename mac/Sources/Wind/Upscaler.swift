@@ -4,14 +4,14 @@ import Metal
 import QuartzCore
 import WindCore
 
-// The Render engine's own upscalers (renderScaling xBR and NIS, as on Windows): one Metal compute pass
-// per changed frame from the captured IOSurface into a drawable of the overlay's CAMetalLayer, shown 1:1.
-// Nearest, Smooth and Sharp need none of this (the image layer's own filter).
+// The Render engine's own upscaler (renderScaling xBR, as on Windows): one Metal compute pass per
+// changed frame from the captured IOSurface into a drawable of the overlay's CAMetalLayer, shown 1:1.
+// Nearest needs none of this (the image layer's own filter).
 // DrawZoom drives it: a pass is encoded on a tick and shown on the next one (one refresh of latency,
 // never a wait inside the tick that encoded it), and only when the view or the captured frame changed.
 //
 // Measured in Wind (scripts/scaling_truth.py, M6, 4K at 144 Hz, 2026-11-03): GPU per pass while panning
-// NIS 1.8-2.9 ms, xBR 1.3-1.5 ms (median; the GPU runs at low clocks under this paced load); a still
+// xBR 1.3-1.5 ms (median; the GPU runs at low clocks under this paced load); a still
 // view runs no pass. The prototype: research/wind-mac/2026-11-03-upscale-render-path.md.
 
 final class Upscaler: @unchecked Sendable {
@@ -21,7 +21,7 @@ final class Upscaler: @unchecked Sendable {
 
     let device: MTLDevice
     private let queue: MTLCommandQueue
-    private let xbrPre: MTLComputePipelineState, xbrPost: MTLComputePipelineState, nis: MTLComputePipelineState
+    private let xbrPre: MTLComputePipelineState, xbrPost: MTLComputePipelineState
     private var mask: MTLTexture?                       // xBR's per-texel edge decisions (r32Uint, source size)
     private var sources: [IOSurfaceID: MTLTexture] = [:]
 
@@ -31,10 +31,10 @@ final class Upscaler: @unchecked Sendable {
     private var passes = 0
 
     /// Builds the kernels (a runtime compile, ~0.1-0.3 s: call it off the main thread). nil without
-    /// Metal or when a kernel does not build; Render then uses Smooth instead (logged once).
+    /// Metal or when a kernel does not build; Render then uses Nearest instead (logged once).
     static func make() -> Upscaler? {
         guard let dev = MTLCreateSystemDefaultDevice(), let q = dev.makeCommandQueue() else {
-            Log.error("render scaling: no Metal device; using Smooth"); return nil
+            Log.error("render scaling: no Metal device; using Nearest"); return nil
         }
         do {
             let o = MTLCompileOptions()
@@ -44,15 +44,15 @@ final class Upscaler: @unchecked Sendable {
                 guard let f = lib.makeFunction(name: n) else { throw NSError(domain: "Wind", code: 3, userInfo: [NSLocalizedDescriptionKey: "no kernel \(n)"]) }
                 return try dev.makeComputePipelineState(function: f)
             }
-            return Upscaler(device: dev, queue: q, xbrPre: try pso("k_xbr_pre"), xbrPost: try pso("k_xbr_post"), nis: try pso("k_nis_tile"))
+            return Upscaler(device: dev, queue: q, xbrPre: try pso("k_xbr_pre"), xbrPost: try pso("k_xbr_post"))
         } catch {
-            Log.error("render scaling: the Metal kernels did not build (\(error.localizedDescription)); using Smooth")
+            Log.error("render scaling: the Metal kernels did not build (\(error.localizedDescription)); using Nearest")
             return nil
         }
     }
 
-    private init(device: MTLDevice, queue: MTLCommandQueue, xbrPre: MTLComputePipelineState, xbrPost: MTLComputePipelineState, nis: MTLComputePipelineState) {
-        self.device = device; self.queue = queue; self.xbrPre = xbrPre; self.xbrPost = xbrPost; self.nis = nis
+    private init(device: MTLDevice, queue: MTLCommandQueue, xbrPre: MTLComputePipelineState, xbrPost: MTLComputePipelineState) {
+        self.device = device; self.queue = queue; self.xbrPre = xbrPre; self.xbrPost = xbrPost
     }
 
     /// The visible source rect (normalised, top-left origin) for a view centred on `center` (desktop
@@ -88,46 +88,34 @@ final class Upscaler: @unchecked Sendable {
         return t
     }
 
-    /// Encodes and commits one pass of `mode` (.xbr or .nis) over `s` for `view` into `dst` (a drawable's
+    /// Encodes and commits one xBR pass over `s` for `view` into `dst` (a drawable's
     /// texture). Returns its command buffer (wait for it before presenting), or nil when it cannot run.
     /// `hold` (the capture's CVPixelBuffer) is kept until the GPU is done with it: the texture keeps only the
     /// IOSurface, and ScreenCaptureKit reuses a buffer for a new frame once nobody holds it.
-    func encode(_ mode: RenderScaling, src s: IOSurface, view: View, into dst: MTLTexture, hold: AnyObject? = nil) -> MTLCommandBuffer? {
+    func encode(src s: IOSurface, view: View, into dst: MTLTexture, hold: AnyObject? = nil) -> MTLCommandBuffer? {
         guard let src = source(s), let cb = queue.makeCommandBuffer() else { return nil }
         let W = Float(src.width), H = Float(src.height)
         var p = Params(uvMin: view.uvMin, uvMax: view.uvMax, srcSize: [W, H], dstSize: [Float(dst.width), Float(dst.height)])
         let tg = MTLSize(width: 16, height: 16, depth: 1)
-        switch mode {
-        case .xbr:
-            if mask.map({ $0.width != src.width || $0.height != src.height }) ?? true {
-                let md = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Uint, width: src.width, height: src.height, mipmapped: false)
-                md.usage = [.shaderWrite, .shaderRead]; md.storageMode = .private
-                mask = device.makeTexture(descriptor: md)
-            }
-            guard let m = mask, let e1 = cb.makeComputeCommandEncoder() else { return nil }
-            // Pass 1 over the visible source texels plus the 3-texel margin pass 2's taps reach.
-            let a = Int((p.uvMin.x * W).rounded(.down)) - 3, b = Int((p.uvMin.y * H).rounded(.down)) - 3
-            let c = Int((p.uvMax.x * W).rounded(.up)) + 3, d = Int((p.uvMax.y * H).rounded(.up)) + 3
-            var pp = PreParams(origin: [Int32(a), Int32(b)], size: [Int32(c - a), Int32(d - b)], srcSize: [W, H])
-            e1.setComputePipelineState(xbrPre); e1.setTexture(src, index: 0); e1.setTexture(m, index: 1)
-            e1.setBytes(&pp, length: MemoryLayout<PreParams>.stride, index: 0)
-            e1.dispatchThreads(MTLSize(width: c - a, height: d - b, depth: 1), threadsPerThreadgroup: tg)
-            e1.endEncoding()
-            guard let e2 = cb.makeComputeCommandEncoder() else { return nil }
-            e2.setComputePipelineState(xbrPost); e2.setTexture(src, index: 0); e2.setTexture(dst, index: 1); e2.setTexture(m, index: 2)
-            e2.setBytes(&p, length: MemoryLayout<Params>.stride, index: 0)
-            e2.dispatchThreads(MTLSize(width: dst.width, height: dst.height, depth: 1), threadsPerThreadgroup: tg)
-            e2.endEncoding()
-        case .nis:
-            guard let e = cb.makeComputeCommandEncoder() else { return nil }
-            e.setComputePipelineState(nis); e.setTexture(src, index: 0); e.setTexture(dst, index: 1)
-            e.setBytes(&p, length: MemoryLayout<Params>.stride, index: 0)
-            // Whole 16x16 groups: each loads its tile with all 256 threads before any of them returns.
-            e.dispatchThreadgroups(MTLSize(width: (dst.width + 15) / 16, height: (dst.height + 15) / 16, depth: 1), threadsPerThreadgroup: tg)
-            e.endEncoding()
-        default:
-            return nil
+        if mask.map({ $0.width != src.width || $0.height != src.height }) ?? true {
+            let md = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Uint, width: src.width, height: src.height, mipmapped: false)
+            md.usage = [.shaderWrite, .shaderRead]; md.storageMode = .private
+            mask = device.makeTexture(descriptor: md)
         }
+        guard let m = mask, let e1 = cb.makeComputeCommandEncoder() else { return nil }
+        // Pass 1 over the visible source texels plus the 3-texel margin pass 2's taps reach.
+        let a = Int((p.uvMin.x * W).rounded(.down)) - 3, b = Int((p.uvMin.y * H).rounded(.down)) - 3
+        let c = Int((p.uvMax.x * W).rounded(.up)) + 3, d = Int((p.uvMax.y * H).rounded(.up)) + 3
+        var pp = PreParams(origin: [Int32(a), Int32(b)], size: [Int32(c - a), Int32(d - b)], srcSize: [W, H])
+        e1.setComputePipelineState(xbrPre); e1.setTexture(src, index: 0); e1.setTexture(m, index: 1)
+        e1.setBytes(&pp, length: MemoryLayout<PreParams>.stride, index: 0)
+        e1.dispatchThreads(MTLSize(width: c - a, height: d - b, depth: 1), threadsPerThreadgroup: tg)
+        e1.endEncoding()
+        guard let e2 = cb.makeComputeCommandEncoder() else { return nil }
+        e2.setComputePipelineState(xbrPost); e2.setTexture(src, index: 0); e2.setTexture(dst, index: 1); e2.setTexture(m, index: 2)
+        e2.setBytes(&p, length: MemoryLayout<Params>.stride, index: 0)
+        e2.dispatchThreads(MTLSize(width: dst.width, height: dst.height, depth: 1), threadsPerThreadgroup: tg)
+        e2.endEncoding()
         cb.addCompletedHandler { [weak self] b in
             withExtendedLifetime(hold) {}
             guard let self, b.status == .completed else { return }

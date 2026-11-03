@@ -39,7 +39,7 @@ def relaunch_with_channel(direct=False, extra=None):
     extra = {"cursor": "system", "keepPointerSpeed": True, **extra}
     if os.environ.get("WIND_CURSOR"):              # WIND_CURSOR=wind: Wind's own cursor
         extra = dict(extra or {}, cursor=os.environ["WIND_CURSOR"])
-    if os.environ.get("WIND_SCALING"):             # WIND_SCALING=2: Render scaling (renderScaling) NIS, and so on
+    if os.environ.get("WIND_SCALING"):             # WIND_SCALING=1: Render scaling (renderScaling) xBR
         extra = dict(extra or {}, renderScaling=int(os.environ["WIND_SCALING"]))
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     kill_all_wind()

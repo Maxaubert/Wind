@@ -49,11 +49,6 @@ Copyright (C) 2011-2022 Hyllian (sergiogdb@gmail.com). Ported to Metal in `mac/S
 (Render scaling xBR) from Wind's HLSL port above, itself from the libretro slang-shaders
 `edge-smoothing/xbr/shaders/xbr-lv2-standalone.slang`. https://github.com/libretro/slang-shaders
 
-### NVIDIA Image Scaling 1.0.2 (MIT)
-Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved. Ported to Metal in
-`mac/Sources/Wind/UpscaleShaders.swift` (Render scaling NVIDIA Image Scaling) from Wind's HLSL port above.
-https://github.com/NVIDIAGameWorks/NVIDIAImageScaling
-
 Wind for Mac links only Apple's system frameworks. This file and the licence ship inside the app
 (`Contents/Resources`).
 

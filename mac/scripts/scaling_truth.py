@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
 # Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Render scaling (renderScaling) cost and frame pacing on the ZOOMED screen, per filter and level.
-For each filter (Nearest, Smooth, Sharp, NIS, xBR) at each level: a still view for 2 s, then a steady pan
+For each filter (Nearest, xBR) at each level: a still view for 2 s, then a steady pan
 (virtual mouse, real HID) of 1.5 s while tools/viewcap records every frame WindowServer shows. Reported:
 - GPU: the display GPU's Device Utilization (ioreg, sampled every 100 ms), still and panning, against
   the same at 1x before the run; Wind's own pass time (median, p95) and ticks that waited for it.
@@ -10,10 +10,10 @@ For each filter (Nearest, Smooth, Sharp, NIS, xBR) at each level: a still view f
 - Pacing: refreshes the moving view did not advance (held or skipped, as pan_truth.py counts them).
 PASS: every filter's pan stalls no more than Nearest's + 2 refreshes plus 5% of the pan (run to run, Nearest
 itself varies by a few percent), and a still view runs at most 10 passes in 2 s.
-Measured 2026-11-03 (M6, 4K at 144 Hz, 1000 Hz mouse): every filter showed 220-228 frames per 1.5 s pan, like
-Nearest; NIS 2.5 ms and xBR 1.7-2.0 ms GPU per pass (median), GPU 59-67% panning against 57-60% for Nearest;
-a still view 3-11% GPU and 2-6% WindowServer CPU in every filter (1x: 2-3%, 1-2%).
-usage: scaling_truth.py [--levels 3,6] [--modes 0,3,4,2,1] [--report-ms 1]"""
+Measured 2026-11-03 (M6, 4K at 144 Hz, 1000 Hz mouse): xBR showed 220-228 frames per 1.5 s pan, like
+Nearest; xBR 1.7-2.0 ms GPU per pass (median), GPU 59-67% panning against 57-60% for Nearest;
+a still view 3-11% GPU and 2-6% WindowServer CPU in either filter (1x: 2-3%, 1-2%).
+usage: scaling_truth.py [--levels 3,6] [--modes 0,1] [--report-ms 1]"""
 import argparse, os, re, subprocess, sys, threading, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,11 +21,11 @@ import windtest as W
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--levels", default="3,6")
-ap.add_argument("--modes", default="0,3,4,2,1")
+ap.add_argument("--modes", default="0,1")
 ap.add_argument("--report-ms", type=int, default=1)
 ap.add_argument("--delay", default="", help="A/B: run Wind's tick this many ms after the display link (wcur delay)")
 a = ap.parse_args()
-NAMES = {0: "Nearest", 1: "xBR", 2: "NIS", 3: "Smooth", 4: "Sharp"}
+NAMES = {0: "Nearest", 1: "xBR"}
 OUT = os.path.join(W.ROOT, "build/scaling-truth"); os.makedirs(OUT, exist_ok=True)
 CAP = os.path.join(W.ROOT, "tools/viewcap/viewcap")
 subprocess.run([os.path.join(W.ROOT, "tools/viewcap/build.sh")], check=True, stdout=subprocess.DEVNULL)

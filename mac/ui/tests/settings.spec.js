@@ -125,18 +125,18 @@ test('Engine defaults to Transform (owner 2026-11-02), and its rows show on View
   await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'Transform engine']);
 });
 
-test('Scaling: Render offers its five filters, Transform only macOS\'s two', async ({ page }) => {
+test('Scaling: Render offers Nearest and xBR, Transform only macOS\'s two', async ({ page }) => {
   await mockHost(page, { values: { engine: 'draw' } });
   await open(page);
   await go(page, 'zoom');
   await expect(row(page, 'smoothImages')).toHaveCount(0);
   const sel = row(page, 'renderScaling').locator('select');
   await expect(sel).toHaveValue('0');
-  await expect(sel.locator('option')).toHaveText(['Nearest', 'Smooth', 'Sharp', 'NVIDIA Image Scaling', 'xBR']);
-  await sel.selectOption({ label: 'NVIDIA Image Scaling' });
-  await expect.poll(() => wrote(page, 'renderScaling')).toBe('2');
-  await sel.selectOption({ label: 'Sharp' });
-  await expect.poll(() => wrote(page, 'renderScaling')).toBe('4');
+  await expect(sel.locator('option')).toHaveText(['Nearest', 'xBR']);
+  await sel.selectOption({ label: 'xBR' });
+  await expect.poll(() => wrote(page, 'renderScaling')).toBe('1');
+  await sel.selectOption({ label: 'Nearest' });
+  await expect.poll(() => wrote(page, 'renderScaling')).toBe('0');
   await row(page, 'engine').locator('select').selectOption('zoom');
   await expect(row(page, 'renderScaling')).toHaveCount(0);
   const tx = row(page, 'smoothImages').locator('select');

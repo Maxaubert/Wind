@@ -849,19 +849,20 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
 ### Render scaling (`renderScaling`, 0.4.0, 2026-11-03)
 
 Render has its own Scaling row (Settings, Zoom, Engine card, only on Render; Transform's row is macOS's
-two). Values keep Windows' meaning (`config.h renderScaling`): 0 Nearest (default, as on Windows), 1 xBR,
-2 NVIDIA Image Scaling; the Mac adds 3 Smooth and 4 Sharp. Anything else loads as Nearest. A config from
-before 0.4.0 with `smoothImages` on and no `renderScaling` loads as Smooth (its old Render look).
-- **Nearest / Smooth / Sharp** are the image layer's `magnificationFilter`: `.nearest`, `.linear` and the
-  private `"cubic"` (Catmull-Rom bicubic: matched within 0.15-0.20 levels on screen; an unknown name
-  would fall back to linear silently). No extra work. The drawn cursor uses linear in every mode but Nearest.
-- **NIS / xBR** are Wind's Metal compute port of the Windows shaders (`UpscaleShaders.swift`: same
-  constants and maths as `src/render/upscale_shaders.h` / `upscale_nis.h`; xBR in two passes, NIS with a
-  threadgroup tile), compiled at runtime (`Upscaler`, ~0.1-0.3 s, on a background queue the first time
-  the mode is wanted on Render; until then, or if Metal fails, they show as Smooth, logged once). Each
-  pass reads the captured IOSurface for the current view and writes a screen-sized drawable of a
-  `CAMetalLayer` (`presentsWithTransaction`) that replaces the image layer. The drawable carries the
-  capture's `IOSurfaceColorSpace`, or Core Animation converts it as sRGB (desaturated).
+two) and a Scaling submenu in the menu bar. It offers **Nearest and xBR only** (owner 2026-11-03, after
+trying NIS, Smooth (bilinear) and Sharp (bicubic) by eye: they were built and removed). Values keep
+Windows' meaning (`config.h renderScaling`): 0 Nearest (default, as on Windows), 1 xBR. Anything else,
+Windows' 2 (NVIDIA Image Scaling) included, loads as Nearest. `smoothImages` is Transform's alone and
+does not touch Render.
+- **Nearest** is the image layer's `magnificationFilter` (`.nearest`), no extra work. The drawn cursor
+  uses nearest on Nearest and linear on xBR.
+- **xBR** is Wind's Metal compute port of the Windows shader (`UpscaleShaders.swift`: same constants and
+  maths as `src/render/upscale_shaders.h`, in two passes), compiled at runtime (`Upscaler`, ~0.1-0.3 s, on
+  a background queue the first time it is wanted on Render; until then, or if Metal fails, it shows as
+  Nearest, logged once). Each pass reads the captured IOSurface for the current view and writes a
+  screen-sized drawable of a `CAMetalLayer` (`presentsWithTransaction`) that replaces the image layer.
+  The drawable carries the capture's `IOSurfaceColorSpace`, or Core Animation converts it as sRGB
+  (desaturated).
 - **One refresh behind, never a wait**: a tick encodes the pass for its view and presents the pass the
   previous tick encoded (waited for only if the GPU is late: 0-38 ticks in a 1.5 s pan). While the view
   moves, the drawn cursor, Wind's screenshot selection and Inspect's crosshair are drawn with the view
@@ -871,13 +872,13 @@ before 0.4.0 with `smoothImages` on and no `renderScaling` loads as Smooth (its 
 - **No work when nothing changes**: a pass runs only when the view or the captured frame changed in
   the view. Every commit of the overlay (excluded from the capture) still brings a capture frame
   marked dirty over the whole screen; such a frame is told apart by comparing the view's rows with the
-  frame before (`changedInView`, capture queue, 0.1-1 ms). This also applies to Nearest, Smooth and
-  Sharp: showing each such frame brought the next, a loop at the refresh rate that kept WindowServer at
+  frame before (`changedInView`, capture queue, 0.1-1 ms). This also applies to Nearest: showing each
+  such frame brought the next, a loop at the refresh rate that kept WindowServer at
   41-54% CPU and the GPU at 54-66% with the view still (main before 0.4.0). Now 2-6% and 3-11% (1x:
   1-2% and 2-3%). Changes outside the view (a menu-bar item at 40 Hz) cost nothing.
   A frame compared against a view the tick has moved since counts as changed (a change in the strip just
   come into view stayed stale once the view stopped); `e2e_draw.py` checks a change in a still view and one
-  outside it that the view then pans onto, in every mode (`scalecard patch`).
+  outside it that the view then pans onto, in both modes (`scalecard patch`).
 - **Capture buffers** (queueDepth 4): a pass holds its frame's CVPixelBuffer until the GPU is done (the
   texture keeps only the IOSurface, and ScreenCaptureKit reuses a buffer nobody holds), and while the Metal
   layer shows the picture the image layer lets go of its frame.
@@ -885,14 +886,14 @@ before 0.4.0 with `smoothImages` on and no `renderScaling` loads as Smooth (its 
   WindowServer show only 166-177 of ~220 refreshes while panning (every other one skipped), even with a
   trivial copy pass and with 3 or 6 surfaces; drawables show all of them.
 - **Measured** (`scripts/scaling_truth.py`, M6, 4K at 144 Hz, 1000 Hz mouse, 1.5 s pans at 3x and 6x):
-  every filter 220-228 frames per pan, stalls within run-to-run noise of Nearest; GPU per pass NIS
-  2.5 ms, xBR 1.7-2.0 ms (median; p95 4-5.6); GPU utilisation while panning 59-67% against 57-60% for
-  Nearest, WindowServer ~90% CPU in every mode (it composites the capture as well as the screen).
-- **Tests**: `e2e_draw.py` checks each mode at 3x and 6x on a test card (`tools/scalecard`) against
-  `tools/upscaleref` (the CPU reference; its xBR and NIS are the Windows HLSL itself, converted by
-  `gen_ported.py`): mean difference 0.09-0.21 levels, every other filter 2.8+ away; a still view runs no
-  pass, a pan one per frame; a simulated Metal failure (`WIND_UPSCALE_FAIL`) shows Smooth.
-  `WIND_SCALING=N` runs any suite with that filter (e2e_draw passes in full on NIS).
+  xBR 220-228 frames per pan, stalls within run-to-run noise of Nearest; GPU per pass 1.7-2.0 ms
+  (median; p95 4-5.6); GPU utilisation while panning 59-67% against 57-60% for Nearest, WindowServer
+  ~90% CPU in both modes (it composites the capture as well as the screen).
+- **Tests**: `e2e_draw.py` checks both modes at 3x and 6x on a test card (`tools/scalecard`) against
+  `tools/upscaleref` (the CPU reference; its xBR is the Windows HLSL itself, converted by
+  `gen_ported.py`), each closer to its own reference than to the other's; a still view runs no pass, a
+  pan one per frame; a simulated Metal failure (`WIND_UPSCALE_FAIL`) shows Nearest.
+  `WIND_SCALING=1` runs any suite with xBR.
 - Research and the prototype: research/wind-mac/2026-11-03-transform-upscaling.md and
   2026-11-03-upscale-render-path.md.
 

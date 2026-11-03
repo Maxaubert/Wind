@@ -85,11 +85,11 @@ test('the macOS zoom rows show only on the macOS zoom engine and sit on View', (
   }
 });
 
-test('Scaling: Render offers Windows\' values plus Smooth and Sharp; Transform macOS\'s two', () => {
+test('Scaling: Render offers Nearest and xBR (Windows\' 0 and 1); Transform macOS\'s two', () => {
   const zoom = groups.find((g) => g.id === 'zoom');
   const r = groupRows(zoom).find((x) => x.key === 'renderScaling');
-  expect(r.options).toEqual(['0', '3', '4', '2', '1']);         // 0-2 mean what they mean on Windows
-  expect(r.optionLabels).toEqual({ '0': 'Nearest', '1': 'xBR', '2': 'NVIDIA Image Scaling', '3': 'Smooth', '4': 'Sharp' });
+  expect(r.options).toEqual(['0', '1']);                        // mean what they mean on Windows
+  expect(r.optionLabels).toEqual({ '0': 'Nearest', '1': 'xBR' });
   expect(r.def).toBe('0');
   const t = groupRows(zoom).find((x) => x.key === 'smoothImages');
   expect(t.options).toEqual(['0', '1']);

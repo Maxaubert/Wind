@@ -44,7 +44,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
 
     private var window: NSWindow?
     private let image = CALayer()
-    /// Wind's own pass (render scaling xBR and NIS) draws here instead of `image`.
+    /// Wind's own pass (render scaling xBR) draws here instead of `image`.
     private let metal = CAMetalLayer()
     private let cursorLayer = CALayer()
     // Inspect's crosshair, drawn in the overlay (screen points). As a window of its own on the desktop it
@@ -507,7 +507,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             // moves with the next pass, the crosshair with it (drawOverlay at the tick).
         } else {
             metal.isHidden = true; image.isHidden = false
-            image.magnificationFilter = layerFilter
+            image.magnificationFilter = .nearest          // Nearest, or xBR without its pass
             // The view moved over frames that were skipped as unchanged where it was: show the newest.
             if captureStale && haveFrame { showCapture() }
             // The desktop point at `center` sits at the screen centre.
@@ -727,17 +727,17 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
 
     // MARK: render scaling
 
-    /// Render scaling (Config.renderScaling): Nearest, Smooth and Sharp are the layer's own filter (no extra
-    /// work); xBR and NIS are Wind's Metal pass (Upscaler), built the first time one is wanted. Until the
-    /// kernels are ready, or if they cannot run, those two show as Smooth.
+    /// Render scaling (Config.renderScaling): Nearest is the layer's own filter (no extra work); xBR is
+    /// Wind's Metal pass (Upscaler), built the first time it is wanted. Until the kernels are ready, or if
+    /// they cannot run, xBR shows as Nearest.
     private(set) var scaling: RenderScaling = .nearest
     private var upscaler: Upscaler?
     private var upscalerLoading = false
     private var upscalerFailed = false
     /// Wind's own pass draws the picture.
     var gpu: Bool { scaling.usesShader && upscaler != nil }
-    /// The filter actually in use (xBR or NIS fall back to Smooth without Metal).
-    var activeScaling: RenderScaling { scaling.usesShader && !gpu ? .smooth : scaling }
+    /// The filter actually in use (xBR falls back to Nearest without Metal).
+    var activeScaling: RenderScaling { scaling.usesShader && !gpu ? .nearest : scaling }
     private var captureSeq = 0, encodedSeq = -1
     private var encodedView: Upscaler.View?
     /// The pass a tick encoded, shown by the next tick (or 12 ms later if no tick comes).
@@ -750,23 +750,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// Ticks that had to wait more than 1 ms for the previous tick's pass (tests and the log).
     private(set) var lateWaits = 0
 
-    private var layerFilter: CALayerContentsFilter {
-        switch activeScaling {
-        case .nearest: return .nearest
-        // Core Animation's private "cubic" filter is true bicubic (measured 2026-11-03, 50.8 dB against a
-        // bicubic reference); an unknown name would fall back to linear silently.
-        case .sharp: return CALayerContentsFilter(rawValue: "cubic")
-        default: return .linear
-        }
-    }
-
     /// From the config (Magnifier.apply). Applies at once, also while zoomed.
     func setScaling(_ s: RenderScaling) {
         guard s != scaling else { return }
         scaling = s
         if s.usesShader && DrawZoom.enabled { loadUpscaler() }
         if !gpu { inFlight = nil; drawnView = nil; encodedView = nil; upscaler?.release(); publishCapView(nil, size: .zero, px: 1) }
-        Log.info("render scaling: \(s.label)\(s.usesShader && !gpu ? " (Smooth until Wind's Metal pass is ready)" : "")")
+        Log.info("render scaling: \(s.label)\(s.usesShader && !gpu ? " (Nearest until Wind's Metal pass is ready)" : "")")
         refreshPicture()
     }
 
@@ -781,7 +771,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         #endif
         DispatchQueue.global(qos: .userInitiated).async {
             let u = simulateFailure ? nil : Upscaler.make()
-            if simulateFailure { Log.error("render scaling: simulated Metal failure; using Smooth") }
+            if simulateFailure { Log.error("render scaling: simulated Metal failure; using Nearest") }
             DispatchQueue.main.async {
                 self.upscalerLoading = false
                 guard let u else { self.upscalerFailed = true; return }
@@ -803,9 +793,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         layout()
     }
 
-    /// Wind's pass failed at run time: Smooth for the rest of this run.
+    /// Wind's pass failed at run time: Nearest for the rest of this run.
     private func upscaleFailed(_ why: String) {
-        Log.error("render scaling: \(why); using Smooth until Wind restarts")
+        Log.error("render scaling: \(why); using Nearest until Wind restarts")
         upscalerFailed = true
         upscaler = nil
         inFlight = nil; drawnView = nil; encodedView = nil
@@ -820,7 +810,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if let f = inFlight { f.buffer.waitUntilCompleted(); inFlight = nil }   // superseded by this one
         let uv = Upscaler.view(center: center, scale: scale, size: screen.frame.size)
         guard let dr = drawable(for: src) else { return false }
-        guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return false }
+        guard let cb = u.encode(src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return false }
         cb.waitUntilCompleted()
         guard cb.status == .completed else { upscaleFailed("a pass failed (\(cb.error?.localizedDescription ?? "?"))"); return false }
         encodedView = uv; encodedSeq = captureSeq
@@ -857,7 +847,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if uv != encodedView { publishCapView(uv, size: screen.frame.size, px: Double(src.width) / screen.frame.width) }
         if uv != encodedView || captureSeq != encodedSeq {
             guard let dr = drawable(for: src) else { return now }    // none free: this tick shows the last one
-            guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return now }
+            guard let cb = u.encode(src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return now }
             inFlightIDs += 1
             let id = inFlightIDs, at = CACurrentMediaTime()
             inFlight = (dr, cb, now, uv, id)
