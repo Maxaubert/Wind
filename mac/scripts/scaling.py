@@ -68,7 +68,7 @@ ALL_REFS = ("nearest", "bilinear", "catmull", "nis", "xbr")
 def card_checks(W, check, levels=(3, 6), modes=None, label="render scaling"):
     """Per mode and level: the overlay draws with that filter, and the card on the zoomed screen matches
     the CPU reference for it (mean difference under 1.5 levels, and closer to it than to any other filter).
-    Leaves renderScaling at Nearest. W is windtest, check its check()."""
+    Leaves renderScaling as WIND_SCALING (or Nearest). W is windtest, check its check()."""
     build()
     card = show_card(60 + 25 * len(levels) * len(modes or MODES))
     try:
@@ -95,6 +95,6 @@ def card_checks(W, check, levels=(3, 6), modes=None, label="render scaling"):
                       f"drawn {s['drawn']} scaling {sc}")
                 check(f"{label}: {name} at {lv}x matches the CPU reference", own < 1.5 and own < nearest_other[0] / 3,
                       f"mean difference {own:.2f} levels, {bad:.2f}% of pixels over 24; next closest {nearest_other[1]} {nearest_other[0]:.2f}")
-        W.set_config(renderScaling=0); W.ctl("level 1"); time.sleep(0.4)
+        W.set_config(renderScaling=int(os.environ.get("WIND_SCALING", "0"))); W.ctl("level 1"); time.sleep(0.4)
     finally:
         card.kill()

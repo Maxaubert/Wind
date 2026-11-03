@@ -100,9 +100,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             // A warm stream already has the screen: show it at once (a cold start takes ~80 ms).
             haveFrame = latest != nil
             pendingCapture = false
-            if let l = latest {
+            if latest != nil {
                 if gpu { presentNow() }                 // the upscaled view, from its first frame
-                else { _ = l; CATransaction.begin(); CATransaction.setDisableActions(true); showCapture(); CATransaction.commit() }
+                else { CATransaction.begin(); CATransaction.setDisableActions(true); showCapture(); CATransaction.commit() }
             }
             window?.alphaValue = haveFrame ? 1 : 0      // else shown with the first captured frame
             layout()                                    // the right scale before the window is ordered in
@@ -153,8 +153,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var lastTickAt = 0.0                      // the last updateCursor (one per zoom tick)
     private var pendingCapture = false                // the newest captured frame goes up with the next tick's commit
     private var shownBuffer: CVPixelBuffer?           // the captured frame on the layer (held: the capture must not reuse it)
-    private var captureStale = false
-                  // frames came that changed nothing in the view: not shown yet
+    private var captureStale = false                  // frames came that changed nothing in the view: not shown yet
 
     /// The newest captured frame onto the layer (inside the caller's transaction).
     private func showCapture() {
@@ -441,7 +440,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// Called every tick with the pointer (desktop points): place the drawn cursor.
     func updateCursor(_ p: CGPoint) {
         DrawZoom.beat = CACurrentMediaTime()
-        guard visible, let screen = NSScreen.screens.first else { return }
+        guard visible, !NSScreen.screens.isEmpty else { return }
         let now = CACurrentMediaTime()
         var shapeDue = false
         // macOS can show the real cursor again (entering the Dock, an app switch): checked every frame
@@ -458,7 +457,6 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
         // An app set a new cursor (ClearCursor kept it): draw it this tick, not at the next 0.1 s check.
         if SkyLight.forceHidden && ClearCursor.shared.generation != cursorGen { shapeDue = true }
-        _ = screen
         lastTickAt = now
         lastPointer = p
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -470,7 +468,6 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         var st = Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair)
         if gpu { st = gpuTick(st) }
         else if pendingCapture { showCapture() }
-
         drawOverlay(st)
         CATransaction.commit()
     }
@@ -793,9 +790,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
 
     /// The picture again after the filter changed: the captured frame on the layer, or a pass of Wind's own.
     private func refreshPicture() {
-        guard visible, haveFrame, let l = latest else { layout(); return }
+        guard visible, haveFrame, latest != nil else { layout(); return }
         if gpu { encodedView = nil; layout(); presentNow(); return }
-        _ = l
         CATransaction.begin(); CATransaction.setDisableActions(true)
         showCapture()
         if let p = lastPointer { drawOverlay(Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair)) }
