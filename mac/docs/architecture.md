@@ -875,6 +875,12 @@ before 0.4.0 with `smoothImages` on and no `renderScaling` loads as Smooth (its 
   Sharp: showing each such frame brought the next, a loop at the refresh rate that kept WindowServer at
   41-54% CPU and the GPU at 54-66% with the view still (main before 0.4.0). Now 2-6% and 3-11% (1x:
   1-2% and 2-3%). Changes outside the view (a menu-bar item at 40 Hz) cost nothing.
+  A frame compared against a view the tick has moved since counts as changed (a change in the strip just
+  come into view stayed stale once the view stopped); `e2e_draw.py` checks a change in a still view and one
+  outside it that the view then pans onto, in every mode (`scalecard patch`).
+- **Capture buffers** (queueDepth 4): a pass holds its frame's CVPixelBuffer until the GPU is done (the
+  texture keeps only the IOSurface, and ScreenCaptureKit reuses a buffer nobody holds), and while the Metal
+  layer shows the picture the image layer lets go of its frame.
 - **Why a CAMetalLayer**: setting a new IOSurface as the image layer's contents every refresh made
   WindowServer show only 166-177 of ~220 refreshes while panning (every other one skipped), even with a
   trivial copy pass and with 3 or 6 surfaces; drawables show all of them.

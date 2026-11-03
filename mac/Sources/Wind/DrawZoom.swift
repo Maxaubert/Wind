@@ -637,9 +637,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
               let pb = CMSampleBufferGetImageBuffer(sb), let surf = CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue() else { return }
         // Wind's pass runs only for a change in the view (on this queue, before the main thread sees it).
         let dirty = (att.first?[.dirtyRects] as? [Any])?.compactMap { ($0 as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } }
-        let changed = changedInView(pb, dirty: dirty)
+        let cmp = changedInView(pb, dirty: dirty)
         DispatchQueue.main.async {
             guard self.stream === s else { return }    // a stopped stream's late frames are dropped
+            // Compared against a view that has moved since (the tick published a new one after this frame was
+            // compared): a change in the part just come into view would be missed, and stay stale once the view
+            // stops. Counted as changed (review 2026-11-03).
+            let changed = cmp.changed || cmp.view != self.publishedCapView
             self.latestBuffer = pb
             if changed { self.captureSeq += 1 }
             if self.latest == nil && !self.visible && self.warmingSince > 0 {
@@ -816,7 +820,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if let f = inFlight { f.buffer.waitUntilCompleted(); inFlight = nil }   // superseded by this one
         let uv = Upscaler.view(center: center, scale: scale, size: screen.frame.size)
         guard let dr = drawable(for: src) else { return false }
-        guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture) else { upscaleFailed("a pass could not be encoded"); return false }
+        guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return false }
         cb.waitUntilCompleted()
         guard cb.status == .completed else { upscaleFailed("a pass failed (\(cb.error?.localizedDescription ?? "?"))"); return false }
         encodedView = uv; encodedSeq = captureSeq
@@ -853,7 +857,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if uv != encodedView { publishCapView(uv, size: screen.frame.size, px: Double(src.width) / screen.frame.width) }
         if uv != encodedView || captureSeq != encodedSeq {
             guard let dr = drawable(for: src) else { return now }    // none free: this tick shows the last one
-            guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture) else { upscaleFailed("a pass could not be encoded"); return now }
+            guard let cb = u.encode(scaling, src: src, view: uv, into: dr.texture, hold: latestBuffer) else { upscaleFailed("a pass could not be encoded"); return now }
             inFlightIDs += 1
             let id = inFlightIDs, at = CACurrentMediaTime()
             inFlight = (dr, cb, now, uv, id)
@@ -887,7 +891,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let r = uv.map { CGRect(x: Double($0.uvMin.x) * size.width * px, y: Double($0.uvMin.y) * size.height * px,
                                 width: Double($0.uvMax.x - $0.uvMin.x) * size.width * px, height: Double($0.uvMax.y - $0.uvMin.y) * size.height * px).insetBy(dx: -6, dy: -6) }
         capLock.lock(); capView = r; capLock.unlock()
+        publishedCapView = r
     }
+    /// The last view published to the capture queue (main thread's copy).
+    private var publishedCapView: CGRect?
 
     /// Capture queue: whether this frame changed anything in the view. A frame the overlay's own commit
     /// caused (excluded from the capture, yet every commit of it brings a frame marked dirty over the
@@ -895,8 +902,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// (0.1-1 ms). Showing each such frame brought the next one, a loop at the refresh rate with the view
     /// still: WindowServer 41-54% CPU and the GPU 54-66%, against 3-5% and 4-9% now (scaling_truth,
     /// 2026-11-03). Changes outside the view (a menu-bar item animating at 40 Hz) cost nothing either.
-    private func changedInView(_ pb: CVPixelBuffer, dirty: [CGRect]?) -> Bool {
+    private func changedInView(_ pb: CVPixelBuffer, dirty: [CGRect]?) -> (changed: Bool, view: CGRect?) {
         capLock.lock(); let view = capView, prev = capPrev; capPrev = pb; capLock.unlock()
+        return (changedInView(pb, prev: prev, view: view, dirty: dirty), view)
+    }
+    private func changedInView(_ pb: CVPixelBuffer, prev: CVPixelBuffer?, view: CGRect?, dirty: [CGRect]?) -> Bool {
         guard let r0 = view, let dirty, let prev,
               CVPixelBufferGetWidth(prev) == CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(prev) == CVPixelBufferGetHeight(pb) else { return true }
         let full = CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb))
@@ -934,7 +944,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// skipped), whatever the pass cost; drawables show all of them, like Nearest (2026-11-03).
     private func show(_ d: CAMetalDrawable) {
         d.present()
-        if metal.isHidden { metal.isHidden = false; image.isHidden = true }
+        if metal.isHidden {
+            metal.isHidden = false; image.isHidden = true
+            // Its frame would hold one of the capture's 4 buffers for nothing (shown again by showCapture).
+            image.contents = nil; shownBuffer = nil
+        }
     }
 
     /// Render scaling for the tests' state: the filter wanted and in use, and Wind's passes so far.

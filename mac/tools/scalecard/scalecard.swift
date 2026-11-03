@@ -4,6 +4,8 @@
 // scalecard grab <out.ppm> [x y w h]         one frame of what is on screen, at the backing resolution,
 //                                            cropped to that rect (pixels): this process has no window and
 //                                            leaves only itself out, so Render's overlay is in it.
+// scalecard patch <x> <y> <w> <h>            a plain window at that rect; stdin lines "r g b" (0-255) set its colour,
+//                                            "move x y" moves it; prints "ready", then "ok" after each line.
 // For the Render scaling checks in scripts/e2e_draw.py (tools/upscaleref computes what each filter
 // should show from a grab at 1x).
 import AppKit
@@ -127,6 +129,32 @@ func grab() {
     dispatchMain()
 }
 
+func patch() {
+    let x = Double(a[2])!, y = Double(a[3])!, w = Double(a[4])!, h = Double(a[5])!
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let H = NSScreen.screens[0].frame.height
+    let win = NSWindow(contentRect: NSRect(x: x, y: H - y - h, width: w, height: h), styleMask: [.borderless], backing: .buffered, defer: false)
+    win.level = .floating; win.hasShadow = false; win.ignoresMouseEvents = true; win.animationBehavior = .none
+    win.collectionBehavior = [.canJoinAllSpaces, .stationary]
+    win.backgroundColor = NSColor(srgbRed: 0.5, green: 0.5, blue: 0.5, alpha: 1)
+    win.orderFrontRegardless()
+    Thread.detachNewThread {
+        while let l = readLine() {
+            let p = l.split(separator: " ")
+            DispatchQueue.main.async {
+                if p.first == "move", p.count == 3 { win.setFrameOrigin(NSPoint(x: Double(p[1])!, y: H - Double(p[2])! - h)) }
+                else if p.count == 3 { let c = p.map { CGFloat(Double($0) ?? 0) / 255 }; win.backgroundColor = NSColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: 1) }
+                print("ok")
+            }
+        }
+        exit(0)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { print("ready") }
+    app.run()
+}
+
 if a.count > 6 && a[1] == "card" { card() }
+else if a.count > 5 && a[1] == "patch" { patch() }
 else if a.count > 2 && a[1] == "grab" { grab() }
-else { print("usage: scalecard card <x> <y> <w> <h> <seconds> | grab <out.ppm> [x y w h]"); exit(2) }
+else { print("usage: scalecard card <x> <y> <w> <h> <seconds> | patch <x> <y> <w> <h> | grab <out.ppm> [x y w h]"); exit(2) }

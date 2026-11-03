@@ -78,6 +78,7 @@ ctl("level 1"); time.sleep(0.4)
 # tools/upscaleref (the Windows HLSL for NIS and xBR) on a test card of Wind's own (tools/scalecard).
 import scaling
 scaling.card_checks(sys.modules["windtest"], check)
+scaling.change_checks(sys.modules["windtest"], check, mv, modes=(0, 3, 4, 2, 1))
 # A still view costs no pass: the frames the overlay's own commits bring are told apart from changes.
 set_config(renderScaling=2)
 ctl("level 1"); time.sleep(0.3); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.5)

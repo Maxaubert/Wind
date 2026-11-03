@@ -90,7 +90,9 @@ final class Upscaler: @unchecked Sendable {
 
     /// Encodes and commits one pass of `mode` (.xbr or .nis) over `s` for `view` into `dst` (a drawable's
     /// texture). Returns its command buffer (wait for it before presenting), or nil when it cannot run.
-    func encode(_ mode: RenderScaling, src s: IOSurface, view: View, into dst: MTLTexture) -> MTLCommandBuffer? {
+    /// `hold` (the capture's CVPixelBuffer) is kept until the GPU is done with it: the texture keeps only the
+    /// IOSurface, and ScreenCaptureKit reuses a buffer for a new frame once nobody holds it.
+    func encode(_ mode: RenderScaling, src s: IOSurface, view: View, into dst: MTLTexture, hold: AnyObject? = nil) -> MTLCommandBuffer? {
         guard let src = source(s), let cb = queue.makeCommandBuffer() else { return nil }
         let W = Float(src.width), H = Float(src.height)
         var p = Params(uvMin: view.uvMin, uvMax: view.uvMax, srcSize: [W, H], dstSize: [Float(dst.width), Float(dst.height)])
@@ -127,6 +129,7 @@ final class Upscaler: @unchecked Sendable {
             return nil
         }
         cb.addCompletedHandler { [weak self] b in
+            withExtendedLifetime(hold) {}
             guard let self, b.status == .completed else { return }
             let ms = (b.gpuEndTime - b.gpuStartTime) * 1000
             self.statsLock.lock(); self.passes += 1; self.gpuMs.append(ms); if self.gpuMs.count > 4000 { self.gpuMs.removeFirst(2000) }; self.statsLock.unlock()

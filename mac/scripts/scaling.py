@@ -98,3 +98,40 @@ def card_checks(W, check, levels=(3, 6), modes=None, label="render scaling"):
         W.set_config(renderScaling=int(os.environ.get("WIND_SCALING", "0"))); W.ctl("level 1"); time.sleep(0.4)
     finally:
         card.kill()
+
+def change_checks(W, check, mv, modes=(0, 2), level=4):
+    """A still view shows a change inside it, and a change outside it once the view pans onto it (frames that
+    change nothing in the view are skipped, changedInView). mv(dx, dy, n, ms) moves the virtual mouse."""
+    build()
+    def patch(*r):
+        p = subprocess.Popen([CARD, "patch", *map(str, r)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        p.stdout.readline(); return p
+    def say(p, c): p.stdin.write(c + "\n"); p.stdin.flush(); p.stdout.readline()
+    def at(img, pt, s):                            # mean colour around a desktop point on the zoomed screen
+        c = s["sky"]["center"]; x = int((960 + (pt[0] - c[0]) * level) * 2); y = int((540 + (pt[1] - c[1]) * level) * 2)
+        return img[y - 3:y + 4, x - 3:x + 4].reshape(-1, 3).mean(axis=0)
+    inside, outside = patch(940, 520, 40, 40), patch(560, 525, 40, 30)
+    try:
+        W.ctl("level 1"); time.sleep(0.5)
+        want = {}
+        for col in ("250 0 0", "0 200 0", "250 120 0"):      # what each colour looks like captured (the display's colour space)
+            say(inside, col); time.sleep(0.3)
+            want[col] = read_ppm(grab(os.path.join(OUT, "patch1x.ppm")))[1080 - 3:1080 + 4, 1920 - 3:1920 + 4].reshape(-1, 3).mean(axis=0)
+        say(inside, "128 128 128")
+        for mode in modes:
+            name = MODES[mode][0]
+            W.set_config(renderScaling=mode); time.sleep(0.3)
+            W.ctl("level 1"); time.sleep(0.4); W.ctl("warp 960 540"); time.sleep(0.3); W.ctl(f"level {level}"); time.sleep(1.2)
+            for col in ("250 0 0", "0 200 0"):
+                say(inside, col); time.sleep(0.25)
+                s = W.ctl("state"); got = at(read_ppm(grab(os.path.join(OUT, "patch.ppm"))), (948, 528), s)   # off the cursor
+                check(f"render scaling: {name} shows a change in a still view", np.abs(got - want[col]).max() <= 6, f"want {want[col].round()} got {got.round()}")
+            say(outside, "250 120 0"); time.sleep(0.3)
+            mv(-12, 0, 25, 8); time.sleep(0.5)
+            s = W.ctl("state"); got = at(read_ppm(grab(os.path.join(OUT, "patch.ppm"))), (580, 540), s)
+            check(f"render scaling: {name} shows a change outside the view once the view pans onto it", np.abs(got - want["250 120 0"]).max() <= 6,
+                  f"view {s['sky']['center']} want {want['250 120 0'].round()} got {got.round()}")
+            say(outside, "128 128 128"); say(inside, "128 128 128"); time.sleep(0.2)
+        W.set_config(renderScaling=int(os.environ.get("WIND_SCALING", "0"))); W.ctl("level 1"); time.sleep(0.4)
+    finally:
+        inside.kill(); outside.kill()
