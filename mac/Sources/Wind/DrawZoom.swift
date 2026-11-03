@@ -36,6 +36,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     nonisolated(unsafe) static var handedOver = false
     private var promptTimer: Timer?
     private var handoverWindow: Int?           // the window that made the engine hand over
+    /// The handover's window when it is stacked above the overlay (a system alert, the lock screen): it is
+    /// above Wind's cursor panel too, so macOS's zoom shows the real cursor meanwhile (Magnifier.cursorCovered).
+    private(set) var handoverAbove: Int?
 
     private var window: NSWindow?
     private let image = CALayer()
@@ -126,9 +129,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     }
 
     /// The overlay shows a picture: hide the real cursor, Wind draws it from now on.
+    /// `forceHidden` is shared with Wind's cursor on macOS's zoom (WindCursor): coming back from a handover
+    /// with Wind's cursor on, it was still set, so this returned early, and Wind's cursor going off a tick
+    /// later cleared it and showed the real cursor: drawn AND real cursor until a zoom-out (owner
+    /// 2026-11-02, after a permission prompt). Taken over here in either case; updateCursor re-takes it
+    /// whenever something else cleared it.
     private func takeCursor() {
-        guard !SkyLight.forceHidden else { return }
-        pointerHidden = SkyLight.wantHidden             // carry Wind's own hide state over
+        if !SkyLight.forceHidden { pointerHidden = SkyLight.wantHidden }   // carry Wind's own hide state over
+        else if ClearCursor.shared.isActive { return }  // already render's
         SkyLight.forceHidden = true
         SkyLight.hideRealCursor(clear: true)
         cursorTakenAt = CACurrentMediaTime()
@@ -137,8 +145,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var lastTickAt = 0.0                      // the last updateCursor (one per zoom tick)
     private var pendingSurface: IOSurface?            // a captured frame for the next tick's commit
 
+    /// The capture stream is running (tests).
+    var capturing: Bool { stream != nil }
     /// A captured frame is at hand, so the overlay can show the zoom from its first frame.
     var hasFrame: Bool { latest != nil }
+    /// The overlay shows a picture and Wind draws the cursor in it (the real one is render's).
+    var drawsCursor: Bool { visible && haveFrame }
 
     /// Cold start (render engine): start capturing before the zoom moves, overlay still ordered out.
     /// Magnifier holds the level at 1x until `hasFrame`, so the first zoomed frame is at ~1.0004
@@ -225,7 +237,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// included, is captured and drawn magnified, and clicks land on it where it is drawn (the
     /// Screen Recording prompt, universalAccessAuthWarn, sits under the overlay: it stays drawn).
     /// The window that makes it so (its window number), or nil.
-    static func blockingWindow() -> Int? {
+    static func blockingWindow() -> (id: Int, above: Bool)? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         let me = ProcessInfo.processInfo.processIdentifier
         var ignore = Set<String>()
@@ -249,11 +261,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
             if ignore.contains(owner) { continue }
             let id = w[kCGWindowNumber as String] as? Int ?? 0
-            if lockOwners.contains(owner) || sharing == 0 { return id }
+            if lockOwners.contains(owner) { return (id, true) }
+            if sharing == 0 { return (id, false) }
             // Above the overlay (listed before it). With the overlay not on screen, judge by level:
             // prompts at or above the screen-saver level would stack over it, unless the overlay
             // goes on its own space above them.
-            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return id }
+            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return (id, true) }
         }
         return nil
     }
@@ -285,23 +298,54 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if DrawZoom.handedOver, let id = handoverWindow, DrawZoom.windowOnScreen(id) { return }
         let blocking = takeover ? nil : DrawZoom.blockingWindow()
         let prompt = takeover || blocking != nil
+        if DrawZoom.handedOver && DrawZoom.failed {     // the capture failed meanwhile: macOS's zoom stays
+            DrawZoom.handedOver = false; handoverWindow = nil; handoverAbove = nil
+            return
+        }
         if prompt && !DrawZoom.handedOver {
             Log.info(takeover ? "draw engine: screenshot or colour-sampler mode; macOS zoom shows it"
-                              : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay); macOS zoom shows it")
+                              : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay\(blocking?.above == true ? ", over Wind's cursor too" : "")); macOS zoom shows it")
             DrawZoom.handedOver = true
-            handoverWindow = blocking
+            handoverWindow = blocking?.id
+            handoverAbove = blocking?.above == true ? blocking?.id : nil
             hide()
+            // No capture while macOS's zoom shows the screen: a 4K stream running under it made the
+            // handed-over zoom choppy (with a system alert up, 28% of pan refreshes skipped and 32% of
+            // steps uneven, against 3% and 6% on plain Transform; owner 2026-11-02). Restarted for the
+            // hand back, which waits for its first frame.
+            stopStream()
             DrawZoom.enabled = false
             onHandover?(true)
+        } else if prompt && DrawZoom.handedOver && (stream != nil || starting) {
+            // Something else came up while the hand back warmed the capture: stay with macOS's zoom
+            // for it, without the capture (review 2026-11-02), and wait for that window instead.
+            Log.info("draw engine: another window the capture cannot show is up; macOS zoom keeps showing it")
+            handoverWindow = blocking?.id
+            handoverAbove = blocking?.above == true ? blocking?.id : nil
+            idleStop?.cancel(); idleStop = nil
+            stopStream()
         } else if !prompt && DrawZoom.handedOver {
-            Log.info("draw engine: it is gone; back to drawing")
+            // Back only with a fresh frame at hand, so the overlay shows the zoom at once (a cold start
+            // takes ~100 ms; the first frame calls this again).
+            if latest == nil {
+                if stream == nil && !starting {
+                    Log.info("draw engine: it is gone; capturing again before drawing")
+                    scheduleIdleStop()                  // lets startStream keep the stream while not drawing
+                    handbackSince = CACurrentMediaTime()
+                    startStream()
+                }
+                return
+            }
+            Log.info(String(format: "draw engine: it is gone; back to drawing (capture warm after %.0f ms)", (CACurrentMediaTime() - handbackSince) * 1000))
             DrawZoom.handedOver = false
-            handoverWindow = nil
+            handoverWindow = nil; handoverAbove = nil
             SkyLight.resetCompositor()                  // leave macOS's zoom before drawing again
             DrawZoom.enabled = true
             onHandover?(false)
         }
     }
+
+    private var handbackSince = 0.0
 
     /// Switch the engine off for this run and let macOS's zoom take over.
     private func fail(_ why: String) {
@@ -311,6 +355,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         stopStream()
         DrawZoom.enabled = false
         onFailure?()
+    }
+
+    /// The engine was switched to macOS's zoom: stop the idle capture now, not after its minute at 1x
+    /// (a 4K stream running under macOS's zoom makes it choppy; see checkPrompts).
+    func stopCapture() {
+        guard !visible else { return }
+        idleStop?.cancel(); idleStop = nil
+        if stream != nil || starting { stopStream(); Log.info("draw engine: capture stopped (engine switched)") }
     }
 
     private func stopStream() {
@@ -368,6 +420,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // Not in the 0.1 s after taking it: the scoreboard can still read shown then, and a forced
         // show+hide right after the order-in blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
         if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor(clear: true) }
+        // Something else gave the real cursor back while the overlay shows a picture (Wind's cursor on
+        // macOS's zoom going off right after a handover back): take it again at once.
+        if haveFrame && !SkyLight.forceHidden { takeCursor() }
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
             shapeDue = true
@@ -527,7 +582,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 Log.info(String(format: "draw engine: capture warm %.0f ms after the zoom was asked for", (CACurrentMediaTime() - self.warmingSince) * 1000))
                 self.warmingSince = 0
             }
+            let first = self.latest == nil
             self.latest = surf
+            if first && DrawZoom.handedOver { self.checkPrompts() }   // the hand back waited for this frame
             guard self.visible else { return }
             self.frames += 1
             // While the zoom ticks, a captured frame goes up with the tick's own commit: committed

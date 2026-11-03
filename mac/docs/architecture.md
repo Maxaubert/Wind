@@ -348,6 +348,8 @@ screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning o
   following the hand (a view shift drags the held pointer, sometimes a tick late).
 - `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
   game lock); `WIND_CURSOR=wind` runs any suite with it.
+- A window of another process stacked above its panel (a system alert, a password prompt) would cover it:
+  the real cursor shows instead until that window closes (`Magnifier.cursorCovered`, see "System prompts").
 
 ### The real cursor over the Dock (owner report 2026-11-02)
 Zoomed (render, or Transform with Wind's cursor), hovering the Dock showed the real, unmagnified cursor
@@ -746,15 +748,55 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   bind) decides the drawn cursor and is restored on the real one when the overlay goes; the drawn
   cursor is also hidden while a game holds the pointer; its shape is compared by pixels.
 - **System prompts** (owner report 2026-10-31, the same as UIAccess prompts on Windows). Render keeps
-  password prompts on screen and draws them magnified (`SkyLight.placeAbovePrompts`); clicks land on them
-  where drawn, because the drawn cursor maps onto the real pointer.
-  - Wind still hands over to macOS's zoom (`DrawZoom.handedOver`) for the lock screen, for a window that
-    opts out of capture, and for anything stacked above the overlay. If the space cannot be placed,
-    password prompts count as above it again.
-  - It hands back only when the window that caused the handover has closed. System alerts from
-    UserNotificationCenter (layer 8) sit above the overlay's space; judged by level once the overlay was
-    hidden, they looked gone and the engine flipped 4 times a second (2026-11-01).
+  password prompts AND system alerts on screen and draws them magnified (`SkyLight.placeAbovePrompts`);
+  clicks land on them where drawn, because the drawn cursor maps onto the real pointer.
+  - The overlay sits on a space of its own at absolute level ScreenLock - 1 (299 on macOS 27.2; the
+    SkyLight constants: SecurityAgent 200, ScreenLock 300, NotificationCenterAtScreenLock 400). Password
+    prompts are on the SecurityAgent space (200). System alerts from UserNotificationCenter (layer 8:
+    permission and TCC prompts, CFUserNotification) are on a space at 299 too, created at login
+    (`SLSCopySpacesForWindows` mask 15 finds it; masks below 15 do not): a newer space at the same level
+    stacks above it, whether the alert came up before or after (window-list order, 2026-11-02; at 250 or
+    298 the alert stayed above). Until 2026-11-02 the space was at 250 and render handed over for alerts.
+  - **No switch for alerts** (owner 2026-11-02: "Transform is very smooth, but when you're on Render and it
+    switches to Transform for a system alert it is very choppy; I thought we solved it for Render"). The
+    hand-over mode was choppy because render's 4K capture kept running under macOS's zoom: with an alert
+    up, macOS's zoom alone skipped 6% of pan refreshes and jerked on 9% of steps, and with the capture
+    still running 27% and 33% (the alert's material alone takes WindowServer from 40% to 68% CPU; the
+    capture alone under macOS's zoom was fine). `scripts/handover_truth.py` measures it on the zoomed
+    screen (viewcap). Now render stays on and draws the alert: as smooth as render without it (3x: jerks
+    32% vs 34%, skipped 13% vs 14%; render's own figures include the second capture viewcap adds), and
+    `e2e_draw.py` clicks the drawn alert's OK button (its text read back first) and the click lands.
+  - Wind still hands over to macOS's zoom (`DrawZoom.handedOver`) for the lock screen, screenshot and
+    colour-sampler modes, a window that opts out of capture, and anything still stacked above the overlay.
+    If the space cannot be placed, prompts at or above the screen-saver level count as above it again.
+  - **Handed over, render's capture stops** (`stopStream` in `checkPrompts`), and the hand back waits for
+    a fresh frame from a restarted stream (~100 ms; the first frame calls `checkPrompts` again), so the
+    overlay shows the zoom at once. Another such window coming up while it warms stops it again and is waited for instead (review 2026-11-02). `handover_truth.py --tier 250` (the old space, alerts above it): the
+    handed-over mode now pans like macOS's zoom with the alert up (3x: jerks 8.9% vs 8.5%, skipped 5.1% vs
+    5.7%; 6x 10.7% and 8.1%, before 14-37%). Switching the engine to Transform also stops render's idle
+    capture at once (it ran a minute at 1x and made Transform choppy meanwhile).
+  - It hands back only when the window that caused the handover has closed: judged by level once the
+    overlay was hidden, alerts above it looked gone and the engine flipped 4 times a second (2026-11-01).
   - Both ways the other engine shows the same view at once.
+  - **The cursor during and after a prompt** (owner 2026-11-02, a permission prompt on render with Wind's
+    cursor). (1) Handed over, Transform drew Wind's cursor in its panel (level screenSaver+1), and the alert
+    sits on a space above every app window (UserNotificationCenter, layer 8, listed first; TCC prompts are
+    such alerts, measured with a throwaway app): the cursor went BEHIND the prompt. Now a handover for a
+    window above the overlay sets `Magnifier.cursorCovered`, and on macOS's zoom a 0.25 s check
+    (`WindCursor.windowAbove`: a big window of another process listed before Wind's cursor panel; SecurityAgent
+    too; only the windows above the panel are read, off the main thread: on it `cursor_truth` showed longmed and
+    hold at 4x over 3% jumps, and the whole list off it went with "fast" over 3% at 4x and 7.3x in 2 of 3 runs) sets it: Wind's cursor goes, the real one shows, magnified by Transform and above the prompt, until
+    that same window closes. (2) Back to render, `DrawZoom.takeCursor` returned early because Wind's cursor
+    still held the shared `SkyLight.forceHidden`; Wind's cursor going off a tick later cleared it and showed
+    the real cursor: the drawn cursor plus a tiny real one until a zoom-out. Now Wind's cursor goes off before
+    the handback, leaves the cursor alone while render draws it (`DrawZoom.drawsCursor`), and render re-takes
+    it on any tick it finds `forceHidden` cleared. Measured with `fakeprompt alert` at 3x, the pointer still:
+    before, no cursor on the alert (Wind's under it, the real one hidden) and after it the real cursor opaque
+    (`realCursorVisible`, not `realCursorClear`) in every sample until 1x; after, the real cursor magnified on
+    the alert (zoomed-screen capture) and 0 of 6 samples with the real cursor once it closed. `e2e_draw.py`
+    checks it on render (system and Wind's cursor) and Transform with Wind's cursor (alert and password prompt).
+    Since 2026-11-02 render draws alerts instead of handing over (above); (1) still covers Transform with
+    Wind's cursor and any handover for a window above the overlay, (2) any hand back.
   - Dead ends: the cursor plane (a screen-sized cursor image) is above prompts but changes a frame late;
     a CGDisplayCapture shield and a displayable CAContext stay under them.
 - **Drawn cursor shape changes** (owner 2026-10-31: the cursor showed big for a moment at every shape

@@ -44,6 +44,10 @@ final class Magnifier {
     private(set) var crosshairAt: CGPoint?      // where Inspect's crosshair is drawn
     private(set) var windCursorAt: CGPoint?     // where Wind's own cursor is drawn (cursor = "wind")
     private var windCursorOffset: Pt?           // its last offset from the shown centre (pointer - exact centre)
+    /// A system prompt stacked above Wind's cursor panel (its window number): macOS's zoom shows the real
+    /// cursor, magnified, until it closes. Wind's cursor was drawn UNDER the prompt (owner 2026-11-02).
+    private(set) var cursorCovered: Int?
+    private var coverTimer: Timer?
     private var prevRawMotion = 0.0
     private var placedThisTick = Pt(0, 0)       // whole points Wind's carries moved the pointer this tick
     private var placedLastTick = Pt(0, 0)
@@ -122,13 +126,17 @@ final class Magnifier {
         config = c
         let draw = c.engine == "draw" && !DrawZoom.failed && !DrawZoom.handedOver
         DrawZoom.shared.onFailure = { [weak self] in self?.lastWritten = nil; self?.wake() }   // re-zoom with macOS's zoom
-        DrawZoom.shared.onHandover = { [weak self] _ in
+        DrawZoom.shared.onHandover = { [weak self] on in
             // The other engine draws from the next tick: write the view again, and start the
             // pointer model afresh (the two engines move the pointer differently).
             // The other engine shows the same view at once. Starting it from "1x" made the next level
             // write treat the view as pinned to an edge: it jumped to the top-left corner and macOS
             // took the pointer to (0, 0) (traced 2026-10-31).
             guard let self else { return }
+            // Handing over for a window above the overlay (a system alert, permission prompt, the lock
+            // screen): it is above Wind's cursor panel too, so the real cursor shows on macOS's zoom.
+            self.cursorCovered = on ? DrawZoom.shared.handoverAbove : nil
+            if !on { self.windCursor.show(at: nil, on: false); self.windCursorAt = nil }   // render takes the cursor
             let lv = self.zoom.level
             if self.zoomedSession && lv > 1.0001 {
                 self.send(self.center, level: lv, keepPointer: true)
@@ -136,7 +144,8 @@ final class Magnifier {
             } else { self.lastWritten = nil; self.liveLevel = 1 }
             self.handTarget = nil; self.lastPtr = nil; self.wake()
         }
-        if c.engine != "draw" { DrawZoom.handedOver = false }
+        // Switched to Transform: also stop a capture a hand back was warming (it ran under macOS's zoom).
+        if c.engine != "draw" { DrawZoom.handedOver = false; DrawZoom.shared.stopCapture() }
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw
@@ -178,6 +187,7 @@ final class Magnifier {
         }
         if SkyLight.isZoomed { SkyLight.reset() }
         guard installTap() else { return false }
+        coverTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkCursorCover() }
         // Wind's own cursor moves to match each view write just before it (carries and level writes
         // come before the frame's last write; a cursor moved only once per frame showed a frame of
         // the new view with the old cursor place, measured on the zoomed screen).
@@ -521,6 +531,40 @@ final class Magnifier {
         if zoomedSession { pendingPlace = inspectLook }
         Log.info("inspect off at \(Int(inspectLook.x)),\(Int(inspectLook.y))")
     }
+
+    /// 4 times a second: a window of another process above Wind's cursor panel (a system prompt) makes
+    /// Wind's cursor go and the real one show (macOS's zoom magnifies it, above the prompt) until that
+    /// window closes. Waits for that same window: with Wind's panel ordered out it cannot be compared.
+    /// The window list is read off the main thread (a few ms each: on main it delayed zoom ticks).
+    private func checkCursorCover() {
+        if coverBusy { return }
+        let covered = cursorCovered
+        let panel = covered == nil && zoomedSession && windCursor.active && !shot.active ? windCursor.shownWindow : nil
+        guard covered != nil || panel != nil else { return }
+        let session = zoomedSession
+        coverBusy = true
+        coverQueue.async { [weak self] in
+            let gone = covered.map { !(session && DrawZoom.windowOnScreen($0)) } ?? false
+            let above = panel.flatMap { WindCursor.windowAbove($0) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.coverBusy = false
+                guard self.cursorCovered == covered else { return }   // a handover changed it meanwhile
+                if covered != nil {
+                    guard gone else { return }
+                    self.cursorCovered = nil
+                    Log.info("the window above Wind's cursor is gone: Wind's cursor again")
+                    self.wake()
+                } else if let w = above, self.zoomedSession, self.windCursor.active {
+                    self.cursorCovered = w.id
+                    Log.info("a window of \(w.owner) is above Wind's cursor (a system prompt): the real cursor shows until it closes")
+                    self.wake()
+                }
+            }
+        }
+    }
+    private var coverBusy = false
+    private let coverQueue = DispatchQueue(label: "wind.cover", qos: .utility)
 
     // MARK: tick
 
@@ -1024,7 +1068,7 @@ final class Magnifier {
         // Not while a screenshot or colour-sampler mode has the pointer: it shows the real cursor itself
         // (WindowServer magnifies it), and Wind's copy doubled it and went into the shot (PointerTakeover).
         // Wind's own screenshot selection draws its crosshair where Wind's cursor would be, whichever cursor is set.
-        let ownCursor = (config.cursor == "wind" || shotOn) && !DrawZoom.enabled && !takeover
+        let ownCursor = (config.cursor == "wind" && cursorCovered == nil || shotOn) && !DrawZoom.enabled && !takeover
         let pNow = owner.owner == .mouse && !locked && !inspect ? virtualPtr : Pt(ptr.x, ptr.y)
         // Following the pointer, the exact centre is the pointer's own (a placement tick writes it at
         // a .5 centre instead, which put the cursor half a point off every other frame).

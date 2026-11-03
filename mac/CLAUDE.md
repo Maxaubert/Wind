@@ -33,6 +33,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
 - `python3 scripts/pan_truth.py`: stutter while zoomed on the zoomed screen (pan, stop, pan again; zooming
   further); every movement start must be as smooth as its middle.
+- `python3 scripts/handover_truth.py`: panning with a system alert up on the zoomed screen (Transform, Render drawing
+  it, `--states zoomalert,handover --tier 250` the hand-over to macOS's zoom); run it after touching `DrawZoom` prompts or the capture.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
 - `python3 scripts/e2e_screenshot.py`: screenshot mode (area, window, Cmd+Shift+5) and the colour sampler while
@@ -42,7 +44,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   Both point the owner's `location-screenshot`/`show-thumbnail` at build/ and restore them (never the Desktop).
 - `python3 scripts/e2e_hover.py`: hover in other apps while zoomed (a notification banner, SwiftUI and AppKit
   hover, click-through), every engine and cursor, plus the cursor given back at 1x; run it (and `e2e_draw.py`'s
-  Dock and app-switch checks) after touching how Wind hides the real cursor or `AlwaysOwnsCursor`.
+  Dock, app-switch and prompt checks) after touching how Wind hides the real cursor or `AlwaysOwnsCursor`.
 - `python3 scripts/cursor_truth.py`: Wind's cursor and Inspect's crosshair measured on the ZOOMED screen
   (what the owner sees, frame by frame); run it after touching either or the write order.
 - `python3 scripts/screenshot_truth.py`: macOS screenshot mode on the ZOOMED screen (crosshair wobble, band lag, pacing); run it after touching the still view in screenshot mode.
