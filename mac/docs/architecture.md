@@ -283,6 +283,20 @@ not.
 - Measured: `edge_truth` passes at 3x, 5.25x and 8x on both edges; the edges keep 1x speed (69.5 pt
   against 68.8). The explorer's edge scenarios show 1 snap of 0.8 screen pt per run, as before.
 
+### Warp carries and the free axis (issue #529, 2026-11-03)
+Tester report (30x, pointer centred, keepPointerSpeed): pushing into the right edge, the pointer flickered
+off screen. Log maths and repro: `~/Documents/Claude/research/wind-mac/2026-11-03-issue-529-edge-flicker.md`.
+- **A warp takes effect against the view shown at that moment**, which can be after the tick's own view
+  write. Planned on the old view while the free axis then moved to the carry's next whole point, the
+  pointer was dragged by that floor change (read 1381.5667 for 1380.5667, exactly one point), and
+  the next tick took it as hand motion times the level (30-150 pt throws). It is a race: 2 of 56 such
+  ticks in his log, 1 of ~200 here with 1-2 ms mouse reports, none with 8 ms reports. So the free axis's
+  view is written first (keepPointer=true) and the warp is planned on it; `carryView` holds the tick's
+  write there.
+- **Without raw counts** (`lockTracking` off, the default) the redo of an undone carry is still taken off
+  (it was only inside the raw-count bound): a 10 pt redo at 30x threw the view 312 pt.
+- `edge_truth.py`'s first check (`--along 30`) pushes toward and along the right edge with 1-2 ms reports.
+
 ### Zoom-pan at a pinned edge (2026-10-31)
 Owner report: panning while zooming with the pointer near an edge shook much more than elsewhere.
 - **Cause.** The view holds against the hand's direction rather than step back a fraction (a rule

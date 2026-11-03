@@ -1223,6 +1223,18 @@ final class Magnifier {
             rawMismatch *= exp(-dt / 0.5)                // try the counts again after a while
             if rawMismatch <= 0.35 { rawDistrusted = false; Log.info("raw counts trusted again") }
         }
+        // Without raw counts (game lock tracking off, the default) the bound below does not run, but a
+        // carry macOS undid and re-applies a tick later is still known: it is taken off here, never as
+        // the hand times the level (issue #529: at 30x a 10 pt redo read as hand motion flung the view
+        // 312 pt along the right edge and the pointer left the screen for a frame).
+        if rawStep == nil || lv <= 1.0001 {
+            func unredo(_ d: Double, _ redo: inout Double) -> Double {
+                guard redo != 0, d * redo > 0, abs(d - redo) <= 0.5 + 0.3 * abs(redo) else { return d }
+                defer { redo = 0 }
+                return d - redo
+            }
+            dx = unredo(dx, &redoX); dy = unredo(dy, &redoY)
+        }
         if let a = rawStep, lv > 1.0001 {
             let b = prevRawStep ?? Pt(0, 0)
             // Signed: the counts also say which way the hand went; against them only a hair passes
@@ -1520,9 +1532,23 @@ final class Magnifier {
         let ey = pinY && abs(want.y - py) >= 0.5 / live ? want.y - py : 0
         let mx = pinX ? ex : kx, my = pinY ? ey : ky
         if mx == 0 && my == 0 && kx == 0 && ky == 0 { return p }
+        // A warp sets the SCREEN position and is turned into a desktop position against the view shown
+        // when it takes effect, which can be after the tick's own view write. Where the other (free)
+        // axis follows the carry onto a new whole point, that write moved the view under a warped
+        // pointer and dragged it the whole point with it, times the level as hand motion next tick
+        // (issue #529, 30x along the right edge: view y 1380.57 written after a warp, the pointer read
+        // 1381.5667 exactly one point on, the view thrown 30 pt and back). So that axis's view is
+        // written FIRST (keeping the pointer's desktop spot) and the warp is planned on it; the tick's
+        // write then stays on it (carryView).
+        var pre = liveCenter
+        if let v = view {
+            let wx = writeAxis(v.x, halfW, screen.w), wy = writeAxis(v.y, halfH, screen.h)   // as send writes them
+            if !pinX && kx != 0 && floor(wx) != floor(liveCenter.x) { pre.x = wx }
+            if !pinY && ky != 0 && floor(wy) != floor(liveCenter.y) { pre.y = wy }
+        }
         // The view's top-left corner as shown: the whole written centre, clamped by the compositor.
-        let ox = min(max(floor(liveCenter.x), halfW), screen.w - halfW) - halfW
-        let oy = min(max(floor(liveCenter.y), halfH), screen.h - halfH) - halfH
+        let ox = min(max(floor(pre.x), halfW), screen.w - halfW) - halfW
+        let oy = min(max(floor(pre.y), halfH), screen.h - halfH) - halfH
         // Whole carries as planned (the remainder stays in the caller's target), on an exact base.
         // A warp is absolute: hand motion that arrived since this tick's read would be lost (a small
         // step back, explorer 2026-10-31), so it is added from a fresh read (no zoom write since).
@@ -1534,6 +1560,11 @@ final class Magnifier {
         // away from its frozen pointer, and a warp there threw the pointer to x = 0).
         let onScreen = s.x >= 0 && s.y >= 0 && s.x <= screen.w - 1 && s.y <= screen.h - 1
         if onScreen && ((pinX && mx != 0) || (pinY && my != 0)) {
+            if pre.x != liveCenter.x || pre.y != liveCenter.y {
+                send(pre, level: live, keepPointer: true)
+                lastWritten = (liveCenter, live)
+                carryView = liveCenter
+            }
             let got = CGPoint(x: ox + s.x / live, y: oy + s.y / live)
             Self.noSuppression?.localEventsSuppressionInterval = 0    // else the hand is held back 250 ms
             CGWarpMouseCursorPosition(s)
