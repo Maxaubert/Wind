@@ -152,6 +152,13 @@ final class WindShot {
         return ax == 0 ? CGPoint(x: c.x, y: f.y) : CGPoint(x: f.x, y: c.y)
     }
 
+    /// What the selection draws, as it is now (a value: render on xBR draws the one of the tick whose
+    /// picture is on screen, a refresh behind).
+    var geom: ShotGeom? {
+        guard active, let c = cross else { return nil }
+        return ShotGeom(mode: mode, cross: c, box: box, anchor: anchor, picked: picked?.rect)
+    }
+
     /// The box as drawn (desktop points), nil before the press.
     var box: CGRect? {
         guard let a = anchor, let e = end else { return nil }
@@ -244,6 +251,15 @@ final class WindShot {
 /// The drawing (crosshair, box, window highlight; no coordinate label, as macOS's own at 1x has none, owner 2026-11-02) as layers in a host layer: render's overlay
 /// (screen points) or Transform's panel (desktop points, magnified by the zoom). Sizes are given in
 /// desktop points and drawn magnified, as macOS's own crosshair looks under zoom.
+/// One frame of the selection's drawing (desktop points).
+struct ShotGeom {
+    var mode: WindShot.Mode
+    var cross: CGPoint
+    var box: CGRect?
+    var anchor: CGPoint?
+    var picked: CGRect?
+}
+
 final class ShotLayers {
     let root = CALayer()
     private let box = CAShapeLayer(), boxDark = CAShapeLayer()
@@ -286,8 +302,9 @@ final class ShotLayers {
     /// Place everything (inside the caller's no-animation transaction). `map` takes a desktop point to
     /// the host's coordinates (bottom-left origin); `mag` is host units per desktop point, `px` per
     /// screen point.
-    func update(_ s: WindShot?, map: (CGPoint) -> CGPoint, mag: Double, px: Double) {
-        guard let s, s.active, let c = s.cross else { root.isHidden = true; return }
+    func update(_ s: ShotGeom?, map: (CGPoint) -> CGPoint, mag: Double, px: Double) {
+        guard let s else { root.isHidden = true; return }
+        let c = s.cross
         root.isHidden = false
         if geom != (mag, px) {
             geom = (mag, px)
@@ -319,7 +336,7 @@ final class ShotLayers {
             box.isHidden = true; boxDark.isHidden = true; probeAnchor.isHidden = true; probeFar.isHidden = true
         }
         if s.mode == .window, let p = s.picked {
-            let p0 = map(CGPoint(x: p.rect.minX, y: p.rect.minY)), p1 = map(CGPoint(x: p.rect.maxX, y: p.rect.maxY))
+            let p0 = map(CGPoint(x: p.minX, y: p.minY)), p1 = map(CGPoint(x: p.maxX, y: p.maxY))
             pick.frame = CGRect(x: min(p0.x, p1.x), y: min(p0.y, p1.y), width: abs(p1.x - p0.x), height: abs(p1.y - p0.y))
             pick.isHidden = false
         } else { pick.isHidden = true }
@@ -360,7 +377,7 @@ final class ShotPanel {
         if panel.frame != f { panel.setFrame(f, display: false) }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         let top = primaryH - f.maxY
-        layers.update(shot, map: { CGPoint(x: $0.x - f.minX, y: f.height - ($0.y - top)) }, mag: 1, px: 1 / level)
+        layers.update(shot?.geom, map: { CGPoint(x: $0.x - f.minX, y: f.height - ($0.y - top)) }, mag: 1, px: 1 / level)
         CATransaction.commit()
     }
 

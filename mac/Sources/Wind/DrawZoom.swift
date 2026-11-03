@@ -465,7 +465,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // a frame apart, and the cursor showed big for a frame at every shape change (owner
         // 2026-10-31: I-beam, scroll bar, resize edge).
         if shapeDue { cursorShape() }
-        var st = Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair)
+        var st = Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair, shot: shot?.geom)
         if gpu { st = gpuTick(st) }
         else if pendingCapture { showCapture() }
         drawOverlay(st)
@@ -473,8 +473,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     }
 
     /// What the overlay draws on top of the picture: the view it maps desktop points with, the pointer
-    /// and Inspect's crosshair.
-    private struct Drawn { var center: CGPoint; var scale: Double; var pointer: CGPoint; var crosshair: CGPoint? }
+    /// and Inspect's crosshair, and Wind's screenshot selection as it was at that tick.
+    private struct Drawn { var center: CGPoint; var scale: Double; var pointer: CGPoint; var crosshair: CGPoint?; var shot: ShotGeom? }
 
     /// The drawn cursor, Wind's screenshot selection and Inspect's crosshair, mapped with `d`'s view
     /// (inside the caller's transaction).
@@ -492,8 +492,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         #endif
         cursorLayer.isHidden = hideNow   // the selection's crosshair replaces it
         // The selection in the same commit as the cursor: the crosshair at the pointer the view was placed
-        // for, the box's anchor where its desktop point is shown now.
-        shotLayers.update(shot, map: { CGPoint(x: W / 2 + ($0.x - c.x) * s, y: H / 2 - ($0.y - c.y) * s) }, mag: s, px: 1)
+        // for, the box's anchor where its desktop point is shown now. On xBR while the view moves that is
+        // the tick of the picture on screen, as for the cursor: the selection as it is now, mapped with that
+        // older view, put the crosshair one tick's hand step times the level off the screen centre, a little
+        // more or less each frame (owner 2026-11-03, "the screenshot cursor is wobbly again").
+        shotLayers.update(d.shot, map: { CGPoint(x: W / 2 + ($0.x - c.x) * s, y: H / 2 - ($0.y - c.y) * s) }, mag: s, px: 1)
         crossRoot.isHidden = d.crosshair == nil         // also on ticks with no view write (at an edge)
         if let x = d.crosshair { crossRoot.position = CGPoint(x: W / 2 + (x.x - c.x) * s, y: H / 2 - (x.y - c.y) * s) }
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * s, y: H - sy - (h - cursorHotSpot.y * s), width: w, height: h)
@@ -792,7 +795,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if gpu { encodedView = nil; layout(); presentNow(); return }
         CATransaction.begin(); CATransaction.setDisableActions(true)
         showCapture()
-        if let p = lastPointer { drawOverlay(Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair)) }
+        if let p = lastPointer { drawOverlay(Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair, shot: shot?.geom)) }
         CATransaction.commit()
         layout()
     }
@@ -819,7 +822,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard cb.status == .completed else { upscaleFailed("a pass failed (\(cb.error?.localizedDescription ?? "?"))"); return false }
         encodedView = uv; encodedSeq = captureSeq
         publishCapView(uv, size: screen.frame.size, px: Double(src.width) / screen.frame.width)
-        let d = Drawn(center: center, scale: scale, pointer: lastPointer ?? center, crosshair: crosshair)
+        let d = Drawn(center: center, scale: scale, pointer: lastPointer ?? center, crosshair: crosshair, shot: shot?.geom)
         CATransaction.begin(); CATransaction.setDisableActions(true)
         show(dr)
         drawnView = (d, uv)
@@ -865,12 +868,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 self.show(f.drawable)
                 self.drawnView = (f.drawn, f.uv)
-                var d = f.drawn; d.pointer = self.lastPointer ?? d.pointer
+                var d = f.drawn; d.pointer = self.lastPointer ?? d.pointer; d.shot = self.shot?.geom
                 self.drawOverlay(d)
                 CATransaction.commit()
             }
         }
-        if let d = drawnView, d.uv != uv, let prev = prevTick { return Drawn(center: d.drawn.center, scale: d.drawn.scale, pointer: prev.pointer, crosshair: prev.crosshair) }
+        if let d = drawnView, d.uv != uv, let prev = prevTick { return Drawn(center: d.drawn.center, scale: d.drawn.scale, pointer: prev.pointer, crosshair: prev.crosshair, shot: (shot?.active ?? false) ? prev.shot : nil) }
         return now
     }
 
