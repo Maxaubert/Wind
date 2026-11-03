@@ -20,6 +20,7 @@ const NO_ROW = {
   lockTracking: 'hidden until games are tested on the Mac (Config.swift)',
   panMaxLagPt: 'nothing in Sources reads it',
   onboarded: 'written by the first-run setup, not a setting',
+  quit: 'Quit Wind (cmd+escape) works but has no row (owner 2026-11-03)',
   keepPointerSpeed: 'off: Transform runs at macOS\'s own pointer speed, no setting (owner 2026-11-01)',
 };
 

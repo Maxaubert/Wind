@@ -65,8 +65,7 @@ export const groups = [
           desc: 'Hide or show the pointer while zoomed', def: '' },
         { key: 'inspect', type: 'keybind', max: 1, label: 'Inspect mode', keywords: ['freeze', 'frozen', 'crosshair', 'tooltip', 'hover', 'look around', 'reticle', 'lock cursor', 'cursor lock', 'hotkey', 'shortcut', 'key'],
           desc: 'Freeze the pointer so you can look around', def: '' },
-        { key: 'quit', type: 'keybind', max: 1, label: 'Quit Wind', keywords: ['exit', 'close', 'stop', 'emergency', 'escape', 'panic', 'kill', 'hotkey', 'shortcut', 'key'],
-          desc: 'Closes Wind from anywhere', def: 'cmd+escape' },
+        // Quit Wind (cmd+escape) has no row (owner 2026-11-03); the bind still works and stays in config.json.
       ] },
     ] },
 
