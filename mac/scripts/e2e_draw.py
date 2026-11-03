@@ -73,6 +73,22 @@ s = ctl("state")
 check("draw engine: key panning moves the view", s["sky"]["center"][0] > 905, f"view {s['sky']['center']}")
 ctl("level 1"); time.sleep(0.4)
 
+# Render scaling (renderScaling): Nearest is the overlay layer's filter, xBR Wind's own Metal pass. Each is
+# checked on the zoomed screen against tools/upscaleref (the Windows HLSL for xBR) on a test card of Wind's
+# own (tools/scalecard).
+import scaling
+scaling.card_checks(sys.modules["windtest"], check)
+scaling.change_checks(sys.modules["windtest"], check, mv, modes=(0, 1))
+# A still view costs no pass: the frames the overlay's own commits bring are told apart from changes.
+set_config(renderScaling=1)
+ctl("level 1"); time.sleep(0.3); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.5)
+p0 = ctl("state")["scaling"]["upscalePasses"]; time.sleep(2.0); p1 = ctl("state")["scaling"]["upscalePasses"]
+check("render scaling: xBR with the view still runs (almost) no passes", p1 - p0 <= 10, f"{p1 - p0} passes in 2 s")
+mv(5, 0, 40, 8); time.sleep(0.3); p2 = ctl("state")["scaling"]
+check("render scaling: xBR runs a pass per moving frame", p2["upscalePasses"] - p1 > 30, f"{p2['upscalePasses'] - p1} passes while panning, {p2}")
+ctl("level 1"); time.sleep(0.4)
+set_config(renderScaling=int(os.environ.get("WIND_SCALING", "0")))
+
 # Inspect: the crosshair moves like the pointer would (macOS acceleration included), the pointer stays
 # put, the view follows the crosshair. The same hand motion at 1x is the reference.
 def inspect_key():
@@ -305,6 +321,17 @@ ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("leve
 s = ctl("state"); L = log_since(n0)
 check("draw engine: a capture failure is logged", any("capture failed" in l for l in L))
 check("draw engine: a capture failure falls back to macOS zoom", s["sky"]["scale"] == 4 and s["cursorVisible"], f"sky {s['sky']} visible {s['cursorVisible']}")
+ctl("level 1"); time.sleep(0.4)
+
+# Wind's Metal pass failing (simulated) leaves xBR as Nearest, still drawn.
+os.environ["WIND_UPSCALE_FAIL"] = "1"
+relaunch_with_channel(direct=True, extra={"engine": "draw", "logLevel": 2, "renderScaling": 1})
+del os.environ["WIND_UPSCALE_FAIL"]
+ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 4"); time.sleep(1.2)
+s = ctl("state")
+check("render scaling: a Metal failure falls back to Nearest, still drawn",
+      s["drawn"] and s["scaling"]["renderScaling"] == 1 and s["scaling"]["scalingActive"] == 0 and any("simulated Metal failure" in l for l in open(LOG)),
+      f"drawn {s['drawn']} scaling {s['scaling']}")
 ctl("level 1"); time.sleep(0.4)
 
 finish()

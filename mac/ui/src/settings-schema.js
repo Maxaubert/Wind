@@ -87,8 +87,17 @@ export const groups = [
           offIf: { key: 'smoothZoom', eq: '0' } },
       ] },
       { caption: 'Engine', rows: [
+        // Transform: macOS's zoom has exactly two filters, nearest and bilinear (research 2026-11-03), so
+        // its row offers only those. Render has its own row (renderScaling).
         { key: 'smoothImages', type: 'select', label: 'Scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'linear', 'bilinear', 'antialiasing', 'images'],
-          desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0' },
+          desc: 'How macOS enlarges the image (its zoom has only these two)', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
+          showIf: ZOOM_ENGINE },
+        // Render: renderScaling, Windows' Render scaling values 0 Nearest and 1 xBR (the Mac offers only
+        // these two, owner 2026-11-03; Windows' 2, NIS, loads as Nearest). Applies at once.
+        { key: 'renderScaling', type: 'select', label: 'Scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'xbr', 'pixel art', 'edges', 'antialiasing', 'images'],
+          desc: 'How the image is enlarged', options: ['0', '1'],
+          optionLabels: { '0': 'Nearest', '1': 'xBR' }, def: '0',
+          showIf: { key: 'engine', eq: 'draw' } },
         // Switches live; Wind falls back to Transform (macOS's zoom) when it cannot capture the screen.
         { key: 'engine', type: 'select', label: 'Engine', keywords: ['renderer', 'render', 'transform', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
           desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'Transform' }, def: 'zoom' },

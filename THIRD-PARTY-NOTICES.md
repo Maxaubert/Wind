@@ -44,6 +44,11 @@ https://github.com/NVIDIAGameWorks/NVIDIAImageScaling
 Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `mac/ui/dist`, which ships
 inside `Wind.app/Contents/Resources/ui`. https://github.com/sveltejs/svelte
 
+### xBR-lv2 shader (MIT)
+Copyright (C) 2011-2022 Hyllian (sergiogdb@gmail.com). Ported to Metal in `mac/Sources/Wind/UpscaleShaders.swift`
+(Render scaling xBR) from Wind's HLSL port above, itself from the libretro slang-shaders
+`edge-smoothing/xbr/shaders/xbr-lv2-standalone.slang`. https://github.com/libretro/slang-shaders
+
 Wind for Mac links only Apple's system frameworks. This file and the licence ship inside the app
 (`Contents/Resources`).
 

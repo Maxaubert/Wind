@@ -77,8 +77,22 @@ test('the macOS zoom rows show only on the macOS zoom engine and sit on View', (
   const card = view.cards.find((c) => c.caption === 'Transform engine');
   expect(card.rows.map((r) => r.key)).toEqual(['slowPrecision', 'precisionBelow', 'slowPanGlide', 'fullPointerSpeed', 'cursor']);
   for (const r of card.rows) expect(r.showIf, r.key).toEqual({ key: 'engine', eq: 'zoom' });
-  // Nothing else depends on the engine.
-  for (const r of allRows.filter((x) => !card.rows.includes(x))) expect(r.showIf?.key, r.key).not.toBe('engine');
+  // Nothing else depends on the engine but each engine's own Scaling row (Engine card on Zoom).
+  const scaling = { smoothImages: { key: 'engine', eq: 'zoom' }, renderScaling: { key: 'engine', eq: 'draw' } };
+  for (const r of allRows.filter((x) => !card.rows.includes(x))) {
+    if (scaling[r.key]) expect(r.showIf, r.key).toEqual(scaling[r.key]);
+    else expect(r.showIf?.key, r.key).not.toBe('engine');
+  }
+});
+
+test('Scaling: Render offers Nearest and xBR (Windows\' 0 and 1); Transform macOS\'s two', () => {
+  const zoom = groups.find((g) => g.id === 'zoom');
+  const r = groupRows(zoom).find((x) => x.key === 'renderScaling');
+  expect(r.options).toEqual(['0', '1']);                        // mean what they mean on Windows
+  expect(r.optionLabels).toEqual({ '0': 'Nearest', '1': 'xBR' });
+  expect(r.def).toBe('0');
+  const t = groupRows(zoom).find((x) => x.key === 'smoothImages');
+  expect(t.options).toEqual(['0', '1']);
 });
 
 test('the engine select: Render or Transform (default), in the Engine card on Zoom', () => {

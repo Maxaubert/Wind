@@ -27,7 +27,9 @@ both main-run-loop sources.
 
 - `center` is the view centre in global points (top-left origin). Readback
   (`SLSGetZoomParameters`) rounds to whole points.
-- `smooth` is pixel interpolation (macOS Zoom's "Smooth images"). Wind defaults to sharp.
+- `smooth` is pixel interpolation (macOS Zoom's "Smooth images"): nearest or bilinear, nothing else
+  (SkyLight picks one of two fixed samplers; research/wind-mac/2026-11-03-transform-upscaling.md).
+  Wind defaults to sharp (`smoothImages`, Transform's Scaling row: Nearest / Smooth).
 - **`keepPointer`** decides what a view change does to the pointer:
   - `true`: the pointer keeps its desktop position (Wind's normal writes).
   - `false`: the pointer keeps its screen position, so its desktop position moves by exactly the
@@ -688,7 +690,7 @@ pans are within 7% of 1x and use carries. Remaining: a sub-point step at quick r
 Instead of zooming macOS, Wind captures the main display with ScreenCaptureKit and draws it
 magnified in a click-through overlay (level screenSaver+1) above everything (`DrawZoom.swift`).
 - **Sub-pixel panning**: the captured IOSurface is a layer placed at any fractional offset and
-  scale (nearest filter for sharp pixels, linear when Smooth images is on). The view centre is the
+  scale (its filter is Render scaling, below). The view centre is the
   pointer itself, fractional (measured: slow pans move by 0.688 / 1.375 pt steps, not whole points).
 - **1x pointer**: macOS is not zoomed, so the pointer moves at its own speed (measured 68.8 pt at
   4x and 10x, the 1x distance). Speed compensation, carries, read guards and the whole-point tricks
@@ -843,6 +845,57 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   and 1.3 at 150 ms; a steady pan at 4x trails by ~6 screen pt. Speed scaled by the level (tried
   first) smoothed tremor LESS at high zoom.
 - Not done yet: multiple displays, DRM video (captured black).
+
+### Render scaling (`renderScaling`, 0.4.0, 2026-11-03)
+
+Render has its own Scaling row (Settings, Zoom, Engine card, only on Render; Transform's row is macOS's
+two) and a Scaling submenu in the menu bar. It offers **Nearest and xBR only** (owner 2026-11-03, after
+trying NIS, Smooth (bilinear) and Sharp (bicubic) by eye: they were built and removed). Values keep
+Windows' meaning (`config.h renderScaling`): 0 Nearest (default, as on Windows), 1 xBR. Anything else,
+Windows' 2 (NVIDIA Image Scaling) included, loads as Nearest. `smoothImages` is Transform's alone and
+does not touch Render.
+- **Nearest** is the image layer's `magnificationFilter` (`.nearest`), no extra work. The drawn cursor
+  uses nearest on Nearest and linear on xBR.
+- **xBR** is Wind's Metal compute port of the Windows shader (`UpscaleShaders.swift`: same constants and
+  maths as `src/render/upscale_shaders.h`, in two passes), compiled at runtime (`Upscaler`, ~0.1-0.3 s, on
+  a background queue the first time it is wanted on Render; until then, or if Metal fails, it shows as
+  Nearest, logged once). Each pass reads the captured IOSurface for the current view and writes a
+  screen-sized drawable of a `CAMetalLayer` (`presentsWithTransaction`) that replaces the image layer.
+  The drawable carries the capture's `IOSurfaceColorSpace`, or Core Animation converts it as sRGB
+  (desaturated).
+- **One refresh behind, never a wait**: a tick encodes the pass for its view and presents the pass the
+  previous tick encoded (waited for only if the GPU is late: 0-38 ticks in a 1.5 s pan). While the view
+  moves, the drawn cursor, Wind's screenshot selection and Inspect's crosshair are drawn with the view
+  and pointer of the picture on screen, so they stay on the right desktop point; a still view draws
+  them as they are. A pass left in flight when the link pauses is shown 12 ms later. A new captured
+  frame while the view is still is passed and shown at once (one GPU wait, 1-3 ms).
+- **No work when nothing changes**: a pass runs only when the view or the captured frame changed in
+  the view. Every commit of the overlay (excluded from the capture) still brings a capture frame
+  marked dirty over the whole screen; such a frame is told apart by comparing the view's rows with the
+  frame before (`changedInView`, capture queue, 0.1-1 ms). This also applies to Nearest: showing each
+  such frame brought the next, a loop at the refresh rate that kept WindowServer at
+  41-54% CPU and the GPU at 54-66% with the view still (main before 0.4.0). Now 2-6% and 3-11% (1x:
+  1-2% and 2-3%). Changes outside the view (a menu-bar item at 40 Hz) cost nothing.
+  A frame compared against a view the tick has moved since counts as changed (a change in the strip just
+  come into view stayed stale once the view stopped); `e2e_draw.py` checks a change in a still view and one
+  outside it that the view then pans onto, in both modes (`scalecard patch`).
+- **Capture buffers** (queueDepth 4): a pass holds its frame's CVPixelBuffer until the GPU is done (the
+  texture keeps only the IOSurface, and ScreenCaptureKit reuses a buffer nobody holds), and while the Metal
+  layer shows the picture the image layer lets go of its frame.
+- **Why a CAMetalLayer**: setting a new IOSurface as the image layer's contents every refresh made
+  WindowServer show only 166-177 of ~220 refreshes while panning (every other one skipped), even with a
+  trivial copy pass and with 3 or 6 surfaces; drawables show all of them.
+- **Measured** (`scripts/scaling_truth.py`, M6, 4K at 144 Hz, 1000 Hz mouse, 1.5 s pans at 3x and 6x):
+  xBR 220-228 frames per pan, stalls within run-to-run noise of Nearest; GPU per pass 1.7-2.0 ms
+  (median; p95 4-5.6); GPU utilisation while panning 59-67% against 57-60% for Nearest, WindowServer
+  ~90% CPU in both modes (it composites the capture as well as the screen).
+- **Tests**: `e2e_draw.py` checks both modes at 3x and 6x on a test card (`tools/scalecard`) against
+  `tools/upscaleref` (the CPU reference; its xBR is the Windows HLSL itself, converted by
+  `gen_ported.py`), each closer to its own reference than to the other's; a still view runs no pass, a
+  pan one per frame; a simulated Metal failure (`WIND_UPSCALE_FAIL`) shows Nearest.
+  `WIND_SCALING=1` runs any suite with xBR.
+- Research and the prototype: research/wind-mac/2026-11-03-transform-upscaling.md and
+  2026-11-03-upscale-render-path.md.
 
 ### Smooth zoom on the render engine (owner report 2026-10-31)
 

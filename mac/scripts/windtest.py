@@ -39,6 +39,8 @@ def relaunch_with_channel(direct=False, extra=None):
     extra = {"cursor": "system", "keepPointerSpeed": True, **extra}
     if os.environ.get("WIND_CURSOR"):              # WIND_CURSOR=wind: Wind's own cursor
         extra = dict(extra or {}, cursor=os.environ["WIND_CURSOR"])
+    if os.environ.get("WIND_SCALING"):             # WIND_SCALING=1: Render scaling (renderScaling) xBR
+        extra = dict(extra or {}, renderScaling=int(os.environ["WIND_SCALING"]))
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     kill_all_wind()
     # Checks assume Wind's defaults for the feel settings, not the owner's own (a slowed zoom made the
@@ -75,7 +77,7 @@ def relaunch_with_channel(direct=False, extra=None):
 TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZoom", "smoothZoomAccel",
                       "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "fullPointerSpeed", "panSmoothMs", "slowPrecision",
                       "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
-                      "engine", "slowPanGlide", "cursor",
+                      "engine", "slowPanGlide", "cursor", "renderScaling",
                       "wheelZoomMods", "panLeft", "panRight", "panUp", "panDown", "hideCursor", "quit"]
 # The binds the checks press. Since 2026-11-01 most actions have no preset, so the tests set their own
 # (the owner's own setup may have changed them too).

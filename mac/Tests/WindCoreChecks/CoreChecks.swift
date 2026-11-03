@@ -276,6 +276,20 @@ struct ConfigTests {
         expect(c.zoomInSpeed == 0.25)
     }
 
+    /// renderScaling keeps Windows' 0 (Nearest) and 1 (xBR); anything else, Windows' 2 (NIS) and the removed
+    /// Smooth and Sharp (3, 4) included, is Nearest. smoothImages (Transform's) does not touch it.
+    func renderScalingClampsLikeWindows() throws {
+        for v in 0...1 { expect(try Config.load(from: Data("{\"renderScaling\": \(v)}".utf8)).renderScaling == v) }
+        for v in [2, 3, 4, 5, -1] { expect(try Config.load(from: Data("{\"renderScaling\": \(v)}".utf8)).renderScaling == 0) }
+        expect(Config().renderScaling == RenderScaling.nearest.rawValue)
+        expect(RenderScaling.xbr.usesShader && !RenderScaling.nearest.usesShader)
+        expect(RenderScaling.menuOrder == [.nearest, .xbr] && Set(RenderScaling.menuOrder) == Set(RenderScaling.allCases))
+        let old = try Config.load(from: Data(#"{"smoothImages": true}"#.utf8))
+        expect(old.renderScaling == 0 && old.smoothImages)
+        let both = try Config.load(from: Data(#"{"smoothImages": true, "renderScaling": 1}"#.utf8))
+        expect(both.renderScaling == 1 && both.smoothImages)
+    }
+
     /// Only zoom in and out take several binds (up to three); every other action keeps its first.
     func clampsBindCounts() throws {
         let c = try Config.load(from: Data(#"{"zoomIn": ["mouse4", "f13", "f14", "f15"], "quit": ["cmd+escape", "f16"], "panLeft": ["ctrl+opt+left", "f17"]}"#.utf8))

@@ -30,7 +30,8 @@ public struct Config: Codable, Equatable {
     public var smoothZoomRamp = 0.6
     public var zoomEaseOutMs = 115.0
     public var quickZoomDefault = 4.0
-    public var smoothImages = false               // false = nearest (sharp pixels), true = smoothed
+    public var smoothImages = false               // Transform: false = nearest (sharp pixels), true = bilinear (macOS's zoom has only these)
+    public var renderScaling = 0                  // Render: 0 Nearest, 1 xBR (Windows' values; anything else loads as Nearest) (RenderScaling)
     public var engine = "zoom"                    // "zoom" = macOS's zoom (Transform, the default since 2026-11-02, owner); "draw" = Wind captures and draws (Render)
 
     // Mouse tracking.
@@ -134,6 +135,7 @@ public struct Config: Codable, Equatable {
         warmthPct = min(100, max(0, warmthPct))
         dimPct = min(100, max(10, dimPct))
         logLevel = min(3, max(0, logLevel))
+        if RenderScaling(rawValue: renderScaling) == nil { renderScaling = 0 }   // like Windows: unknown is Nearest
         if engine != "draw" { engine = "zoom" }
         if cursor != "wind" { cursor = "system" }
         if !Config.palettes.contains(uiPalette) { uiPalette = "grey" }
@@ -166,6 +168,23 @@ public struct Config: Codable, Equatable {
         guard let b = parseBind(wheelZoomMods), b.trigger == .none else { return nil }
         return b.mods
     }
+}
+
+/// The Render engine's scaling filter (Config.renderScaling). The values mean what they mean on Windows
+/// (config.h renderScaling); the Mac offers Nearest and xBR (owner 2026-11-03), and Windows' 2 (NVIDIA
+/// Image Scaling) or any other value loads as Nearest.
+public enum RenderScaling: Int, CaseIterable, Sendable {
+    case nearest = 0, xbr = 1
+    /// Wind runs a Metal pass of its own for it (Nearest is the overlay layer's filter).
+    public var usesShader: Bool { self == .xbr }
+    public var label: String {
+        switch self {
+        case .nearest: return "Nearest"
+        case .xbr: return "xBR"
+        }
+    }
+    /// The order the settings page and the menu offer them in.
+    public static let menuOrder: [RenderScaling] = [.nearest, .xbr]
 }
 
 public enum Action: String, CaseIterable {

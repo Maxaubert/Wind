@@ -31,6 +31,10 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `python3 scripts/e2e_draw.py`: the render engine (`engine = "draw"`; Transform, `"zoom"`, is the default since 2026-11-02); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
+- Render scaling (`renderScaling`: 0 Nearest, 1 xBR only, owner 2026-11-03; design in `docs/architecture.md`, Render scaling):
+  `e2e_draw.py` checks both on screen against `tools/upscaleref` (the Windows HLSL); `python3 scripts/scaling_truth.py`
+  measures GPU, CPU and pan pacing per filter at 3x and 6x. `WIND_SCALING=1` runs any suite with xBR.
+  xBR draws into a CAMetalLayer: never a new IOSurface as layer contents per frame (WindowServer skips refreshes).
 - `python3 scripts/pan_truth.py`: stutter while zoomed on the zoomed screen (pan, stop, pan again; zooming
   further); every movement start must be as smooth as its middle.
 - `python3 scripts/handover_truth.py`: panning with a system alert up on the zoomed screen (Transform, Render drawing

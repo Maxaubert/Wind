@@ -125,6 +125,25 @@ test('Engine defaults to Transform (owner 2026-11-02), and its rows show on View
   await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'Transform engine']);
 });
 
+test('Scaling: Render offers Nearest and xBR, Transform only macOS\'s two', async ({ page }) => {
+  await mockHost(page, { values: { engine: 'draw' } });
+  await open(page);
+  await go(page, 'zoom');
+  await expect(row(page, 'smoothImages')).toHaveCount(0);
+  const sel = row(page, 'renderScaling').locator('select');
+  await expect(sel).toHaveValue('0');
+  await expect(sel.locator('option')).toHaveText(['Nearest', 'xBR']);
+  await sel.selectOption({ label: 'xBR' });
+  await expect.poll(() => wrote(page, 'renderScaling')).toBe('1');
+  await sel.selectOption({ label: 'Nearest' });
+  await expect.poll(() => wrote(page, 'renderScaling')).toBe('0');
+  await row(page, 'engine').locator('select').selectOption('zoom');
+  await expect(row(page, 'renderScaling')).toHaveCount(0);
+  const tx = row(page, 'smoothImages').locator('select');
+  await expect(tx.locator('option')).toHaveText(['Nearest', 'Smooth']);
+  await expect(row(page, 'smoothImages')).toContainText('only these two');
+});
+
 test('Engine shows on Zoom without Advanced; on Render, Transform brings its rows', async ({ page }) => {
   await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);

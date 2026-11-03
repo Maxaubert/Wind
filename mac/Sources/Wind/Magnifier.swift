@@ -152,6 +152,7 @@ final class Magnifier {
             lastWritten = nil
             Log.info("engine: \(draw ? "draw (capture and draw, experimental)" : "zoom (macOS)")")
         }
+        DrawZoom.shared.setScaling(RenderScaling(rawValue: c.renderScaling) ?? .nearest)
         HIDGain.shared.enabled = c.fullPointerSpeed && !c.keepPointerSpeed
         Log.level = c.logLevel
         let (b, problems) = c.binds()
