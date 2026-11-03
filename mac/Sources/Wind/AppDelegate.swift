@@ -352,6 +352,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         writeState()
     }
 
+    /// Open Wind's own menu-bar menu for `secs` (it closes itself: the command file is not read while a
+    /// menu tracks). scripts/blink_truth.py moves the pointer through it while zoomed.
+    func testMenu(_ secs: Double) {
+        if let f = statusItem.button?.window?.frame { Log.info(String(format: "status item at %.0f,%.0f %.0fx%.0f", f.minX, f.minY, f.width, f.height)) }
+        DispatchQueue.main.async {
+            let menu = self.statusItem.menu
+            let t = Timer(timeInterval: secs, repeats: false) { _ in Log.info("test menu: closing (run loop mode \(RunLoop.current.currentMode?.rawValue ?? "?"))"); menu?.cancelTracking() }
+            RunLoop.main.add(t, forMode: .common)
+            self.statusItem.button?.performClick(nil)
+        }
+    }
+
     /// Settings window commands for scripts/e2e_settings.py: js <base64 body>, onboard, close, offscreen on|off.
     func testSettings(_ w: [String]) {
         switch w.first ?? "" {

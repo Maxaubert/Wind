@@ -858,6 +858,17 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   speed): a tremor at 16x (+-2 counts every 30 ms) moved the view with sd 6.0 screen pt, 1.9 at 60 ms
   and 1.3 at 150 ms; a steady pan at 4x trails by ~6 screen pt. Speed scaled by the level (tried
   first) smoothed tremor LESS at high zoom.
+- **Wind's own menu-bar menu while zoomed** (nimkimi 2026-11-03: in the top-right menu the cursor went away,
+  then came back). A tracking menu runs the main run loop in `NSEventTrackingRunLoopMode`, which fires
+  common-mode timers and the display link but does not drain the main dispatch queue. Render runs each tick
+  3 ms after the link (`drawTickDelay`) from a main-queue timer, so no tick ran while the menu was open: the
+  view and the drawn cursor froze while the pointer moved on (the real cursor transparent), measured 0 ticks
+  in 1.5 s and the drawn cursor moving 0 of 309 screen pt. With the pointer still, the default-mode heartbeat
+  timers stopped too: after 1.5 s `ClearCursor` took it for a stall and showed the app's cursor (tiny,
+  unmagnified), and after 3 s the hang watchdog quit Wind. Now the link steps at once outside the default mode,
+  and both heartbeats are common-mode timers. `e2e_draw.py` (own menu) and `scripts/blink_truth.py` (drawn
+  cursor in every zoomed-screen frame across the menu bar extras and the edges, and in Wind's menu) check it.
+  The menu bar extras and the edges alone showed no missing frame (both cursors, Nearest and xBR, 3x and 8x).
 - Not done yet: multiple displays, DRM video (captured black).
 
 ### Render scaling (`renderScaling`, 0.4.0, 2026-11-03)

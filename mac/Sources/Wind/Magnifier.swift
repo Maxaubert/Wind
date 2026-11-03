@@ -586,7 +586,7 @@ final class Magnifier {
     private lazy var tickTimer: DispatchSourceTimer = {
         let t = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
         t.setEventHandler { [weak self] in
-            guard let self, let l = self.delayedLink else { return }
+            guard let self, self.delayedTickPending, let l = self.delayedLink else { return }   // not if the link stepped meanwhile
             self.delayedTickPending = false
             self.step(l)
         }
@@ -596,7 +596,11 @@ final class Magnifier {
 
     @objc private func tick(_ l: CADisplayLink) {
         let delay = Magnifier.tickDelay ?? (DrawZoom.enabled ? Magnifier.drawTickDelay : 0)
-        if delay > 0 {
+        // Only from the default run-loop mode: while a menu tracks (Wind's own menu-bar menu) the main
+        // queue is not drained, so a delayed tick never ran until the menu closed. Render then froze the
+        // view and the drawn cursor while the pointer moved on unseen (nimkimi 2026-11-03, the top-right
+        // menu), and after 3 s its hang watchdog quit Wind. The link itself fires in common modes.
+        if delay > 0 && RunLoop.current.currentMode == .default {
             if delayedTickPending { return }
             delayedTickPending = true
             delayedLink = l
@@ -604,6 +608,7 @@ final class Magnifier {
             tickTimer.schedule(deadline: .now() + delay, leeway: .nanoseconds(0))
             return
         }
+        delayedTickPending = false                      // a delayed tick left pending as a menu opened: this one instead
         step(l)
     }
 

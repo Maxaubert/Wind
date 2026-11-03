@@ -79,10 +79,15 @@ final class ClearCursor: @unchecked Sendable {
         t.name = "wind.clearcursor"; t.qualityOfService = .userInteractive
         t.start()
         beatTimer?.invalidate()
-        beatTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        // In common modes: a default-mode timer stops while a menu tracks, and with the pointer still in
+        // Wind's own menu-bar menu the poll thread took that for a stall and showed the app's cursor, tiny
+        // and unmagnified, after 1.5 s (2026-11-03).
+        let bt = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.lock.lock(); self.beat = CACurrentMediaTime(); self.lock.unlock()
         }
+        RunLoop.main.add(bt, forMode: .common)
+        beatTimer = bt
     }
 
     /// Back to the app's cursor. Main thread.
@@ -165,7 +170,7 @@ final class ClearCursor: @unchecked Sendable {
             lock.unlock()
             if stale {
                 // Wind's main thread is stuck: show the app's cursor until it is back.
-                if !wasStalled { (app ?? NSCursor.arrow).set() }
+                if !wasStalled { (app ?? NSCursor.arrow).set(); Log.info("clear cursor: main thread quiet 1.5 s, the app's cursor shown") }
                 continue
             }
             let seed = SkyLight.cursorSeed

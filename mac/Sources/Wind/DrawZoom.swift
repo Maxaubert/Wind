@@ -486,7 +486,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let sx = (p.x - c.x) * s + W / 2, sy = (p.y - c.y) * s + H / 2
         let w = cursorSize.width * s, h = cursorSize.height * s
         let shooting = shot?.active ?? false
-        cursorLayer.isHidden = pointerHidden || lockHidden || shooting   // the selection's crosshair replaces it
+        let hideNow = pointerHidden || lockHidden || shooting
+        #if WIND_TEST_CHANNEL
+        if hideNow != cursorLayer.isHidden { Log.verbose("drawn cursor \(hideNow ? "hidden" : "shown") (pointer \(pointerHidden), lock \(lockHidden), shot \(shooting))") }
+        #endif
+        cursorLayer.isHidden = hideNow   // the selection's crosshair replaces it
         // The selection in the same commit as the cursor: the crosshair at the pointer the view was placed
         // for, the box's anchor where its desktop point is shown now.
         shotLayers.update(shot, map: { CGPoint(x: W / 2 + ($0.x - c.x) * s, y: H / 2 - ($0.y - c.y) * s) }, mag: s, px: 1)
@@ -962,7 +966,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
         t.resume()
         watchdog = t
-        // The heartbeat also comes from a timer, so an idle (paused) tick does not look like a hang.
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in DrawZoom.beat = CACurrentMediaTime() }
+        // The heartbeat also comes from a timer, so an idle (paused) tick does not look like a hang. In
+        // common modes: a default-mode timer stops while a menu tracks, and with the pointer still in Wind's
+        // own menu-bar menu the watchdog quit Wind after 3 s (2026-11-03).
+        RunLoop.main.add(Timer(timeInterval: 0.5, repeats: true) { _ in DrawZoom.beat = CACurrentMediaTime() }, forMode: .common)
     }
 }

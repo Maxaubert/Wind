@@ -14,6 +14,8 @@ import WindCore
 //   warp <x> <y>               move the pointer       lock on|off   force the game-lock regime
 //   settoggle on|off <label>   a macOS Zoom shortcut or shake-to-locate switch (exact label)
 //   fixzoom                    switch every macOS Zoom shortcut off
+//   menu <secs>                open Wind's own menu-bar menu; it closes itself after secs (no command
+//                              is read while it tracks)
 //   settings [onboard|close]   open the settings window (or the first-run setup), or close it
 //   settings offscreen on|off  later opens place the window off every display, without focus
 //   settings js <base64>       run the decoded JS (an async function body) in the settings page;
@@ -60,6 +62,7 @@ enum CommandChannel {
                 SettingsToggle.set(pane: pane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
             }
         case "settings": app.testSettings(Array(w.dropFirst()))   // settings [onboard|close] | settings js <base64>
+        case "menu": app.testMenu(w.count > 1 ? Double(w[1]) ?? 2 : 2)   // menu <secs>: Wind's own menu-bar menu, closed after secs
         case "login": app.perform(Selector(("toggleLogin")))
         case "fixzoom": app.perform(Selector(("turnOffSystemZoom")))
         case "pressbutton":

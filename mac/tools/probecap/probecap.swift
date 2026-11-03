@@ -53,7 +53,8 @@ final class Cap: NSObject, SCStreamOutput, @unchecked Sendable {
 
     // 0 magenta, 1 yellow, 2 cyan
     static func kind(_ r: Int, _ g: Int, _ b: Int) -> Int {
-        if r > 150 && b > 150 && g < 90 && abs(r - b) < 70 { return 0 }
+        // The magenta probe reads about (216, 100, 245) once the capture converts it to the display (2026-11-03).
+        if r > 150 && b > 150 && g < min(r, b) - 70 && abs(r - b) < 70 { return 0 }
         if r > 150 && g > 150 && b < 90 && abs(r - g) < 70 { return 1 }
         if g > 150 && b > 150 && r < 90 && abs(g - b) < 70 { return 2 }
         return -1
