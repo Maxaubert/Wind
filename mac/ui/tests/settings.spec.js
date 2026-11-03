@@ -27,6 +27,7 @@ test('Settings opens on Hotkeys; three pages, a divider, then Preferences and Ab
 });
 
 test('pages show their cards; the macOS zoom card is hidden on the render engine', async ({ page }) => {
+  await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);
   await expect(page.locator('main .cap')).toHaveText(['Zoom', 'Quick zoom', 'Extra keys']);
   await go(page, 'zoom');
@@ -116,7 +117,16 @@ test('the advanced switch shows the advanced rows inline and hides them again', 
 
 // ---- engine ---------------------------------------------------------------------------------------
 
-test('Engine shows on Zoom without Advanced, defaults to Render, and Transform brings its rows', async ({ page }) => {
+test('Engine defaults to Transform (owner 2026-11-02), and its rows show on View', async ({ page }) => {
+  await open(page);
+  await go(page, 'zoom');
+  await expect(row(page, 'engine').locator('select')).toHaveValue('zoom');
+  await go(page, 'view');
+  await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus', 'Transform engine']);
+});
+
+test('Engine shows on Zoom without Advanced; on Render, Transform brings its rows', async ({ page }) => {
+  await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);
   await go(page, 'zoom');
   const sel = row(page, 'engine').locator('select');
@@ -216,6 +226,7 @@ test('hotkeys rows show the Mac binds as boxes with glyphs', async ({ page }) =>
 // ---- select list and slider keys (owner 2026-11-01) ---------------------------------------------------
 
 test('a select opens its own list below the button, not the native menu over it', async ({ page }) => {
+  await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);
   await go(page, 'zoom');
   const sel = row(page, 'engine').locator('select');

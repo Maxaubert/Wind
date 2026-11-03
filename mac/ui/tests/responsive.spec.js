@@ -68,7 +68,7 @@ for (const [w, h] of [[700, 480], [900, 600]]) {
     await page.setViewportSize({ width: w, height: h });
     await page.goto('/?mode=onboard');
     await expect(page.getByRole('button', { name: 'Get started' })).toBeVisible();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {                    // Transform (the default) has no Screen Recording step
       await page.locator('.wizfoot .btn.primary:not(:disabled), .wizfoot .btn:has-text("Skip this step")').first().click();
       await page.waitForTimeout(200);
       const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);

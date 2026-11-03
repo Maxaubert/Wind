@@ -22,7 +22,7 @@
   // The chosen theme, from the host's first-paint config like Settings. A first run has none: Wind grey.
   const palette = normalizePalette(init.values && init.values.uiPalette);
   const initMac = init.mac || null;
-  const engine = String((init.values && init.values.engine) || 'draw');
+  const engine = String((init.values && init.values.engine) || 'zoom');
 
   let values = $state(fill({ values: init.values || {} }));
   let mac = $state(initMac);

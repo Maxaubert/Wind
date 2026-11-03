@@ -157,6 +157,7 @@ test('advanced rows are editable from search while Show advanced settings is off
 });
 
 test('a row gated by another setting shows dimmed, not hidden', async ({ page }) => {
+  await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);
   await input(page).fill('edge margin');
   await expect(page.locator('.res .hit[data-hit="mouseMarginPct"] .row')).toHaveClass(/disabled/);

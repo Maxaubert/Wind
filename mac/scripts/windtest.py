@@ -32,7 +32,7 @@ def relaunch_with_channel(direct=False, extra=None):
     # WIND_ENGINE=draw runs any suite on the draw engine (started directly: no permission prompt).
     if os.environ.get("WIND_ENGINE"):
         extra = dict(extra or {}, engine=os.environ["WIND_ENGINE"]); direct = True
-    # The default engine is render since 2026-11-01: suites that name none still run macOS zoom.
+    # Suites that name no engine run macOS zoom (Transform, the default again since 2026-11-02).
     extra = {"engine": "zoom", **(extra or {})}
     # Transform's defaults since 2026-11-01 are Wind's cursor and no pointer speed-up; the suites were
     # built on the system cursor with the speed-up on and set either one where they test it.

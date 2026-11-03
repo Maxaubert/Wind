@@ -28,7 +28,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   every macOS Zoom shortcut off).
 - Run all three after touching `Magnifier.swift`, `SkyLight.swift` or `CaretTracker.swift`.
 - `python3 scripts/e2e_focus.py`: keyboard focus tracking in a throwaway Chrome (WIND_ENGINE=draw for render).
-- `python3 scripts/e2e_draw.py`: the render engine (`engine = "draw"`, the default since 2026-11-01); `WIND_ENGINE=draw`
+- `python3 scripts/e2e_draw.py`: the render engine (`engine = "draw"`; Transform, `"zoom"`, is the default since 2026-11-02); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
   `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
 - `python3 scripts/pan_truth.py`: stutter while zoomed on the zoomed screen (pan, stop, pan again; zooming
