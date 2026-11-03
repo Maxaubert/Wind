@@ -123,6 +123,10 @@ nothing reads or moves the pointer. Measured with the virtual mouse: 68.75 pt at
 - LinearMouse puts its own value back when a mouse becomes the active one, and no notification
   reports it: Wind reads the gain back every 100 ms while zoomed, takes a changed value as the new
   base and raises it again. New mice are picked up within a second.
+- The HID client is scheduled on Wind's queue: unscheduled, its service list stays as it was when it was
+  made, so a mouse that came back as a new service (wake, a wireless mouse reconnecting) was never raised
+  and Transform kept macOS's slow speed until a restart (owner 2026-11-03, seen after a live switch from
+  Render; `e2e_mouse.py` re-adds the virtual mouse to check it).
 - The bases are saved in `hidgain.json` (Application Support) while raised; WindGuard and the next
   launch put them back after a crash.
 - Curve-mode mice and trackpads are left alone (the gain is not a plain multiplier there; scaling

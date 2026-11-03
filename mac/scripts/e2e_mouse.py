@@ -13,8 +13,11 @@ VM = os.path.join(ROOT, "tools/vmouse/vmouse")
 if not os.path.exists(VM):
     subprocess.run([os.path.join(ROOT, "tools/vmouse/build.sh")], check=True)
 relaunch_with_channel()
-vm = subprocess.Popen(["sudo", VM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-if vm.stdout.readline().strip() != "ready": sys.exit("vmouse: Karabiner virtual HID device not ready")
+def start_vm():
+    v = subprocess.Popen(["sudo", VM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    if v.stdout.readline().strip() != "ready": sys.exit("vmouse: Karabiner virtual HID device not ready")
+    return v
+vm = start_vm()
 assert_zoom_live()
 
 def mv(dx, dy, n=10, ms=8):
@@ -72,6 +75,20 @@ subprocess.run(["hidutil", "property", "--matching", '{"PrimaryUsagePage":1,"Pri
                 "--set", f'{{"HIDMouseAcceleration":{base_gain[0] if base_gain else 45056}}}'], capture_output=True)
 time.sleep(0.4)
 check("full pointer speed: a reset gain is raised again", gains() == [round(g * 4) for g in base_gain], f"{gains()} base {base_gain}")
+ctl("level 1"); time.sleep(0.4)
+# A mouse that comes back as a new HID service after launch (wake from sleep, a wireless mouse
+# reconnecting; each vmouse start is one): Wind's HID client was never told about it, so Transform kept
+# macOS's slow zoomed speed. The owner met it on a live switch from Render, which needs no gain
+# (2026-11-03). Render first, the mouse re-added, then Transform live from the config.
+set_config(engine="draw")
+vm.stdin.write("quit\n"); vm.stdin.flush(); vm.wait(); time.sleep(0.5)
+vm = start_vm(); time.sleep(0.5)
+set_config(engine="zoom")
+full, s = travel(4, False, True)
+check("full pointer speed: a mouse re-added after launch is raised (Render -> Transform)",
+      set(gains()) == {round(g * 4) for g in base_gain}, f"{gains()} base {base_gain}")   # other mice may come and go
+check("full pointer speed: a mouse re-added after launch moves at 1x speed", abs(full - base) < base * 0.02,
+      f"{full:.2f} pt, 1x {base:.2f}")
 ctl("level 1"); time.sleep(0.4)
 set_config(fullPointerSpeed=False)
 

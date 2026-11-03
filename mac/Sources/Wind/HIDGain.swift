@@ -12,6 +12,7 @@ import Foundation
 @_silgen_name("IOHIDEventSystemClientCopyServices") private func hidCopyServices(_ c: CFTypeRef) -> Unmanaged<CFArray>?
 @_silgen_name("IOHIDServiceClientCopyProperty") private func hidCopyProperty(_ s: CFTypeRef, _ k: CFString) -> Unmanaged<CFTypeRef>?
 @_silgen_name("IOHIDServiceClientSetProperty") private func hidSetProperty(_ s: CFTypeRef, _ k: CFString, _ v: CFTypeRef) -> Bool
+@_silgen_name("IOHIDEventSystemClientScheduleWithDispatchQueue") private func hidSchedule(_ c: CFTypeRef, _ q: DispatchQueue)
 @_silgen_name("IOHIDServiceClientGetRegistryID") private func hidRegistryID(_ s: CFTypeRef) -> Unmanaged<CFTypeRef>?
 
 final class HIDGain {
@@ -83,7 +84,14 @@ final class HIDGain {
 
     /// Linear-mode mice; others (curve mode, trackpads) keep macOS's speed.
     private func scan() {
-        if client == nil { client = (hidClientCreate(nil) ?? hidSimpleClientCreate(nil))?.takeRetainedValue() }
+        if client == nil {
+            client = (hidClientCreate(nil) ?? hidSimpleClientCreate(nil))?.takeRetainedValue()
+            // Scheduled, so its service list follows the system. Unscheduled, it kept the mice of the
+            // moment it was made: a mouse that came back as a new service (wake from sleep, a wireless
+            // mouse reconnecting) was never raised and Transform stayed at macOS's slow zoomed speed
+            // until Wind restarted (owner 2026-11-03, noticed on a live switch from Render).
+            if let c = client { hidSchedule(c, q) }
+        }
         guard let c = client else { return }
         var found = 0
         for s in Self.services(c) {
