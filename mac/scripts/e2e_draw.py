@@ -279,6 +279,32 @@ def app_switch(label):
 app_switch("draw engine")
 
 
+# Wind's own menu-bar menu open while zoomed (nimkimi 2026-11-03: the cursor went in the top-right menu). The
+# render tick ran from the main queue, which a tracking menu does not drain: the view and the drawn cursor
+# froze while the pointer moved on, and after 3 s the hang watchdog quit Wind. The menu is opened by the
+# test channel and closes itself; the pointer moves well away from it and nothing is clicked.
+def own_menu(label):
+    ctl("level 1"); time.sleep(0.3); ctl("warp 700 500"); time.sleep(0.2); ctl("level 3"); time.sleep(0.8)
+    pid = subprocess.run(["pgrep", "-x", "Wind"], capture_output=True, text=True).stdout.split()
+    n0 = nlines()
+    ctl("menu 4")                                       # no ctl while it tracks: the command file waits
+    time.sleep(0.3)
+    for i in range(6): mv(4 if i % 2 == 0 else -4, 1, 40, 8)
+    time.sleep(4.2)
+    after = subprocess.run(["pgrep", "-x", "Wind"], capture_output=True, text=True).stdout.split()
+    check(f"{label}: Wind keeps running with its menu open 4 s", pid and pid == after, f"pids {pid} -> {after}")
+    if pid != after: return
+    L = log_since(n0)
+    i0 = next((i for i, l in enumerate(L) if "command: menu" in l), 0)
+    i1 = next((i for i, l in enumerate(L) if "test menu: closing" in l), len(L))
+    ticks = sum(1 for l in L[i0:i1] if " view " in l)
+    check(f"{label}: the view and drawn cursor keep up while Wind's menu is open", ticks > 200, f"{ticks} ticks in 4 s")
+    # The pointer still for the menu's last ~3 s: the heartbeats must run too (no real cursor shown for a stall).
+    check(f"{label}: no real cursor while Wind's menu is open", not any("main thread quiet" in l for l in L))
+    ctl("level 1"); time.sleep(0.4)
+own_menu("draw engine")
+
+
 # A real password prompt (SecurityAgent): render stays on and the prompt is drawn magnified once. The prompt asks for nothing: it is closed
 # by ending the osascript that asked (nothing is typed or clicked in it).
 ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)

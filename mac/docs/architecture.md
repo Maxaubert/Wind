@@ -123,6 +123,10 @@ nothing reads or moves the pointer. Measured with the virtual mouse: 68.75 pt at
 - LinearMouse puts its own value back when a mouse becomes the active one, and no notification
   reports it: Wind reads the gain back every 100 ms while zoomed, takes a changed value as the new
   base and raises it again. New mice are picked up within a second.
+- The HID client is scheduled on Wind's queue: unscheduled, its service list stays as it was when it was
+  made, so a mouse that came back as a new service (wake, a wireless mouse reconnecting) was never raised
+  and Transform kept macOS's slow speed until a restart (owner 2026-11-03, seen after a live switch from
+  Render; `e2e_mouse.py` re-adds the virtual mouse to check it).
 - The bases are saved in `hidgain.json` (Application Support) while raised; WindGuard and the next
   launch put them back after a crash.
 - Curve-mode mice and trackpads are left alone (the gain is not a plain multiplier there; scaling
@@ -278,6 +282,20 @@ not.
   and running the frame's work 3 ms after the display link did not reduce the shake.
 - Measured: `edge_truth` passes at 3x, 5.25x and 8x on both edges; the edges keep 1x speed (69.5 pt
   against 68.8). The explorer's edge scenarios show 1 snap of 0.8 screen pt per run, as before.
+
+### Warp carries and the free axis (issue #529, 2026-11-03)
+Tester report (30x, pointer centred, keepPointerSpeed): pushing into the right edge, the pointer flickered
+off screen. Log maths and repro: `~/Documents/Claude/research/wind-mac/2026-11-03-issue-529-edge-flicker.md`.
+- **A warp takes effect against the view shown at that moment**, which can be after the tick's own view
+  write. Planned on the old view while the free axis then moved to the carry's next whole point, the
+  pointer was dragged by that floor change (read 1381.5667 for 1380.5667, exactly one point), and
+  the next tick took it as hand motion times the level (30-150 pt throws). It is a race: 2 of 56 such
+  ticks in his log, 1 of ~200 here with 1-2 ms mouse reports, none with 8 ms reports. So the free axis's
+  view is written first (keepPointer=true) and the warp is planned on it; `carryView` holds the tick's
+  write there.
+- **Without raw counts** (`lockTracking` off, the default) the redo of an undone carry is still taken off
+  (it was only inside the raw-count bound): a 10 pt redo at 30x threw the view 312 pt.
+- `edge_truth.py`'s first check (`--along 30`) pushes toward and along the right edge with 1-2 ms reports.
 
 ### Zoom-pan at a pinned edge (2026-10-31)
 Owner report: panning while zooming with the pointer near an edge shook much more than elsewhere.
@@ -718,6 +736,16 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   the app's cursor (`NSCursor.currentSystem`) as the shape Wind draws and sets the transparent one again.
   Measured against an app that sets a cursor on every mouse move: ~0.2 ms from its set to Wind's, its
   cursor in none of ~580 captured frames.
+- Wind's own windows (Settings, a WKWebView that is foreground while open) set the cursor in Wind's own
+  process: WebKit on every hover change (about 30 sets a second sweeping the page), AppKit's cursor rects.
+  Left to the poll, each showed the real, unmagnified cursor until the re-set: zoomed over Settings the real
+  arrow or pointing hand was the system cursor in 5% of 5 ms samples, about 20 glimpses a second (owner
+  2026-11-03, "in settings the tiny cursor reappears"). `ClearCursor` replaces `-[NSCursor set]` in Wind's
+  process once (`hookOwnSets`): while active (and the main thread not stalled) a set's cursor becomes the
+  shape Wind draws and the transparent one is set instead; otherwise it passes through (stop() clears
+  `active` before putting the app's cursor back). After: 0 of ~1100 samples, both cursors on render.
+  `e2e_settings_mouse.py` sweeps the zoomed page with an outside sampler. Transform with Wind's cursor
+  hides the real cursor, so it never showed there (0 before and after).
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
@@ -844,6 +872,17 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   speed): a tremor at 16x (+-2 counts every 30 ms) moved the view with sd 6.0 screen pt, 1.9 at 60 ms
   and 1.3 at 150 ms; a steady pan at 4x trails by ~6 screen pt. Speed scaled by the level (tried
   first) smoothed tremor LESS at high zoom.
+- **Wind's own menu-bar menu while zoomed** (nimkimi 2026-11-03: in the top-right menu the cursor went away,
+  then came back). A tracking menu runs the main run loop in `NSEventTrackingRunLoopMode`, which fires
+  common-mode timers and the display link but does not drain the main dispatch queue. Render runs each tick
+  3 ms after the link (`drawTickDelay`) from a main-queue timer, so no tick ran while the menu was open: the
+  view and the drawn cursor froze while the pointer moved on (the real cursor transparent), measured 0 ticks
+  in 1.5 s and the drawn cursor moving 0 of 309 screen pt. With the pointer still, the default-mode heartbeat
+  timers stopped too: after 1.5 s `ClearCursor` took it for a stall and showed the app's cursor (tiny,
+  unmagnified), and after 3 s the hang watchdog quit Wind. Now the link steps at once outside the default mode,
+  and both heartbeats are common-mode timers. `e2e_draw.py` (own menu) and `scripts/blink_truth.py` (drawn
+  cursor in every zoomed-screen frame across the menu bar extras and the edges, and in Wind's menu) check it.
+  The menu bar extras and the edges alone showed no missing frame (both cursors, Nearest and xBR, 3x and 8x).
 - Not done yet: multiple displays, DRM video (captured black).
 
 ### Render scaling (`renderScaling`, 0.4.0, 2026-11-03)
@@ -867,7 +906,12 @@ does not touch Render.
   previous tick encoded (waited for only if the GPU is late: 0-38 ticks in a 1.5 s pan). While the view
   moves, the drawn cursor, Wind's screenshot selection and Inspect's crosshair are drawn with the view
   and pointer of the picture on screen, so they stay on the right desktop point; a still view draws
-  them as they are. A pass left in flight when the link pauses is shown 12 ms later. A new captured
+  them as they are. The selection is a per-tick value (`ShotGeom` in `Drawn`) for this: drawn as it was
+  now with the older view, its crosshair left the screen centre by a tick's hand step times the level and
+  jumped on 49-57% of moving frames at 3x/6x in 0.4.0-0.4.1 (owner 2026-11-03, "wobbly again"; 0% on Nearest
+  and before 0.4.0, 0% after; it is now 2.0 frames behind the hand on xBR, 1.0 on Nearest). `drawshot_truth.py`
+  fails a render run over 3%. Report: research/wind-mac/2026-11-03-screenshot-wobble-xbr.md.
+  A pass left in flight when the link pauses is shown 12 ms later. A new captured
   frame while the view is still is passed and shown at once (one GPU wait, 1-3 ms).
 - **No work when nothing changes**: a pass runs only when the view or the captured frame changed in
   the view. Every commit of the overlay (excluded from the capture) still brings a capture frame

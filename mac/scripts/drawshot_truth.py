@@ -131,10 +131,10 @@ def analyse(path, meta):
             den = sum((x - mt) ** 2 for x in tt) or 1
             b = sum((x - mt) * (y - mv) for x, y in zip(tt, vv)) / den
             res.append(abs(vv[2] - (mv + b * (tt[2] - mt))))
-    end = None
     if dr:
         t, X, Z, Y = dr[-1]; D = (A[0] + (X[0] - Y[0]) / lv, A[1] + (X[1] - Y[1]) / lv); p = ptr_at(P, t)
         end = math.hypot(p[0] - D[0], p[1] - D[1])
+    else: end = float("nan")
     out["drag"] = dict(frames=len(dr), lag_mean_pt=S.mean(lag) if lag else float("nan"), lag_p95_pt=pct(lag, 0.95),
                        lag_mean_px=(S.mean(lag) * lv) if lag else float("nan"), lag_frames_med=pct(lagf, 0.5), lag_frames_p95=pct(lagf, 0.95),
                        corner_max_px=max(corner or [float("nan")]), corner_off_frames=sum(1 for c in corner if c > 1.5),
@@ -238,5 +238,15 @@ for name, m in metas.items():
           f"({d['corner_off_frames']} frames > 1.5); back on screen {d['back_screen']}, in desktop {d['back_desktop']} of {d['moving']}; "
           f"anchor residual p95 {d['anchor_res_p95_px']:.2f} max {d['anchor_res_max_px']:.2f} px; at rest {d['end_at_rest_pt']:.2f} pt")
     print(f"   pacing: {p['refreshes']} refreshes, {p['frames']} frames, {p['idle']} idle, {p['missing']} missing")
+    if name.startswith("owner"):
+        # Render's crosshair stays on the screen centre while the view follows the pointer (0% before
+        # 0.4.0 and on Nearest). On xBR the picture is a refresh behind and the selection was drawn as it was
+        # now with that older view: 49-57% of moving frames jumped, the owner's "wobbly again" (2026-11-03).
+        W.check(f"{name}: free crosshair holds the screen centre", f["moving"] > 50 and f["jumps_pct"] <= 3 and f["blips"] <= 3,
+                f"jumps {f['jumps']}/{f['moving']} ({f['jumps_pct']:.1f}%), blips {f['blips']}, spread p95 {f['spread_p95_px']:.1f} px")
+        W.check(f"{name}: the box's anchor seen while dragging", d["frames"] > 30, f"{d['frames']} frames")
+        if d["frames"] > 30:
+            W.check(f"{name}: box corner with the crosshair, no back-steps", d["corner_max_px"] <= 3 and d["back_screen"] <= 5,
+                    f"corner off max {d['corner_max_px']:.1f} px, back on screen {d['back_screen']}")
 json.dump(summary, open(os.path.join(a.out, "summary.json"), "w"), indent=1)
-if not a.analyse: W.finish()
+W.finish()

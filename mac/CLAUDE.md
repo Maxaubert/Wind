@@ -19,7 +19,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - Settings UI (`ui/`, Svelte): `npm ci && npm run build`, `npx playwright test` (mock bridge, WebKit +
   Chromium), `npm run test:rules` (keybind rules and config defaults). Design: `docs/architecture.md`, Settings window.
 - `python3 scripts/e2e_settings.py`: the settings window in the test build (page writes, keybinds, setup).
-- `python3 scripts/e2e_settings_mouse.py`: the settings window ON SCREEN with real clicks and keys (select list, slider arrows).
+- `python3 scripts/e2e_settings_mouse.py`: the settings window ON SCREEN with real clicks and keys (select list, slider arrows),
+  and no real cursor over it zoomed on render (Wind's own cursor sets, `ClearCursor.hookOwnSets`).
 - `python3 scripts/e2e.py`: e2e checks; builds and runs the test app in place of the installed one, restores it after.
 - `python3 scripts/e2e_mouse.py`: real-HID pointer e2e via `tools/vmouse` (Karabiner, sudo).
 - `python3 scripts/e2e_caret.py`: real typing in TextEdit, Terminal, Safari, Chrome, Claude Code
