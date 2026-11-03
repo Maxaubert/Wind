@@ -303,3 +303,16 @@ test('after dragging a slider the arrow keys step it by its increment, with no f
   await page.keyboard.press('ArrowRight');
   expect(await sl.evaluate((e) => getComputedStyle(e).outlineStyle)).toBe('none');
 });
+
+test('the About card sits centred under the banner, not against it', async ({ page }) => {
+  await mockHost(page);
+  await open(page);
+  await go(page, 'about');
+  const main = await page.locator('main.main').boundingBox();
+  const card = await page.locator('.page > .card').boundingBox();
+  const banner = await page.locator('.page > *').first().boundingBox();
+  const above = card.y - (banner.y + banner.height);
+  const below = main.y + main.height - 48 - (card.y + card.height);
+  expect(above).toBeGreaterThan(40);
+  expect(Math.abs(above - below)).toBeLessThan(4);
+});

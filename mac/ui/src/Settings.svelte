@@ -221,6 +221,9 @@
   .page.fade { animation: pagein var(--dur-fast) var(--ease); }
   @keyframes pagein { from { opacity: 0; } }
   .tail { height: 48px; padding: 0; }
+  /* About: its one card sits centred in the space under the banner, not right up against it (owner 2026-11-03). */
+  .main[data-page='about'] .page { min-height: calc(100% - 48px); display: flex; flex-direction: column; }
+  .main[data-page='about'] .page > :global(.card) { margin-block: auto; }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>
