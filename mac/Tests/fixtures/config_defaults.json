@@ -28,6 +28,7 @@
     "quickZoom": { "type": "list", "def": "" },
     "quickZoomDefault": { "type": "double", "def": "4", "min": 1.1, "max": 30 },
     "quit": { "type": "list", "def": "cmd+escape" },
+    "renderScaling": { "type": "int", "def": "0", "min": 0, "max": 0 },
     "showAdvanced": { "type": "bool", "def": "0" },
     "slowPanGlide": { "type": "bool", "def": "0" },
     "slowPrecision": { "type": "bool", "def": "0" },

@@ -227,7 +227,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Follow text caret", #selector(toggleCaret), on: c.trackCaret))
         menu.addItem(item("Follow keyboard focus", #selector(toggleFocus), on: c.trackFocus))
         menu.addItem(item("Mouse within edges (instead of centred)", #selector(toggleEdge), on: c.mouseAlign == 1))
-        menu.addItem(item("Smooth images", #selector(toggleSmooth), on: c.smoothImages))
+        if c.engine == "draw" {                         // Render's own filters (renderScaling)
+            let sc = NSMenu()
+            for r in RenderScaling.menuOrder {
+                sc.addItem(item(r.label, #selector(setScaling(_:)), on: c.renderScaling == r.rawValue, tag: r.rawValue))
+            }
+            let si = item("Scaling", nil); si.submenu = sc
+            menu.addItem(si)
+        } else {
+            menu.addItem(item("Smooth images", #selector(toggleSmooth), on: c.smoothImages))   // macOS's zoom: nearest or bilinear
+        }
 
         let warm = NSMenu()
         for p in [0, 25, 50, 75, 100] {
@@ -268,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
     @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
+    @objc private func setScaling(_ i: NSMenuItem) { saveConfig { $0.renderScaling = i.tag } }
     @objc private func openSettings() { showSettings(onboard: false) }
 
     func showSettings(onboard: Bool) {
@@ -397,6 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
             "shot": shotState(),
+            "scaling": DrawZoom.shared.scalingState(),
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "config": (try? JSONSerialization.jsonObject(with: mag.config.encoded())) ?? NSNull(),   // what Wind runs on now
             "settings": ["open": settingsWindow.isOpen, "windowId": settingsWindow.testWindowId, "url": settingsWindow.testLoadedURL],

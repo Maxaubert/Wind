@@ -276,6 +276,28 @@ struct ConfigTests {
         expect(c.zoomInSpeed == 0.25)
     }
 
+    /// renderScaling keeps Windows' values (0-2) and the Mac's own (3, 4); anything else is Nearest.
+    func renderScalingClampsLikeWindows() throws {
+        for v in 0...4 { expect(try Config.load(from: Data("{\"renderScaling\": \(v)}".utf8)).renderScaling == v) }
+        expect(try Config.load(from: Data(#"{"renderScaling": 5}"#.utf8)).renderScaling == 0)
+        expect(try Config.load(from: Data(#"{"renderScaling": -1}"#.utf8)).renderScaling == 0)
+        expect(Config().renderScaling == RenderScaling.nearest.rawValue)
+        expect(RenderScaling.xbr.usesShader && RenderScaling.nis.usesShader && !RenderScaling.sharp.usesShader)
+        expect(Set(RenderScaling.menuOrder) == Set(RenderScaling.allCases))
+    }
+
+    /// A file from before 0.4.0 (smoothImages set both engines) keeps Render smooth; a file that names
+    /// renderScaling keeps it, and Transform's smoothImages stays its own.
+    func smoothImagesMigratesToRenderScaling() throws {
+        let old = try Config.load(from: Data(#"{"smoothImages": true}"#.utf8))
+        expect(old.renderScaling == RenderScaling.smooth.rawValue && old.smoothImages)
+        expect(try Config.load(from: Data(#"{"smoothImages": false}"#.utf8)).renderScaling == 0)
+        let both = try Config.load(from: Data(#"{"smoothImages": true, "renderScaling": 2}"#.utf8))
+        expect(both.renderScaling == 2 && both.smoothImages)
+        let saved = try Config.load(from: Config.load(from: Data(#"{"smoothImages": true, "renderScaling": 0}"#.utf8)).encoded())
+        expect(saved.renderScaling == 0)
+    }
+
     /// Only zoom in and out take several binds (up to three); every other action keeps its first.
     func clampsBindCounts() throws {
         let c = try Config.load(from: Data(#"{"zoomIn": ["mouse4", "f13", "f14", "f15"], "quit": ["cmd+escape", "f16"], "panLeft": ["ctrl+opt+left", "f17"]}"#.utf8))

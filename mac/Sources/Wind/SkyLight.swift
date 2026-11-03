@@ -136,7 +136,7 @@ enum SkyLight {
     /// duration is about pi * sqrt(scale * distance) / (1500 * glide), clamped to 0.01-0.5 s.
     static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true, glide: Double = 0, drawnFollow: Bool = true) -> Bool {
         HIDGain.shared.follow(DrawZoom.enabled ? 1 : scale)   // render does not slow the pointer
-        if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale, smooth: smooth); return true }
+        if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale); return true }
         guard let f = setZoom else { return false }
         if glide == 0 && drawnFollow { beforeWrite?(center, scale) }
         var c = center

@@ -17,6 +17,8 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("ScreenCaptureKit"),
+                .linkedFramework("Metal"),
+                .linkedFramework("IOSurface"),
             ]
         ),
         .executableTarget(name: "wind-checks", dependencies: ["WindCore"], path: "Tests/WindCoreChecks"),
