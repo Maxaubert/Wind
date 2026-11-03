@@ -906,7 +906,12 @@ does not touch Render.
   previous tick encoded (waited for only if the GPU is late: 0-38 ticks in a 1.5 s pan). While the view
   moves, the drawn cursor, Wind's screenshot selection and Inspect's crosshair are drawn with the view
   and pointer of the picture on screen, so they stay on the right desktop point; a still view draws
-  them as they are. A pass left in flight when the link pauses is shown 12 ms later. A new captured
+  them as they are. The selection is a per-tick value (`ShotGeom` in `Drawn`) for this: drawn as it was
+  now with the older view, its crosshair left the screen centre by a tick's hand step times the level and
+  jumped on 49-57% of moving frames at 3x/6x in 0.4.0-0.4.1 (owner 2026-11-03, "wobbly again"; 0% on Nearest
+  and before 0.4.0, 0% after; it is now 2.0 frames behind the hand on xBR, 1.0 on Nearest). `drawshot_truth.py`
+  fails a render run over 3%. Report: research/wind-mac/2026-11-03-screenshot-wobble-xbr.md.
+  A pass left in flight when the link pauses is shown 12 ms later. A new captured
   frame while the view is still is passed and shown at once (one GPU wait, 1-3 ms).
 - **No work when nothing changes**: a pass runs only when the view or the captured frame changed in
   the view. Every commit of the overlay (excluded from the capture) still brings a capture frame
