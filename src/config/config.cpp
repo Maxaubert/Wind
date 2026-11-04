@@ -172,6 +172,7 @@ static void ClampConfig(Config& c, bool haveRenderScaling) {
     c.maxLevel        = clampd(c.maxLevel,        1.0, 30.0);
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
+    c.wheelZoomSpeed  = clampd(c.wheelZoomSpeed,  0.1, 3.0);
     c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
     c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
     c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
@@ -277,6 +278,7 @@ static void ApplyValueKey(Config& c, const std::string& key, const std::string& 
     else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
     else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
     else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
+    else if (key == "wheelZoomSpeed")   c.wheelZoomSpeed = ParseDoubleStrict(val);
     else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
     else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
     else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
@@ -532,6 +534,9 @@ std::string DefaultIniText() {
                "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.75=default, 3.5=twice as fast, 0.875=half);\n"
                ";   speed is independent of maxLevel\n"
                "zoomInSpeed=1.75\nzoomOutSpeed=1.75\n"
+               "; wheelZoomSpeed: how far one wheel notch zooms, relative to the hold speed (0.6=default, 1=a\n"
+               ";   notch zooms as far as holding for 0.1 s)\n"
+               "wheelZoomSpeed=0.6\n"
                "; smoothZoom: 0=linear constant speed; 1=zoom-IN soft-starts, easing up to linear (shipped on)\n"
                "smoothZoom=1\n"
                "; smoothZoomAccel: ease-in depth - zoom-in starts at zoomInSpeed/this and climbs to\n"

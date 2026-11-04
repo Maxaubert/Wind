@@ -64,6 +64,7 @@ export const groups = [
         { key: 'maxLevel', type: 'slider', label: 'Max zoom', keywords: ['maximum', 'limit', 'highest', 'magnification', 'level', 'cap', 'zoom level', 'factor', 'times', 'upper'], desc: 'The highest zoom level', min: 2, max: 30, step: 1, def: 30.0, unit: 'times' },
         { key: 'zoomInSpeed', type: 'slider', label: 'Zoom-in speed', keywords: ['faster', 'slower', 'rate', 'magnify speed', 'zoom rate', 'acceleration', 'velocity', 'how fast'], desc: 'How fast the view zooms in', min: 0.25, max: 4, step: 0.05, def: 1.75, unit: 'times' },
         { key: 'zoomOutSpeed', type: 'slider', label: 'Zoom-out speed', keywords: ['faster', 'slower', 'rate', 'zoom rate', 'velocity', 'how fast'], desc: 'How fast the view zooms out', min: 0.25, max: 4, step: 0.05, def: 1.75, unit: 'times' },
+        { key: 'wheelZoomSpeed', type: 'slider', label: 'Scroll zoom speed', keywords: ['wheel', 'mouse wheel', 'scroll', 'trackpad', 'notch', 'faster', 'slower', 'rate', 'step', 'how fast', 'sensitivity'], desc: 'How far each scroll step zooms', min: 0.1, max: 3, step: 0.05, def: 0.6, unit: 'times' },
         { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go', min: 0, max: 300, step: 5, def: 115, unit: 'ms' },
       ] },
       { caption: 'Easing', rows: [

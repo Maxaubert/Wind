@@ -44,7 +44,7 @@ const Field kFields[] = {
     F(zoomInMods), F(zoomOutMods), F(zoomInMods2), F(zoomOutMods2),
     F(zoomInButtonMods), F(zoomOutButtonMods), F(zoomInButton2Mods), F(zoomOutButton2Mods),
     F(zoomWheelMods), F(panKeysOn), F(hideCursorOn), F(cursorLockOn),
-    F(maxLevel), F(zoomInSpeed), F(zoomOutSpeed), F(smoothZoom), F(smoothZoomAccel), F(smoothZoomRamp),
+    F(maxLevel), F(zoomInSpeed), F(zoomOutSpeed), F(wheelZoomSpeed), F(smoothZoom), F(smoothZoomAccel), F(smoothZoomRamp),
     F(zoomEaseOutMs), F(vsync), F(dwmFlush), F(diagnostics), F(cursorSensitivity), F(panGlideMaxPx),
     F(gameCursorLagMs), F(cursorConstantSize), F(trayPinned), F(cursorVisibility), F(model),
     F(fastPan), F(smoothPan), F(magInputTransform), F(bilinear), F(renderScaling), F(upscaleTiming),

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "zoom_controller.h"
+#include "view_glide.h"   // SpringToward: the wheel glide
 #include <algorithm>
 #include <cmath>
 namespace wind {
@@ -28,9 +29,10 @@ void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
 // ~150ms and direction reversals round off instead of snapping. Time-based, so VRR tick-interval
 // variation does not change the felt ease (the same law as the mapper's easing).
 
-// Wheel glide time constant: short enough that a notch feels immediate, long enough that it is a
-// glide and not a jump (~95% of the way in ~0.25 s).
-static constexpr double kWheelTau = 0.08;
+// Wheel glide: a critically damped spring in log space, ~95% of a notch in 0.25 s, the same as Wind
+// for Mac. It starts from rest (the first-order glide it replaced put +2.9% of a notch on the very
+// first frame, which read as a jump) and keeps its speed across notches that come in a row.
+static constexpr double kWheelGlideMs = 250.0;
 
 // One wheel notch zooms as far as HOLDING the zoom bind does in this long, at the same speed
 // slider, so scrolling about 10 notches a second feels like holding; faster or slower scrolling
@@ -41,7 +43,7 @@ double WheelNotchStep(double speed) {
 }
 void ZoomController::wheelNotches(int steps) {
     if (steps == 0) return;
-    stepTarget(steps, WheelNotchStep(steps > 0 ? inSpeed_ : outSpeed_));
+    stepTarget(steps, WheelNotchStep((steps > 0 ? inSpeed_ : outSpeed_) * wheelSpeed_));
 }
 
 void ZoomController::stepTarget(int steps, double step) {
@@ -52,13 +54,13 @@ void ZoomController::stepTarget(int steps, double step) {
 }
 
 void ZoomController::tick(double dt) {
-    if (dir_ != ZoomDir::None) target_ = 0.0;          // a held zoom takes over from the wheel
+    if (dir_ != ZoomDir::None) { target_ = 0.0; wheelVel_ = 0.0; }   // a held zoom takes over from the wheel
     if (target_ > 0.0 && dt > 0.0) {
-        // Exponential approach in LOG space: equal steps look equal at any zoom.
-        const double a = 1.0 - std::exp(-dt / kWheelTau);
-        const double lg = std::log(level_) + (std::log(target_) - std::log(level_)) * a;
-        level_ = std::exp(lg);
-        if (std::abs(std::log(level_ / target_)) < 0.002) { level_ = target_; target_ = 0.0; }
+        // In LOG space: equal steps look equal at any zoom.
+        level_ = std::exp(SpringToward(std::log(level_), std::log(target_), wheelVel_, dt * 1000.0, kWheelGlideMs));
+        if (std::abs(std::log(level_ / target_)) < 0.002 && std::abs(wheelVel_) < 0.05) {
+            level_ = target_; target_ = 0.0; wheelVel_ = 0.0;
+        }
         level_ = std::min(maxLevel_, std::max(minLevel_, level_));
         rate_ = 0.0; heldIn_ = 0.0;
         return;
@@ -99,9 +101,9 @@ void ZoomController::tick(double dt) {
     // (rampStopped in the transform model) is not deferred by an invisible decaying rate.
     if (dir_ == ZoomDir::None && (level_ >= maxLevel_ || level_ <= minLevel_)) rate_ = 0.0;
 }
-void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; rate_ = 0.0; target_ = 0.0; }
+void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; rate_ = 0.0; target_ = 0.0; wheelVel_ = 0.0; }
 void ZoomController::setLevel(double l) {
-    target_ = 0.0;   // a snap (quick zoom, keep-level) cancels any wheel glide
+    target_ = 0.0; wheelVel_ = 0.0;   // a snap (quick zoom, keep-level) cancels any wheel glide
     level_ = std::min(maxLevel_, std::max(minLevel_, l));
 }
 
