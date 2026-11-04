@@ -16,10 +16,11 @@ on:
       - '!mac/docs/**'
       - 'LICENSE'
       - 'THIRD-PARTY-NOTICES.md'
+      - 'tests/fixtures/shared/**'
       - '.github/workflows/mac.yml'
   pull_request:
     # The licence and notices ship inside the Mac zip too, so a PR that changes them runs these checks.
-    paths: [ 'mac/**', 'ui-shared/**', '.github/workflows/mac.yml', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'tools/check_copyright.ps1' ]
+    paths: [ 'mac/**', 'ui-shared/**', 'tests/fixtures/shared/**', '.github/workflows/mac.yml', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'tools/check_copyright.ps1' ]
   workflow_dispatch:
 
 permissions:
