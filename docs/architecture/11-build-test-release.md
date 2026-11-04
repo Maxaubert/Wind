@@ -81,6 +81,13 @@ headlessly, so the unit tests are the only verification loop that runs everywher
   a slider may be narrower than the core's clamp only when listed there with a reason. After an
   intended change to a default or a clamp, regenerate the fixture with
   `set WIND_UPDATE_FIXTURES=1 && build.bat test` and review its diff.
+- `tests/fixtures/shared/` holds the cases Wind shares with Wind for Mac, whose view geometry, zoom
+  controller and view owner are Swift ports of `src/track` and `src/zoom`: `tests/test_shared_fixtures.cpp`
+  runs them here, `mac/Tests/WindCoreChecks/SharedFixtures.swift` on the Mac (`mac.yml` runs on
+  changes to the folder). Rows are tagged `all`, `win` or `mac`; deliberate differences (the wheel
+  glide, keyboard pan speed at low zoom, `setLevel` during the ease-out) are per-platform rows. The
+  `all` and `win` values come from the C++ code: the same `WIND_UPDATE_FIXTURES=1` run rewrites them,
+  then the Mac has to match.
 
 **UI suite.** `ui/tests/*.spec.js` are Playwright specs, run with `npx playwright test` in `ui/`
 (the config starts the Vite server). Each spec installs a fake `window.chrome.webview` that answers

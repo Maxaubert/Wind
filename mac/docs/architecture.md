@@ -1055,6 +1055,11 @@ Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-sp
   are checked against `Tests/fixtures/mac_keybind_cases.txt` (wind-checks and `npm run test:rules`).
   The schema defaults and ranges are checked against `Tests/fixtures/config_defaults.json`
   (regenerate with `swift run wind-checks --write-defaults` after changing `Config`).
+- **Shared with Windows:** `ViewMath.swift`, `ZoomController.swift` and `ViewOwner.swift` are checked
+  against the repo's `tests/fixtures/shared/` (wind-checks `SharedFixtures.swift`; the Windows tests read
+  the same files). Rows tagged `all` come from the Windows code and must match here; deliberate
+  differences (wheel glide spring, key pan speed, `setLevel` stopping the ease-out, the still view) are
+  `win`/`mac` rows.
 
 ## Hitches as apps open (owner 2026-11-04)
 "As if it's getting scheduled out", when a prompt appears or an app opens: a brief freeze on Render. The OS was

@@ -1,0 +1,47 @@
+# View owner cases shared by Wind (Windows) and Wind for Mac. Read by tests/test_shared_fixtures.cpp
+# (src/track/view_target.h, StepViewOwner) and by mac/Tests/WindCoreChecks/SharedFixtures.swift
+# (mac/Sources/WindCore/ViewOwner.swift, stepViewOwner).
+#
+# One case per line: owner <platform> <tokens...>, tokens run left to right on one ViewOwnerState.
+#   platform: all (both run it), win (Windows only), mac (Mac only).
+#   Inputs are key=value and stay set for the rest of the line, except dx, dy and btn, which last one
+#   step. Before the first token: en=1 tc=1 tf=1 dt=8, everything else the ViewOwnerInputs default.
+#     en  enabled (zoomed, not locked)       tc / tf  track caret / focus
+#     dx dy  pointer movement this step, px  btn  a mouse button is down
+#     sb  ms since a button                  sk  ms since a key (0 = unknown, no gate)
+#     kab a typing key went down after the button   dt  ms this step
+#     kind none|caret|focus  seq  the tracker's report number   pan  keyboard panning   act  tracking on
+#   reset           ResetViewOwnerForSession (a new zoom session)
+#   =owner:warp:seq one StepViewOwner with the inputs so far, then the expected owner
+#                   (mouse|caret|focus|keys), warpPointer (0/1) and the latched target's seq.
+# Expected values come from the C++ code: after an intended change there,
+#   set WIND_UPDATE_FIXTURES=1 && build.bat test
+# rewrites the all and win rows, then the Mac must match.
+
+# a typed caret takes the view; the mouse takes it back on real movement and the pointer comes to the view
+owner all reset sk=100 kind=caret seq=1 =mouse:0:0 seq=2 =caret:0:2 dx=4 =mouse:1:2
+# a new zoom session re-baselines: a report from before the zoom-in never fires
+owner all sk=100 kind=caret seq=5 en=0 =mouse:0:0 reset en=1 =mouse:0:0 seq=6 =caret:0:6
+# no key within a second: the caret is ignored (scrolling moves a caret without a key)
+owner all reset kind=caret seq=1 sk=5000 =mouse:0:0 seq=2 =mouse:0:0 sk=1000 seq=3 =caret:0:3
+# the first step on a fresh state counts as already tracking, so seq 1 fires at once
+owner all sk=100 kind=caret seq=1 =caret:0:1 =caret:0:1
+# kinds that are off leave the mouse in charge; focus follows its own switch
+owner all tc=0 sk=100 kind=caret seq=1 =mouse:0:0 kind=focus seq=2 =focus:0:2 tf=0 seq=3 =focus:0:2
+# jitter: under 3 px within 100 ms keeps the caret; 3 px takes the view back
+owner all sk=100 kind=caret seq=1 =caret:0:1 dx=1 =caret:0:1 dx=1 =caret:0:1 dx=1 =mouse:1:1
+owner all sk=100 kind=caret seq=1 =caret:0:1 dx=1 dy=1 =caret:0:1 dy=-1 =mouse:1:1
+# movement spread over more than 100 ms never adds up
+owner all sk=100 kind=caret seq=1 =caret:0:1 dx=2 dt=60 =caret:0:1 =caret:0:1 dx=2 =caret:0:1 dx=1 dt=8 =mouse:1:1
+# a button gives the view back without moving the pointer, and its quiet second swallows the click's caret
+owner all sk=100 kind=caret seq=1 =caret:0:1 btn=1 =mouse:0:1 sb=0 seq=2 =mouse:0:1 sb=400 seq=3 =mouse:0:1 sb=1000 seq=4 =caret:0:4
+# a typing key after the click ends the quiet second early (#328)
+owner all sk=100 kind=caret seq=1 btn=1 =mouse:0:0 sb=200 seq=2 =mouse:0:0 kab=1 seq=3 =caret:0:3
+# keyboard panning owns the view ahead of a caret, the mouse takes it back from the keys
+owner all sk=100 pan=1 kind=caret seq=1 =keys:0:0 seq=2 =keys:0:0 pan=0 =keys:0:0 dx=5 =mouse:1:0
+# disabled (zoomed out or locked): the mouse resumes and reports seen meanwhile never fire
+owner all sk=100 kind=caret seq=1 =caret:0:1 en=0 seq=2 =mouse:0:1 en=1 =mouse:0:1 seq=3 =caret:0:3
+# tracking off: nothing takes the view, and its rising edge is a baseline, not an event
+owner all sk=100 kind=caret seq=1 =caret:0:1 act=0 seq=2 =caret:0:1 act=1 seq=3 =caret:0:1 seq=4 =caret:0:4
+# the latched target keeps the report that passed the gates
+owner all sk=100 kind=focus seq=1 =focus:0:1 kind=caret seq=2 =caret:0:2 sk=3000 seq=3 =caret:0:2
