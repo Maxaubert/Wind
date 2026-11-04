@@ -1083,9 +1083,10 @@ above the overlay, so it stays unmagnified on the zoomed view. It cannot be cove
 - A capture running when the engine is switched is stopped at the switch and at any zoom-in: left alone, each zoom-in
   cancelled the idle stop and it ran on with the dot (owner 2026-11-04, `backdrop_truth.py` covers the switch while zoomed).
 - No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
-- What is below reaches the screen only while the overlay commits, so `keepAliveTick` nudges the cursor layer 0.001 pt on every
-  refresh the tick does not commit. Cost, WindowServer CPU with the view still at 3x on a busy desktop (1x about 34-43%): Backdrop 59%,
-  Render 43%, Transform 33%.
+- What is below reaches the screen only as far as a commit dirties the backdrop, so `keepAliveTick` nudges the backdrop layer itself 0.001 pt
+  on every refresh the view does not move it. A nudge of the cursor layer alone, or a tick with the view still, redrew part of the view: a
+  Terminal scrolled with the pointer still tore in half (owner 2026-11-04; `dispcap --tear`, whole-window flips: 666 of 828 frames torn, 2 of
+  895 with the backdrop nudged, 0 of 430 on Render). WindowServer CPU with the view still at 3x is measured in `backdrop_truth.py`.
 - ScreenCaptureKit never shows the magnification: `tools/cursorchurn/dispcap` (CGDisplayStream) does, and shows the indicator itself.
   `scripts/backdrop_truth.py`: no indicator or capture, stripes at the level, the point at the centre, content changing below an idle overlay.
 - `WIND_ENGINE=backdrop` suites: e2e_hover, e2e_focus, e2e_screenshot, e2e_settings_mouse pass. e2e_draw and e2e_mouse fail only on checks of

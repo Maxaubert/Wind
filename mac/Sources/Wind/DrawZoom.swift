@@ -33,6 +33,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var backdropLayer: CALayer?
     private var keepAlive: CADisplayLink?
     private var nudge = false
+    private var backdropMovedAt = 0.0
     /// The engine failed this run (no permission, capture stopped, several displays): Wind stays on
     /// macOS's zoom until it restarts.
     nonisolated(unsafe) static var failed = false
@@ -188,13 +189,17 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let side = 2 * max(abs(px), abs(W - px), abs(py), abs(H - py)) + 8
         b.setValue((1 / L - 1) / 2, forKey: "zoom")
         b.bounds = CGRect(x: 0, y: 0, width: side, height: side)
-        b.position = CGPoint(x: px, y: H - py)
+        let at = CGPoint(x: px, y: H - py)
+        if abs(at.x - b.position.x) > 0.01 || abs(at.y - b.position.y) > 0.01 { backdropMovedAt = CACurrentMediaTime() }
+        b.position = at
         b.magnificationFilter = scaling == .nearest ? .nearest : CALayerContentsFilter(rawValue: "cubic")
     }
 
-    /// What is below the overlay reaches the screen only while the overlay commits: with it idle, a window
-    /// changing below showed at its 1x place, never magnified (re/2026-11-01-noslow-transform.md). The
-    /// tick sleeps with the pointer still, so a cursor nudge too small to see commits every refresh.
+    /// What is below reaches the screen only as far as the overlay's commit dirties the backdrop. With it idle
+    /// a window changing below showed at its 1x place (re/2026-11-01-noslow-transform.md), and a commit that
+    /// left the backdrop alone, a nudge of the cursor layer or a tick with the view still (wheel events wake
+    /// it), redrew part of the view: the screen torn in half in a scrolling Terminal, 80% of frames torn
+    /// (owner 2026-11-04; 0.2% with this). So the backdrop itself changes on every refresh the view does not move it.
     private func startKeepAlive() {
         guard keepAlive == nil, let s = NSScreen.screens.first else { return }
         let l = s.displayLink(target: self, selector: #selector(keepAliveTick))
@@ -203,11 +208,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     }
 
     @objc private func keepAliveTick() {
-        guard visible else { keepAlive?.invalidate(); keepAlive = nil; return }
-        if CACurrentMediaTime() - lastTickAt < 0.012 { return }     // the tick commits
+        guard visible, let b = backdropLayer else { keepAlive?.invalidate(); keepAlive = nil; return }
+        if CACurrentMediaTime() - backdropMovedAt < 0.012 { return }     // the view moved it
         nudge.toggle()
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        cursorLayer.position.x += nudge ? 0.001 : -0.001
+        b.position.x += nudge ? 0.001 : -0.001
         CATransaction.commit()
     }
 

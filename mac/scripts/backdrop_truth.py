@@ -63,6 +63,23 @@ for k in range(10):
     for n, (sx, sy) in spots.items(): seen[n].add(tuple(f.getpixel((sx + d, sy)) > 128 for d in (0, 25, 50, 75)))
     time.sleep(0.13)
 for n in spots: W.check(f"content below an idle overlay updates {n} the cursor" if n == "near" else f"content below an idle overlay updates ({n} from the cursor)", len(seen[n]) >= 2, f"{len(seen[n])} states at {spots[n]}")
+W.ctl("level 1"); time.sleep(0.6); churn.kill(); time.sleep(0.3)
+
+# Torn frames (owner 2026-11-04): the whole window flips black and white with the pointer still. Every spot of a
+# frame must agree. Wheel events wake the tick, which leaves the backdrop alone: checked with them too.
+churn = subprocess.Popen([T + "/cursorchurn", "30", "solid"], stdout=subprocess.PIPE, text=True); churn.stdout.readline(); time.sleep(0.8)
+W.ctl(f"warp {x + w // 2} {y + h // 2}"); time.sleep(0.4); W.ctl(f"level {a.level}"); time.sleep(2)
+SPOTS = [f"{i},{j}" for i in (200, 960, 1700) for j in (120, 400, 700, 1000)]
+def torn(label):
+    o = subprocess.run([T + "/dispcap", "--tear", "4"] + SPOTS, capture_output=True, text=True).stdout.split()
+    f, t = int(o[1]), int(o[3])
+    W.check(f"no torn frames, {label}", f > 100 and t <= f * 0.02, f"{t} of {f}")
+torn("pointer still")
+vm = subprocess.Popen(["sudo", os.path.join(W.ROOT, "tools/vmouse/vmouse")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+if vm.stdout.readline().strip() != "ready": sys.exit("vmouse not ready")
+vm.stdin.write("wheel 1 150 30\n"); vm.stdin.flush()      # 4.5 s of wheel events, the pointer still
+time.sleep(0.2); torn("pointer still, wheel events"); vm.stdout.readline(); vm.stdin.close()
+print(f"WindowServer CPU, Backdrop, content changing: {ws_cpu():.0f}%", flush=True)
 W.ctl("level 1"); time.sleep(0.6); churn.kill()
 
 # Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).

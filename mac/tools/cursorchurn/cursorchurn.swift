@@ -14,6 +14,7 @@ final class V: NSView {
     }
     override func mouseMoved(with e: NSEvent) { NSCursor.arrow.set(); sets += 1 }
     override func draw(_ r: NSRect) {
+        if solid { (inverted ? NSColor.white : NSColor.black).setFill(); bounds.fill(); return }
         for i in 0..<40 { ((i % 2 == 0) != inverted ? NSColor.white : NSColor.darkGray).setFill(); NSRect(x: CGFloat(i) * bounds.width / 40, y: 0, width: bounds.width / 40, height: bounds.height).fill() }
     }
 }
@@ -23,6 +24,12 @@ let w = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 1200, height: 800), st
 w.title = "cursorchurn"; w.contentView = V(); w.acceptsMouseMovedEvents = true
 w.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
+// solid: the whole window black, then white, 30 times a second: a frame shown whole has every spot agreeing.
+nonisolated(unsafe) var solid = false
+if CommandLine.arguments.contains("solid") {
+    solid = true
+    Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { _ in inverted.toggle(); w.contentView?.needsDisplay = true }
+}
 if CommandLine.arguments.contains("flash") {
     Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in inverted.toggle(); w.contentView?.needsDisplay = true }
 }
