@@ -49,12 +49,20 @@ W.check("the pointer's desktop point is at the screen centre", abs(near - im.wid
 W.ctl("level 1"); time.sleep(0.8); churn.kill(); time.sleep(0.3)
 
 churn = subprocess.Popen([T + "/cursorchurn", "30", "flash"], stdout=subprocess.PIPE, text=True); churn.stdout.readline(); time.sleep(0.8)
-W.ctl(f"warp {px} {py}"); time.sleep(0.4); W.ctl(f"level {a.level}"); time.sleep(2)   # the tick sleeps from here
-seen = set()
-for k in range(8):
+# The pointer in the view's top-left corner, the samples far from it: an update near the drawn cursor proves
+# nothing (owner 2026-11-04: a banner far from the cursor went stale; only the cursor's own area was redrawn).
+W.ctl(f"warp {x + 60} {y + 120}"); time.sleep(0.4); W.ctl(f"level {a.level}"); time.sleep(2)   # the tick sleeps from here
+spots = {"near": None, "far": (1650, 950), "mid": (1100, 700)}
+s = W.ctl("state"); c = s["sky"]["center"]
+spots["near"] = (int(960 + (x + 60 - c[0]) * a.level) + 60, int(540 + (y + 120 - c[1]) * a.level) + 60)
+seen = {k: set() for k in spots}
+for k in range(10):
     subprocess.run([T + "/dispcap", png, "0.1"], check=True)
-    seen.add(Image.open(png).convert("L").getpixel((im.width // 2 + 30, 300)) > 128); time.sleep(0.13)
-W.check("content below an idle overlay reaches the magnified view", len(seen) == 2, f"polarities seen {seen}")
+    f = Image.open(png).convert("L")
+    # A stripe edge can sit on a spot: read a few pixels across and take the side of the first.
+    for n, (sx, sy) in spots.items(): seen[n].add(tuple(f.getpixel((sx + d, sy)) > 128 for d in (0, 25, 50, 75)))
+    time.sleep(0.13)
+for n in spots: W.check(f"content below an idle overlay updates {n} the cursor" if n == "near" else f"content below an idle overlay updates ({n} from the cursor)", len(seen[n]) >= 2, f"{len(seen[n])} states at {spots[n]}")
 W.ctl("level 1"); time.sleep(0.6); churn.kill()
 
 # Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).

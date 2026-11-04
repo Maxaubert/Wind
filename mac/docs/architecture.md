@@ -753,10 +753,12 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   unless the cursor seed moved since, and Wind's transparent set moves it, so at 1x those sets cost
   nothing (0 seed bumps) and zoomed each one showed the real cursor until the poll's re-set (owner
   2026-11-04, ChatGPT: flicker while moving). `ClearCursor` reads the same shape (pixels) set twice within
-  1 s as that signature: for 1 s after each such set the poll thread also hides the real cursor, which no
+  1 s as that signature: for 0.5 s after each such set the poll thread also hides the real cursor, which no
   set shows through. It hides on that thread with its own balanced hide count (per process): on the main
   thread each hide stopped the tick 10-30 ms. The poll keeps re-setting the transparent image meanwhile:
-  an app switch force-shows even a hidden cursor (the poll re-hides it). `scripts/churn_truth.py`, 1 ms outside
+  an app switch force-shows even a hidden cursor (the poll re-hides it). Hover arriving during the hide is ignored, and
+  with the hand still nothing looks again (owner 2026-11-04: a banner's close button only after a zoom), so the end of the
+  hide posts a mouse move of no distance (`recheckHover`; `churn_truth.py` "arriving and stopping"). `scripts/churn_truth.py`, 1 ms outside
   sampler at 3x: `tools/cursorchurn` 3.92% -> 0.05-0.08%, the real ChatGPT window 0.98% -> 0.08% (the first
   two sets of a burst still show). SwiftUI hover is off only meanwhile; a panel above
   `cursorchurn` kept it (checked with the test app only, not with a real Chromium window under it).
