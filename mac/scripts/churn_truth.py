@@ -16,6 +16,7 @@ import windtest as W
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--target", default="churn")
+ap.add_argument("--engine", default="draw")
 ap.add_argument("--secs", type=float, default=5)
 ap.add_argument("--report-ms", type=int, default=1)
 ap.add_argument("--limit", type=float, default=0.2)
@@ -42,7 +43,7 @@ if not os.path.exists(SAMP):
     with open(SAMP + ".swift", "w") as f: f.write(SRC)
     subprocess.run(["swiftc", "-O", SAMP + ".swift", "-o", SAMP], check=True, capture_output=True)
 
-W.relaunch_with_channel(direct=True, extra={"engine": "draw", "cursor": "wind", "renderScaling": 1})
+W.relaunch_with_channel(direct=True, extra={"engine": a.engine, "cursor": "wind", "renderScaling": 1})
 vm = subprocess.Popen(["sudo", os.path.join(W.ROOT, "tools/vmouse/vmouse")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse not ready")
 def vmc(cmd): vm.stdin.write(cmd + "\n"); vm.stdin.flush(); vm.stdout.readline()
@@ -73,6 +74,9 @@ sample("1x")
 W.ctl(f"warp {cx} {cy}"); time.sleep(0.3); W.ctl("level 3"); time.sleep(1.5)
 s0 = W.ctl("state")
 pct, bumps = sample("3x moving")
+# Stopping: the end of the hide posts a move, and an app that repeats answers it once, not over and over.
+c0 = W.ctl("state")["clearCursorCounts"]; time.sleep(3); c1 = W.ctl("state")["clearCursorCounts"]
+W.check("render: a still pointer brings at most one more set", c1[1] - c0[1] <= 2, f"{c0} -> {c1}")
 s = W.ctl("state")
 print("clear cursor counts", s0.get("clearCursorCounts"), "->", s.get("clearCursorCounts"))
 W.check("render: the app really set the cursor while moving", bumps > 20, f"{bumps} seed bumps")
@@ -85,7 +89,8 @@ W.check("zoomed out, the real cursor shows", s["realCursorVisible"] and not s.ge
 # Hover above the app: the sets stop when the pointer is on another app's window, so the real cursor is
 # only transparent again and SwiftUI hover (a notification banner's) works, a moment after it arrives.
 if not os.path.exists(PROBE): subprocess.run([os.path.join(W.ROOT, "tools/hoverprobe/build.sh")], check=True, stdout=subprocess.DEVNULL)
-pp = subprocess.Popen([PROBE, "panel"], stdout=subprocess.PIPE, text=True)
+# Over the target (a real app's window starts near the top left): the app stays key and in reach of the sets.
+pp = subprocess.Popen([PROBE, "panel"] + ([] if churn else ["300", "400"]), stdout=subprocess.PIPE, text=True)
 _, px, py, pw, ph = pp.stdout.readline().split(); px, py, pw, ph = int(px), int(py), int(pw), int(ph)
 events = []
 threading.Thread(target=lambda: [events.append((time.time(), l.strip())) for l in pp.stdout], daemon=True).start()
@@ -101,6 +106,18 @@ while time.time() - arrived < 3:
 hov = [t - arrived for t, l in events if l == "SUI hover true"]
 print("pointer", s0["pointer"], "panel", px, py, pw, ph, "events", [l for _, l in events][-5:])
 W.check("render: SwiftUI hover works above the app", bool(hov), f"{hov[0]:+.2f} s from arriving" if hov else "no hover in 3 s")
+
+# Arriving and stopping (owner 2026-11-04: a banner's close button came only after a zoom): the hand stops on
+# the panel while the real cursor is still hidden for the app's sets. The hover must come with no further move.
+W.ctl("level 1"); time.sleep(0.5); W.ctl(f"warp {px + 300} {py - 60}"); time.sleep(0.4); W.ctl("level 3"); time.sleep(1.2)
+events.clear()
+for k in range(30): vmc(f"move {2 if k % 2 else -2} 0 20 {a.report_ms}")
+vmc(f"move 0 12 10 {a.report_ms}")                # one quick move onto the panel, about 82 pt, then the hand stops
+stopped = time.time(); time.sleep(2.5)
+print("stopped at", W.ctl("state")["pointer"], "panel top", py)
+got = [t - stopped for t, l in events if l == "SUI hover true"]
+W.check("render: hover comes after arriving and stopping, with no further move", bool(got), f"{got[0]:+.2f} s from stopping" if got else "none in 2.5 s")
+s = W.ctl("state"); W.check("render: the pointer stayed put", abs(s["pointer"][1] - (py + 22.5)) < 3, f"pointer {s['pointer']}")
 pp.kill(); W.ctl("level 1")
 if churn: churn.kill()
 vm.stdin.close()

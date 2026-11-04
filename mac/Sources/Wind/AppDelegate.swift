@@ -216,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A short menu (owner 2026-11-03: too many items, bad order): the engine, what the view follows,
         // then the app. Everything else is in Settings; the two items Settings has no row for sit in More.
         let engines = NSMenu()
-        for (id, label) in [("draw", "Render"), ("zoom", "Transform")] {
+        for (id, label) in [("draw", "Render"), ("backdrop", "Backdrop"), ("zoom", "Transform")] {
             let e = item(label, #selector(setEngine(_:)), on: c.engine == id); e.representedObject = id
             engines.addItem(e)
         }
@@ -247,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func showSettings(onboard: Bool) {
         settingsWindow.onCapture = { [weak self] on in self?.mag.bindsSuspended = on }
-        settingsWindow.runningEngine = { DrawZoom.enabled ? "draw" : "zoom" }
+        settingsWindow.runningEngine = { DrawZoom.enabled ? (DrawZoom.backdrop ? "backdrop" : "draw") : "zoom" }
         settingsWindow.macStatus = { [weak self] in
             ["accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(),
              "zoomShortcuts": self?.zoomShortcuts ?? [], "loginItem": SMAppService.mainApp.status == .enabled,

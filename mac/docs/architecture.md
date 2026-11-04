@@ -753,10 +753,12 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   unless the cursor seed moved since, and Wind's transparent set moves it, so at 1x those sets cost
   nothing (0 seed bumps) and zoomed each one showed the real cursor until the poll's re-set (owner
   2026-11-04, ChatGPT: flicker while moving). `ClearCursor` reads the same shape (pixels) set twice within
-  1 s as that signature: for 1 s after each such set the poll thread also hides the real cursor, which no
+  1 s as that signature: for 0.5 s after each such set the poll thread also hides the real cursor, which no
   set shows through. It hides on that thread with its own balanced hide count (per process): on the main
   thread each hide stopped the tick 10-30 ms. The poll keeps re-setting the transparent image meanwhile:
-  an app switch force-shows even a hidden cursor (the poll re-hides it). `scripts/churn_truth.py`, 1 ms outside
+  an app switch force-shows even a hidden cursor (the poll re-hides it). Hover arriving during the hide is ignored, and
+  with the hand still nothing looks again (owner 2026-11-04: a banner's close button only after a zoom), so the end of the
+  hide posts a mouse move of no distance (`recheckHover`; `churn_truth.py` "arriving and stopping"). `scripts/churn_truth.py`, 1 ms outside
   sampler at 3x: `tools/cursorchurn` 3.92% -> 0.05-0.08%, the real ChatGPT window 0.98% -> 0.08% (the first
   two sets of a burst still show). SwiftUI hover is off only meanwhile; a panel above
   `cursorchurn` kept it (checked with the test app only, not with a real Chromium window under it).
@@ -1070,3 +1072,27 @@ its tick. `scripts/hitch_truth.py` pans at 3x while apps open and quit, running 
 - Worst gap in `hitch_truth.py`: 66 ms -> 25 ms, no `slow present`, no recapture; `pan_truth.py` late ticks 10-15 -> 0. What is left comes from WindowServer being
   busy at those moments: 10-17 ms in `CATransaction.commit`, and 20-25 ms gaps with nothing of Wind's
   running (the display link's callback itself came late). Not removable from Wind without moving the tick off the main thread.
+
+## Backdrop engine (config `engine = "backdrop"`, prototype, owner 2026-11-04)
+Why: Render's capture brings macOS's recording indicator, a WindowServer window (`StatusIndicator`, 28x28, top right) stacked
+above the overlay, so it stays unmagnified on the zoomed view. It cannot be covered: its space is level 800 and anything above
+799 needs `com.apple.private.skylight.privacy-indicator`. The only way to have no dot is not to capture.
+- `DrawZoom.backdrop`: Render's overlay made clear, with a `CABackdropLayer` magnifying what WindowServer composites below
+  (`zoom = (1/L - 1)/2`, layer centre `(C L - W/2)/(L - 1)`). The drawn cursor, ClearCursor, prompts, hand-over and the 1x pointer
+  are Render's. No stream, no Screen Recording, no `hasFrame` wait. No class or key: falls back to macOS's zoom.
+- A capture running when the engine is switched is stopped at the switch and at any zoom-in: left alone, each zoom-in
+  cancelled the idle stop and it ran on with the dot (owner 2026-11-04, `backdrop_truth.py` covers the switch while zoomed).
+- `handover` (Settings, under Engine; greyed on Transform; Render too): off, nothing goes to macOS's zoom (owner 2026-11-04, the lock screen too).
+  Protected windows and windows above the overlay stay as drawn, macOS's screenshot modes run under the overlay with their real crosshair
+  unmagnified, and the lock screen shows unmagnified above the overlay: `DrawZoom.lockUp` gives the real cursor back meanwhile and restarts a capture it stopped.
+- No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
+- What is below reaches the screen only as far as a commit dirties the backdrop, so `keepAliveTick` nudges the backdrop layer itself 0.001 pt
+  on every refresh the view does not move it. A nudge of the cursor layer alone, or a tick with the view still, redrew part of the view: a
+  Terminal scrolled with the pointer still tore in half (owner 2026-11-04; `dispcap --tear`, whole-window flips: 666 of 828 frames torn, 2 of
+  895 with the backdrop nudged, 0 of 430 on Render). WindowServer CPU with the view still at 3x is measured in `backdrop_truth.py`.
+- ScreenCaptureKit never shows the magnification: `tools/cursorchurn/dispcap` (CGDisplayStream) does, and shows the indicator itself.
+  `scripts/backdrop_truth.py`: no indicator or capture, stripes at the level, the point at the centre, content changing below an idle overlay.
+- `WIND_ENGINE=backdrop` suites: e2e_hover, e2e_focus, e2e_screenshot, e2e_settings_mouse pass. e2e_draw and e2e_mouse fail only on checks of
+  capture, xBR and macOS's speed, on Transform sections the override forces (same with `WIND_ENGINE=draw`), and in one of two runs Inspect's
+  crosshair (89 pt against 69 pt).
+- Not checked: HDR, DRM video, capture-protected windows, Spaces and full-screen apps, and what the panel itself shows (software only).

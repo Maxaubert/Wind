@@ -26,7 +26,7 @@ import QuartzCore
 // moved since, and Wind's own transparent set moves it. So every move put the real, unmagnified cursor up
 // until the poll cleared it: the tiny cursor flickering over ChatGPT (owner 2026-11-04; 1-4% of samples,
 // scripts/churn_truth.py). The same shape set twice within a second is that signature: the poll thread then
-// hides the real cursor as well, which no set can show through, until the sets stop. On that thread and
+// hides the real cursor as well, which no set can show through, until the sets stop (recheckHover then). On that thread and
 // with a hide of its own (the hide count is per process, so it balances with the main thread's): each is a
 // WindowServer call of 10-30 ms as windows change, too long for the tick. SwiftUI hover is off only for
 // that long, and an app under a banner gets no moves.
@@ -46,7 +46,7 @@ final class ClearCursor: @unchecked Sendable {
     private let wsLock = NSLock()
     private var repeatHidden = false        // the poll thread's own hide
     private var lastForeign = 0.0
-    private static let repeatWithin = 1.0, busyHold = 1.0
+    private static let repeatWithin = 1.0, busyHold = 0.5
     private var shapeGen = 0
     private var ours: UInt32 = 0            // the seed of Wind's own transparent set
     private var beat = 0.0                  // main thread alive (a timer while active)
@@ -203,6 +203,18 @@ final class ClearCursor: @unchecked Sendable {
         repeatHidden = on
     }
 
+    /// The hide just ended. Hover that came while it lasted was ignored, and with the hand already still
+    /// nothing looks again: a banner's close button stayed away until the next event, a zoom for one (owner
+    /// 2026-11-04). A mouse move of no distance makes the system look. Only here: render never zooms macOS,
+    /// so the pointer stays where it is. The app's set that answers it, over the app that repeats, starts a
+    /// new count: this cannot go round.
+    private func recheckHover() {
+        lock.lock(); repeatAt = 0; lock.unlock()
+        guard let at = CGEvent(source: nil)?.location,
+              let e = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: at, mouseButton: .left) else { return }
+        e.post(tap: .cghidEventTap)
+    }
+
     private func poll(session s: Int) {
         lock.lock(); var last = ours; lock.unlock()     // 0 (start's set raced with an app's): look at once
         var quick = false, hidden = false
@@ -219,6 +231,7 @@ final class ClearCursor: @unchecked Sendable {
             lock.unlock()
             if hideNow || hidden {
                 repeatHide(hideNow, session: s)
+                if hidden && !hideNow && !stale { recheckHover() }
                 hidden = hideNow
             }
             if stale {

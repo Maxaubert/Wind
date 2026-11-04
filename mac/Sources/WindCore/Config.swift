@@ -32,7 +32,7 @@ public struct Config: Codable, Equatable {
     public var quickZoomDefault = 4.0
     public var smoothImages = false               // Transform: false = nearest (sharp pixels), true = bilinear (macOS's zoom has only these)
     public var renderScaling = 0                  // Render: 0 Nearest, 1 xBR (Windows' values; anything else loads as Nearest) (RenderScaling)
-    public var engine = "zoom"                    // "zoom" = macOS's zoom (Transform, the default since 2026-11-02, owner); "draw" = Wind captures and draws (Render)
+    public var engine = "zoom"                    // "backdrop" = no capture (docs/architecture.md); "zoom" = macOS's zoom (Transform, the default since 2026-11-02, owner); "draw" = Wind captures and draws (Render)
 
     // Mouse tracking.
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges
@@ -44,6 +44,7 @@ public struct Config: Codable, Equatable {
     public var precisionBelow = 100.0             // hand speed (pt/s at 1x) below which it applies; full 1x speed at twice that
     public var panMaxLagPt = 24.0                 // most the view may trail the pointer, screen points
     public var cursor = "wind"                   // "system" = the real cursor; "wind" = Wind draws it (steady on whole-point zoom)
+    public var handover = true                    // Render and Backdrop hand over to macOS's zoom (off: never)
     public var ownScreenshot = true               // while zoomed, Wind runs the screenshot-area shortcuts itself (smooth crosshair and box)
     public var slowPanGlide = false               // experimental: WindowServer glides each whole-point step of slow pans (issue #13)
 
@@ -136,7 +137,7 @@ public struct Config: Codable, Equatable {
         dimPct = min(100, max(10, dimPct))
         logLevel = min(3, max(0, logLevel))
         if RenderScaling(rawValue: renderScaling) == nil { renderScaling = 0 }   // like Windows: unknown is Nearest
-        if engine != "draw" { engine = "zoom" }
+        if engine != "draw" && engine != "backdrop" { engine = "zoom" }
         if cursor != "wind" { cursor = "system" }
         if !Config.palettes.contains(uiPalette) { uiPalette = "grey" }
     }

@@ -25,6 +25,15 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     static let shared = DrawZoom()
     /// On when the config selects the draw engine.
     nonisolated(unsafe) static var enabled = false
+    /// Backdrop (config engine "backdrop", owner 2026-11-04): the same overlay, but a CABackdropLayer
+    /// magnifies what WindowServer composites below it instead of a captured picture. No capture, so no
+    /// recording indicator and no Screen Recording permission. No pixels reach Wind, so no xBR: Nearest or
+    /// cubic. Everything else (the drawn cursor, prompts, the hand-over, the 1x pointer) is Render's.
+    nonisolated(unsafe) static var backdrop = false
+    private var backdropLayer: CALayer?
+    private var keepAlive: CADisplayLink?
+    private var nudge = false
+    private var backdropMovedAt = 0.0
     /// The engine failed this run (no permission, capture stopped, several displays): Wind stays on
     /// macOS's zoom until it restarts.
     nonisolated(unsafe) static var failed = false
@@ -36,6 +45,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// A system prompt is up: macOS's zoom shows it (prompts sit above the overlay or cannot be
     /// captured, so they showed twice or not at all). The config still selects the draw engine.
     nonisolated(unsafe) static var handedOver = false
+    /// Config `handover`: off, nothing goes to macOS's zoom. The lock screen sits above the overlay, so it then
+    /// shows unmagnified, and the drawn cursor is under it: the real one comes back meanwhile (`lockUp`).
+    nonisolated(unsafe) static var handoverAllowed = true
+    private var lockUp = false
     private var promptTimer: Timer?
     private var handoverWindow: Int?           // the window that made the engine hand over
     /// The handover's window when it is stacked above the overlay (a system alert, the lock screen): it is
@@ -91,14 +104,19 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         center = c; scale = s
         if window == nil { makeWindow() }
         if !visible {
-            if scaling.usesShader { loadUpscaler() }
+            if DrawZoom.backdrop && !prepareBackdrop() { fail("no backdrop layer on this macOS"); return }
+            // Whatever way a capture got here (Render warm when the engine was switched), it must not stay:
+            // each zoom-in cancels the idle stop, so it ran on and kept the recording dot (owner 2026-11-04).
+            if DrawZoom.backdrop && (stream != nil || starting) { idleStop?.cancel(); idleStop = nil; stopStream() }
+            if !DrawZoom.backdrop { prepareCapturedOverlay() }
+            if scaling.usesShader && !DrawZoom.backdrop { loadUpscaler() }
             visible = true
             DrawZoom.overlayUp = true
             DrawZoom.beat = CACurrentMediaTime()
             startWatchdog()
             idleStop?.cancel(); idleStop = nil
             // A warm stream already has the screen: show it at once (a cold start takes ~80 ms).
-            haveFrame = latest != nil
+            haveFrame = hasFrame
             pendingCapture = false
             if latest != nil {
                 if gpu { presentNow() }                 // the upscaled view, from its first frame
@@ -123,7 +141,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 }
             }
             shownAt = CACurrentMediaTime()
-            if stream == nil { startStream() }
+            if stream == nil && !DrawZoom.backdrop { startStream() }
+            if DrawZoom.backdrop { startKeepAlive() }
             startPromptWatch()
             // Zoomed in during a screenshot or sampler mode: hand over right away, not at the next poll.
             if PointerTakeover.shared.active { DispatchQueue.main.async { self.checkPrompts() } }
@@ -134,6 +153,71 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             }
         }
         layout()
+    }
+
+    /// The overlay clear with the backdrop in it, or nil if this macOS has no such layer.
+    private func prepareBackdrop() -> Bool {
+        if backdropLayer == nil, let cls = NSClassFromString("CABackdropLayer") as? CALayer.Type {
+            let b = cls.init()
+            guard b.responds(to: NSSelectorFromString("setZoom:")) else { return false }
+            b.setValue(true, forKey: "windowServerAware"); b.setValue(true, forKey: "enabled")
+            window?.contentView?.layer?.insertSublayer(b, at: 0)
+            backdropLayer = b
+        }
+        guard let b = backdropLayer else { return false }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        window?.isOpaque = false; window?.backgroundColor = .clear
+        window?.contentView?.layer?.backgroundColor = nil
+        b.isHidden = false; image.isHidden = true; metal.isHidden = true
+        CATransaction.commit()
+        return true
+    }
+
+    /// Back from the backdrop (the engine was switched): the overlay is an opaque picture again.
+    private func prepareCapturedOverlay() {
+        guard let b = backdropLayer, !b.isHidden else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        b.isHidden = true
+        window?.isOpaque = true; window?.backgroundColor = .black
+        window?.contentView?.layer?.backgroundColor = NSColor.black.cgColor
+        CATransaction.commit()
+    }
+
+    /// The backdrop's zoom about the layer's centre: a layer of side S at P shows the region of side
+    /// S (1 + 2z) around P, so the desktop point `center` sits at the screen centre with
+    /// z = (1/L - 1) / 2 and P = (C L - W/2) / (L - 1). re/2026-11-01-noslow-transform.md
+    private func placeBackdrop(_ W: CGFloat, _ H: CGFloat) {
+        guard let b = backdropLayer else { return }
+        let L = max(scale, 1.0002)
+        let px = (center.x * L - W / 2) / (L - 1), py = (center.y * L - H / 2) / (L - 1)
+        let side = 2 * max(abs(px), abs(W - px), abs(py), abs(H - py)) + 8
+        b.setValue((1 / L - 1) / 2, forKey: "zoom")
+        b.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        let at = CGPoint(x: px, y: H - py)
+        if abs(at.x - b.position.x) > 0.01 || abs(at.y - b.position.y) > 0.01 { backdropMovedAt = CACurrentMediaTime() }
+        b.position = at
+        b.magnificationFilter = scaling == .nearest ? .nearest : CALayerContentsFilter(rawValue: "cubic")
+    }
+
+    /// What is below reaches the screen only as far as the overlay's commit dirties the backdrop. With it idle
+    /// a window changing below showed at its 1x place (re/2026-11-01-noslow-transform.md), and a commit that
+    /// left the backdrop alone, a nudge of the cursor layer or a tick with the view still (wheel events wake
+    /// it), redrew part of the view: the screen torn in half in a scrolling Terminal, 80% of frames torn
+    /// (owner 2026-11-04; 0.2% with this). So the backdrop itself changes on every refresh the view does not move it.
+    private func startKeepAlive() {
+        guard keepAlive == nil, let s = NSScreen.screens.first else { return }
+        let l = s.displayLink(target: self, selector: #selector(keepAliveTick))
+        l.add(to: .main, forMode: .common)
+        keepAlive = l
+    }
+
+    @objc private func keepAliveTick() {
+        guard visible, let b = backdropLayer else { keepAlive?.invalidate(); keepAlive = nil; return }
+        if CACurrentMediaTime() - backdropMovedAt < 0.012 { return }     // the view moved it
+        nudge.toggle()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        b.position.x += nudge ? 0.001 : -0.001
+        CATransaction.commit()
     }
 
     /// The overlay shows a picture: hide the real cursor, Wind draws it from now on.
@@ -165,7 +249,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// The capture stream is running (tests).
     var capturing: Bool { stream != nil }
     /// A captured frame is at hand, so the overlay can show the zoom from its first frame.
-    var hasFrame: Bool { latest != nil }
+    var hasFrame: Bool { latest != nil || DrawZoom.backdrop }
     /// The overlay shows a picture and Wind draws the cursor in it (the real one is render's).
     var drawsCursor: Bool { visible && haveFrame }
 
@@ -213,6 +297,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     func hide() {
         guard visible else { return }
         visible = false
+        lockUp = false
+        keepAlive?.invalidate(); keepAlive = nil
         DrawZoom.overlayUp = false
         window?.orderOut(nil)
         SkyLight.forceHidden = false
@@ -254,7 +340,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     nonisolated(unsafe) static var abovePrompts = false
 
     /// The lock screen and screen saver: not captured, so macOS's zoom shows them.
-    private static let lockOwners: Set<String> = ["loginwindow", "ScreenSaverEngine"]
+    private static let lockOwners: Set<String> = {
+        var s: Set<String> = ["loginwindow", "ScreenSaverEngine"]
+        #if WIND_TEST_CHANNEL
+        if let v = ProcessInfo.processInfo.environment["WIND_FAKE_LOCK"] { s.insert(v) }   // a test window stands in for it
+        #endif
+        return s
+    }()
 
     /// Whether something is on screen the drawn zoom cannot show right: a window stacked above the
     /// overlay (it would show twice, unzoomed on top of its magnified copy), a window that opts out
@@ -262,7 +354,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// included, is captured and drawn magnified, and clicks land on it where it is drawn (the
     /// Screen Recording prompt, universalAccessAuthWarn, sits under the overlay: it stays drawn).
     /// The window that makes it so (its window number), or nil.
-    static func blockingWindow() -> (id: Int, above: Bool)? {
+    static func blockingWindow() -> (id: Int, above: Bool, lock: Bool)? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
         let me = ProcessInfo.processInfo.processIdentifier
         var ignore = Set<String>()
@@ -286,12 +378,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
             if ignore.contains(owner) { continue }
             let id = w[kCGWindowNumber as String] as? Int ?? 0
-            if lockOwners.contains(owner) { return (id, true) }
-            if sharing == 0 { return (id, false) }
+            if lockOwners.contains(owner) { return (id, true, true) }
+            if !handoverAllowed { continue }
+            if sharing == 0 { return (id, false, false) }
             // Above the overlay (listed before it). With the overlay not on screen, judge by level:
             // prompts at or above the screen-saver level would stack over it, unless the overlay
             // goes on its own space above them.
-            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return (id, true) }
+            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return (id, true, false) }
         }
         return nil
     }
@@ -330,20 +423,40 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
     }
 
+    /// The lock screen came or went with Handover off: the real cursor shows meanwhile, and a capture the lock
+    /// screen stopped is started again after it.
+    private func setLockUp(_ on: Bool) {
+        lockUp = on
+        Log.info(on ? "draw engine: lock screen up, no handover: the real cursor shows" : "draw engine: lock screen gone, drawing the cursor again")
+        if on {
+            SkyLight.forceHidden = false
+            SkyLight.restoreWanted()
+        } else if visible {
+            if !DrawZoom.backdrop && stream == nil && !starting { haveFrame = false; window?.alphaValue = 0; startStream() }
+            else { takeCursor() }
+        }
+    }
+
+    /// Handover switched off: stop waiting for the window that caused one, the next look takes the view back.
+    func stopWaitingForHandover() { handoverWindow = nil; handoverAbove = nil }
+
     /// Hand the view to macOS's zoom while something is up the overlay cannot show right, and take it
     /// back after. Also called at once when a screenshot or colour-sampler mode starts or ends
     /// (PointerTakeover): it forces the real cursor visible, which render never magnifies (the small
     /// free crosshair beside Wind's big one), and its selection band stacks above the overlay. Handed
     /// over only once the band appeared (0.25 s into a drag), the view jumped mid-drag (2026-11-01).
-    func checkPrompts(read: (waitedFor: Bool, blocking: (id: Int, above: Bool)?)? = nil) {
+    func checkPrompts(read: (waitedFor: Bool, blocking: (id: Int, above: Bool, lock: Bool)?)? = nil) {
         let zoomed = visible || DrawZoom.handedOver
         if !zoomed { promptTimer?.invalidate(); promptTimer = nil; return }
-        let takeover = PointerTakeover.shared.active
+        let takeover = PointerTakeover.shared.active && DrawZoom.handoverAllowed
         // Handed over, wait for the window that caused it to close: with the overlay hidden, a
         // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
         // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
         if DrawZoom.handedOver, let id = handoverWindow, read?.waitedFor ?? DrawZoom.windowOnScreen(id) { return }
-        let blocking = takeover ? nil : (read != nil ? read!.blocking : DrawZoom.blockingWindow())
+        var blocking = takeover ? nil : (read != nil ? read!.blocking : DrawZoom.blockingWindow())
+        let locked = !DrawZoom.handoverAllowed && blocking?.lock == true
+        if locked { blocking = nil }
+        if locked != lockUp { setLockUp(locked) }
         let prompt = takeover || blocking != nil
         if DrawZoom.handedOver && DrawZoom.failed {     // the capture failed meanwhile: macOS's zoom stays
             DrawZoom.handedOver = false; handoverWindow = nil; handoverAbove = nil
@@ -374,7 +487,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         } else if !prompt && DrawZoom.handedOver {
             // Back only with a fresh frame at hand, so the overlay shows the zoom at once (a cold start
             // takes ~100 ms; the first frame calls this again).
-            if latest == nil {
+            if !hasFrame {
                 if stream == nil && !starting {
                     Log.info("draw engine: it is gone; capturing again before drawing")
                     scheduleIdleStop()                  // lets startStream keep the stream while not drawing
@@ -383,7 +496,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 }
                 return
             }
-            Log.info(String(format: "draw engine: it is gone; back to drawing (capture warm after %.0f ms)", (CACurrentMediaTime() - handbackSince) * 1000))
+            Log.info(DrawZoom.backdrop ? "draw engine: it is gone; back to drawing" : String(format: "draw engine: it is gone; back to drawing (capture warm after %.0f ms)", (CACurrentMediaTime() - handbackSince) * 1000))
             DrawZoom.handedOver = false
             handoverWindow = nil; handoverAbove = nil
             SkyLight.resetCompositor()                  // leave macOS's zoom before drawing again
@@ -472,7 +585,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { Stall.time("cursor keep") { SkyLight.hideRealCursor(clear: true) } }
         // Something else gave the real cursor back while the overlay shows a picture (Wind's cursor on
         // macOS's zoom going off right after a handover back): take it again at once.
-        if haveFrame && !SkyLight.forceHidden { takeCursor() }
+        if haveFrame && !SkyLight.forceHidden && !lockUp { takeCursor() }
         if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
             shapeDue = true
@@ -531,7 +644,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         CATransaction.begin(); CATransaction.setDisableActions(true)
         cursorLayer.magnificationFilter = activeScaling == .nearest ? .nearest : .linear   // xBR without its pass is Nearest
         metal.frame = CGRect(x: 0, y: 0, width: W, height: H)
-        if gpu {
+        if DrawZoom.backdrop {
+            placeBackdrop(W, H)
+            crossRoot.isHidden = crosshair == nil
+            if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
+        } else if gpu {
             // Wind's own pass draws a screen-sized picture into the Metal layer (shown by show()). The view
             // moves with the next pass, the crosshair with it (drawOverlay at the tick).
         } else {
@@ -631,7 +748,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     }
 
     private func startStream() {
-        guard stream == nil, !starting, let win = window else { return }
+        guard stream == nil, !starting, !DrawZoom.backdrop, let win = window else { return }
         starting = true
         let windowID = CGWindowID(win.windowNumber)
         generation += 1
@@ -754,7 +871,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             guard self.stream === s else { return }
             Log.error("draw engine: capture stopped: \(error.localizedDescription)")
             self.stopStream()
-            guard self.visible else { return }
+            guard self.visible, !self.lockUp else { return }    // setLockUp restarts it after the lock screen
             self.restarts += 1
             if self.restarts > 2 { self.fail("capture keeps stopping"); return }
             self.haveFrame = false
@@ -778,7 +895,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var upscalerLoading = false
     private var upscalerFailed = false
     /// Wind's own pass draws the picture.
-    var gpu: Bool { scaling.usesShader && upscaler != nil }
+    var gpu: Bool { scaling.usesShader && upscaler != nil && !DrawZoom.backdrop }
     /// The filter actually in use (xBR falls back to Nearest without Metal).
     var activeScaling: RenderScaling { scaling.usesShader && !gpu ? .nearest : scaling }
     private var captureSeq = 0, encodedSeq = -1
@@ -797,7 +914,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     func setScaling(_ s: RenderScaling) {
         guard s != scaling else { return }
         scaling = s
-        if s.usesShader && DrawZoom.enabled { loadUpscaler() }
+        if s.usesShader && DrawZoom.enabled && !DrawZoom.backdrop { loadUpscaler() }
         if !gpu { inFlight = nil; drawnView = nil; encodedView = nil; upscaler?.release(); publishCapView(nil, size: .zero, px: 1) }
         Log.info("render scaling: \(s.label)\(s.usesShader && !gpu ? " (Nearest until Wind's Metal pass is ready)" : "")")
         refreshPicture()

@@ -57,7 +57,8 @@ struct HV: View {
 func panel() {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    let r = NSRect(x: 60, y: 60, width: 400, height: 120)
+    let at = CommandLine.arguments.dropFirst(2).compactMap { Double($0) }     // panel [x y]: bottom left
+    let r = NSRect(x: at.first ?? 60, y: at.dropFirst().first ?? 60, width: 400, height: 120)
     let p = NSPanel(contentRect: r, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
     p.level = .statusBar; p.collectionBehavior = [.canJoinAllSpaces]
     p.title = "WINDTEST hover"

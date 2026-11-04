@@ -18,3 +18,4 @@ tools/cursorchurn/cursorchurn
 tools/upscaleref/up
 tools/upscaleref/build-ported.inc
 tools/scalecard/scalecard
+tools/cursorchurn/dispcap

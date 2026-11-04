@@ -150,7 +150,7 @@ test('Engine shows on Zoom without Advanced; on Render, Transform brings its row
   await go(page, 'zoom');
   const sel = row(page, 'engine').locator('select');
   await expect(sel).toHaveValue('draw');
-  await expect(sel.locator('option')).toHaveText(['Render', 'Transform']);
+  await expect(sel.locator('option')).toHaveText(['Render', 'Backdrop', 'Transform']);
   await go(page, 'view');
   for (const k of ['slowPrecision', 'slowPanGlide', 'cursor', 'precisionBelow'])
     await expect(row(page, k), k).toHaveCount(0);
@@ -244,6 +244,21 @@ test('hotkeys rows show the Mac binds as boxes with glyphs', async ({ page }) =>
 
 // ---- select list and slider keys (owner 2026-11-01) ---------------------------------------------------
 
+test('Handover sits under Engine, greyed on Transform and live on Render and Backdrop', async ({ page }) => {
+  await mockHost(page, { values: { maxLevel: '12', engine: 'zoom' } });
+  await open(page);
+  await go(page, 'zoom');
+  const keys = await page.locator('main .row').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-key')));
+  expect(keys.indexOf('handover')).toBe(keys.indexOf('engine') + 1);
+  await expect(row(page, 'handover')).toHaveClass(/disabled/);
+  for (const e of ['draw', 'backdrop']) {
+    await row(page, 'engine').locator('select').selectOption(e);
+    await expect(row(page, 'handover')).not.toHaveClass(/disabled/);
+  }
+  await row(page, 'engine').locator('select').selectOption('zoom');
+  await expect(row(page, 'handover')).toHaveClass(/disabled/);
+});
+
 test('a select opens its own list below the button, not the native menu over it', async ({ page }) => {
   await mockHost(page, { values: { maxLevel: '12', engine: 'draw' } });
   await open(page);
@@ -252,7 +267,7 @@ test('a select opens its own list below the button, not the native menu over it'
   await sel.click();
   const list = page.getByRole('listbox');
   await expect(list).toBeVisible();
-  await expect(list.getByRole('option')).toHaveText(['Render', 'Transform']);
+  await expect(list.getByRole('option')).toHaveText(['Render', 'Backdrop', 'Transform']);
   await expect(list.getByRole('option', { name: 'Render' })).toHaveAttribute('aria-selected', 'true');
   const s = await sel.boundingBox(), l = await list.boundingBox();
   expect(l.y).toBeGreaterThanOrEqual(s.y + s.height);              // below the button, never over it
@@ -264,6 +279,7 @@ test('a select opens its own list below the button, not the native menu over it'
   await sel.focus();
   await page.keyboard.press(' ');
   await expect(list).toBeVisible();
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect.poll(() => wrote(page, 'engine')).toBe('draw');

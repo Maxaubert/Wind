@@ -124,7 +124,7 @@ final class Magnifier {
 
     func apply(_ c: Config) {
         config = c
-        let draw = c.engine == "draw" && !DrawZoom.failed && !DrawZoom.handedOver
+        let draw = (c.engine == "draw" || c.engine == "backdrop") && !DrawZoom.failed && !DrawZoom.handedOver
         DrawZoom.shared.onFailure = { [weak self] in self?.lastWritten = nil; self?.wake() }   // re-zoom with macOS's zoom
         DrawZoom.shared.onHandover = { [weak self] on in
             // The other engine draws from the next tick: write the view again, and start the
@@ -145,7 +145,16 @@ final class Magnifier {
             self.handTarget = nil; self.lastPtr = nil; self.wake()
         }
         // Switched to Transform: also stop a capture a hand back was warming (it ran under macOS's zoom).
-        if c.engine != "draw" { DrawZoom.handedOver = false; DrawZoom.shared.stopCapture() }
+        if c.engine == "zoom" { DrawZoom.handedOver = false }
+        DrawZoom.handoverAllowed = c.handover
+        if !c.handover { DrawZoom.shared.stopWaitingForHandover() }
+        if (c.engine == "backdrop") != DrawZoom.backdrop {
+            if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
+            DrawZoom.backdrop = c.engine == "backdrop"
+            lastWritten = nil
+        }
+        // After the zoom-out above: stopCapture does nothing while the overlay is up.
+        if c.engine != "draw" { DrawZoom.shared.stopCapture() }
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw
