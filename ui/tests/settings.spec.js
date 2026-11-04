@@ -713,3 +713,15 @@ test('a settings write the host could not save shows a dialog', async ({ page })
   await page.evaluate(() => window.__hostSend({ type: 'configWriteFailed', key: 'maxLevel' }));
   await expect(page.getByRole('dialog')).toContainText('maxLevel');
 });
+
+test('the About card sits centred under the banner, not against it', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'about');
+  const main = await page.locator('main.main').boundingBox();
+  const card = await page.locator('.page > .card').boundingBox();
+  const banner = await page.locator('.page > *').first().boundingBox();
+  const above = card.y - (banner.y + banner.height);
+  const below = main.y + main.height - 110 - (card.y + card.height);
+  expect(above).toBeGreaterThan(40);
+  expect(Math.abs(above - below)).toBeLessThan(4);
+});
