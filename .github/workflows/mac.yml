@@ -17,7 +17,8 @@ on:
       - 'THIRD-PARTY-NOTICES.md'
       - '.github/workflows/mac.yml'
   pull_request:
-    paths: [ 'mac/**', '.github/workflows/mac.yml' ]
+    # The licence and notices ship inside the Mac zip too, so a PR that changes them runs these checks.
+    paths: [ 'mac/**', '.github/workflows/mac.yml', 'LICENSE', 'THIRD-PARTY-NOTICES.md' ]
   workflow_dispatch:
 
 permissions:

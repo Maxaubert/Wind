@@ -34,6 +34,7 @@ on:
       - '!tools/testenv/**'
       # Wind for Mac has its own release (mac-v* tags); it never changes the Windows installer.
       - '!mac/**'
+      - '!.github/workflows/mac.yml'
       # Text that ships IN the installer, so a change to it must republish: the licence it
       # shows and installs (wind.nsi, LICENSE.txt), the notices it installs, and the release
       # notes this workflow publishes with it.
