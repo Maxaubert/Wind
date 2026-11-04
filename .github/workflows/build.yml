@@ -6,9 +6,9 @@ on:
   # The Windows build; Wind for Mac (mac/) has its own checks.
   push:
     branches: [ main ]
-    paths-ignore: [ 'mac/**' ]
+    paths-ignore: [ 'mac/**', '.github/workflows/mac.yml' ]
   pull_request:
-    paths-ignore: [ 'mac/**' ]
+    paths-ignore: [ 'mac/**', '.github/workflows/mac.yml' ]
 
 jobs:
   windows-build:
