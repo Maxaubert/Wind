@@ -4,7 +4,7 @@
 // the mock host (ranked list, the real controls edited in place, advanced and gated rows, Cmd+F).
 import { test, expect } from '@playwright/test';
 import { groups, allRows } from '../src/settings-schema.js';
-import { search, editDistance, words } from '../src/search/search.js';
+import { search, editDistance, words } from '../../../ui-shared/src/search/search.js';
 import { mockHost, open, go, row, live, CMD } from './mock.js';
 
 test.beforeEach(async ({ page }) => { await mockHost(page, { values: { maxLevel: '12' } }); });

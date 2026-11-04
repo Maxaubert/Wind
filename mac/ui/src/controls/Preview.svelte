@@ -6,9 +6,9 @@
   // ?group=<id> picks the group (default hotkeys), ?palette=<id> the built-in theme (default
   // grey), ?engine=<draw|zoom> the engine.
   import '../design/tokens.css';
-  import '../design/themes.css';
-  import { normalizePalette } from '../design/themes.js';
-  import Card from '../shell/Card.svelte';
+  import '$shared/design/themes.css';
+  import { normalizePalette } from '$shared/design/themes.js';
+  import Card from '$shared/shell/Card.svelte';
   import SettingRow from './SettingRow.svelte';
   import { groups, schemaDefaults } from '../settings-schema.js';
 

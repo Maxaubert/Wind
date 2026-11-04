@@ -8,22 +8,22 @@
   // a pushed config ({type:'config', push:true}) and refresh the page.
   import { onMount, tick } from 'svelte';
   import './design/tokens.css';
-  import './design/themes.css';
+  import '$shared/design/themes.css';
   import { groups, missingPermissions } from './settings-schema.js';
   import { getSession, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
            getMacStatus, onMacStatus, macAction } from './bridge.js';
   import { fill } from './session.js';
-  import { themes, normalizePalette } from './design/themes.js';
+  import { themes, normalizePalette } from '$shared/design/themes.js';
   import { capturing } from './lib/capture.js';
   import Sidebar from './shell/Sidebar.svelte';
-  import ScrollChip from './shell/ScrollChip.svelte';
-  import Banner from './shell/Banner.svelte';
+  import ScrollChip from '$shared/shell/ScrollChip.svelte';
+  import Banner from '$shared/shell/Banner.svelte';
   import PermissionBanner from './shell/PermissionBanner.svelte';
-  import Card from './shell/Card.svelte';
+  import Card from '$shared/shell/Card.svelte';
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from './prompts/Prompt.svelte';
   import Results from './search/Results.svelte';
-  import { search } from './search/search.js';
+  import { search } from '$shared/search/search.js';
 
   // Replaced at build time with ../VERSION (vite.config.js); empty in tests.
   const VERSION = typeof __WIND_VERSION__ === 'string' ? __WIND_VERSION__ : '';

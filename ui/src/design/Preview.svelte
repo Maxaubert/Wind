@@ -6,8 +6,8 @@
   import './tokens.css';
   import TitleBar from '../shell/TitleBar.svelte';
   import Sidebar from '../shell/Sidebar.svelte';
-  import Banner from '../shell/Banner.svelte';
-  import Card from '../shell/Card.svelte';
+  import Banner from '$shared/shell/Banner.svelte';
+  import Card from '$shared/shell/Card.svelte';
   import SaveCapsule from '../shell/SaveCapsule.svelte';
 
   const q = new URLSearchParams(location.search);

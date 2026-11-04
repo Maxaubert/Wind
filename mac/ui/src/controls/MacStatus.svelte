@@ -6,7 +6,7 @@
   //                Zoom shortcuts that are on; empty = all off) or loginItem (with row.toggle: a switch)
   //   mac          the latest macStatus from the host (bridge.js getMacStatus / onMacStatus), null until known
   //   onAction     onAction(action, value) runs row.action through macAction
-  import Toggle from './Toggle.svelte';
+  import Toggle from '$shared/controls/Toggle.svelte';
   let { row, mac = null, onAction = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
   const known = $derived(!!mac && mac[row.status] !== undefined);
   const ok = $derived(row.status === 'zoomShortcuts' ? !(mac && mac.zoomShortcuts && mac.zoomShortcuts.length) : !!(mac && mac[row.status]));

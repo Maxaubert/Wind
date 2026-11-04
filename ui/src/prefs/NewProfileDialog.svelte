@@ -7,7 +7,7 @@
   //   names       existing profile names (for the duplicate check and the suggested name)
   //   onCreate({ name, from })   from is 'current' or 'default'      onCancel()
   import { untrack } from 'svelte';
-  import { dialog } from '../lib/dialog.js';
+  import { dialog } from '$shared/lib/dialog.js';
   import { nameError, suggestName } from './profileName.js';
   let { names = [], onCreate = () => {}, onCancel = () => {} } = $props();
   let name = $state(untrack(() => suggestName(names)));   // the suggestion is only the starting text

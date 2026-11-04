@@ -7,7 +7,7 @@
   // the dialogs and the bridge calls.
   //   names, active   the profile list and the live one
   //   onSwitch(name)  onNew()  onDelete(name)
-  import { iconSvg } from '../design/icons.js';
+  import { iconSvg } from '$shared/design/icons.js';
   let { names = [], active = '', onSwitch = () => {}, onNew = () => {}, onDelete = () => {}, disabled = false,
         labelledby, describedby } = $props();
   let open = $state(false);

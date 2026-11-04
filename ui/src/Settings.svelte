@@ -9,27 +9,27 @@
   // so they are never "unsaved" and a later Save cannot lose them.
   import { onMount, tick, untrack } from 'svelte';
   import './design/tokens.css';
-  import './design/themes.css';
+  import '$shared/design/themes.css';
   import { groups } from './settings-schema.js';
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
            exportDiagnostics, openRepo, pickExe, windowControl, onMessage,
            setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
   import { fill, changedKeys } from './session.js';
-  import { themes, normalizePalette } from './design/themes.js';
+  import { themes, normalizePalette } from '$shared/design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
   import { capturing } from './lib/capture.js';
   import TitleBar from './shell/TitleBar.svelte';
   import Sidebar from './shell/Sidebar.svelte';
-  import ScrollChip from './shell/ScrollChip.svelte';
-  import Banner from './shell/Banner.svelte';
-  import Card from './shell/Card.svelte';
+  import ScrollChip from '$shared/shell/ScrollChip.svelte';
+  import Banner from '$shared/shell/Banner.svelte';
+  import Card from '$shared/shell/Card.svelte';
   import SaveCapsule from './shell/SaveCapsule.svelte';
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from './prompts/Prompt.svelte';
   import Results from './search/Results.svelte';
   import NewProfileDialog from './prefs/NewProfileDialog.svelte';
   import TrayMenuPage from './tray/TrayMenuPage.svelte';
-  import { search } from './search/search.js';
+  import { search } from '$shared/search/search.js';
 
   // Replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests.
   const VERSION = typeof __WIND_VERSION__ === 'string' ? __WIND_VERSION__ : '';

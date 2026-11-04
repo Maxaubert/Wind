@@ -222,7 +222,7 @@ static std::string UiPaletteOf(const std::string& live) {
 // Window/WebView background from uiPalette so first paint never flashes the wrong colour. Always dark (#324:
 // light mode is gone; uiTheme is an ignored legacy key). The colour is the generated flyout palette's menu
 // background, which equals the Settings --bg token (tests/test_flyout_palettes.cpp checks it against
-// ui/src/design/themes.css). Unknown or empty is Wind grey. 0xRRGGBB -> COLORREF (0x00BBGGRR).
+// ui-shared/src/design/themes.css). Unknown or empty is Wind grey. 0xRRGGBB -> COLORREF (0x00BBGGRR).
 static COLORREF ThemeBackground(const std::string& palette) {
     const unsigned rgb = wind::Flyout::FindPalette(palette).dark.menu;
     return RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);

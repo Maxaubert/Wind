@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { allRows, rowKeys, schemaDefaults } from '../src/settings-schema.js';
 import { fill } from '../src/session.js';
-import { themes } from '../src/design/themes.js';
+import { themes } from '../../../ui-shared/src/design/themes.js';
 
 // Plain node:test, no browser: run with `npm run test:rules`.
 // The settings schema copies Wind for Mac's Config defaults and clamp ranges. Tests/fixtures/

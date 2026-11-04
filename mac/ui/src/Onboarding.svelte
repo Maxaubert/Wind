@@ -13,9 +13,9 @@
   import { getSession, setConfig, getMacStatus, onMacStatus, macAction } from './bridge.js';
   import { fill } from './session.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
-  import { normalizePalette } from './design/themes.js';
+  import { normalizePalette } from '$shared/design/themes.js';
   import './design/tokens.css';
-  import './design/themes.css';
+  import '$shared/design/themes.css';
   let { onDone = () => {} } = $props();
 
   const init = window.__windInit || {};
