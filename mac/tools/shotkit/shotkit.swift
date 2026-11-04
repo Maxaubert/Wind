@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // shotkit: helpers for scripts/e2e_screenshot.py (macOS screenshot mode and the colour sampler while zoomed).
 //   shotkit window X Y W H R G B   a click-through solid sRGB window at a desktop rect (top-left points),
 //                                  floating level, title "WINDTEST shot"; prints "up", runs until killed

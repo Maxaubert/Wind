@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // hoverprobe banner | panel
 //   banner: the first Notification Center banner (AX): "x y w h hovered" (hovered = its Close button
 //           `xmark` is there, which Notification Center adds only while the pointer is over the banner).

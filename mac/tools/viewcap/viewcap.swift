@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // viewcap <seconds> <outfile> [width]
 // Ground truth for the VIEW on the zoomed screen (same capture as tools/cursorcap: a stream with the
 // cursor, excluding only this windowless process, is WindowServer's zoomed output). Per frame it

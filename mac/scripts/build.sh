@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Build Wind.app into build/. `scripts/build.sh install` also installs it to /Applications and
 # relaunches it. `scripts/build.sh test` builds build/test/Wind.app with the e2e command channel
 # compiled in (WIND_TEST_CHANNEL); the installed app never has it. Signs with the local "Wind Mac Dev" identity when present (a stable identity keeps

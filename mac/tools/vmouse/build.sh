@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Builds tools/vmouse/vmouse: real HID pointer motion through Karabiner-Elements' virtual HID
 # device, for the pointer e2e tests (scripts/e2e_mouse.py). Needs Karabiner-Elements installed
 # (its DriverKit virtual HID device active); vmouse runs as root because the device socket is

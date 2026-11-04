@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import Foundation
 
 // A tiny test runner: Command Line Tools ship neither XCTest nor the swift-testing macros.

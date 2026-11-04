@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Builds tools/fakegame/FakeGame.app: a foreground app that locks the pointer like a game's
 # mouse-look, for scripts/e2e_mouse.py. Launch with `open -W FakeGame.app --args <seconds>`.
 set -euo pipefail
