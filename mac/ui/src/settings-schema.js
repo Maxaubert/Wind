@@ -100,6 +100,9 @@ export const groups = [
         // Switches live; Wind falls back to Transform (macOS's zoom) when it cannot capture the screen.
         { key: 'engine', type: 'select', label: 'Engine', keywords: ['renderer', 'render', 'transform', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
           desc: 'How the screen is zoomed', options: ['draw', 'backdrop', 'zoom'], optionLabels: { draw: 'Render', backdrop: 'Backdrop', zoom: 'Transform' }, def: 'zoom' },
+        // handover: Render and Backdrop let macOS's zoom show what they cannot. Off, only the lock screen does.
+        { key: 'handover', type: 'toggle', label: 'Handover', keywords: ['hand over', 'handover', 'fallback', 'macos zoom', 'prompt', 'protected', 'screenshot'],
+          desc: 'macOS\'s zoom takes over for protected windows and screenshot modes', def: 1, offIf: { key: 'engine', eq: 'zoom' } },
       ] },
     ] },
 

@@ -146,6 +146,8 @@ final class Magnifier {
         }
         // Switched to Transform: also stop a capture a hand back was warming (it ran under macOS's zoom).
         if c.engine == "zoom" { DrawZoom.handedOver = false }
+        DrawZoom.handoverAllowed = c.handover
+        if !c.handover { DrawZoom.shared.stopWaitingForHandover() }
         if (c.engine == "backdrop") != DrawZoom.backdrop {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.backdrop = c.engine == "backdrop"

@@ -82,6 +82,18 @@ time.sleep(0.2); torn("pointer still, wheel events"); vm.stdout.readline(); vm.s
 print(f"WindowServer CPU, Backdrop, content changing: {ws_cpu():.0f}%", flush=True)
 W.ctl("level 1"); time.sleep(0.6); churn.kill()
 
+# Handover: a capture-protected window hands over with it on, and not with it off.
+PROMPT = os.path.join(W.ROOT, "tools/fakeprompt/fakeprompt")
+if not os.path.exists(PROMPT): subprocess.run([os.path.join(W.ROOT, "tools/fakeprompt/build.sh")], check=True, stdout=subprocess.DEVNULL)
+W.ctl("level 3"); time.sleep(1.2)
+for on in (True, False):
+    W.set_config(handover=on); time.sleep(0.8)
+    p = subprocess.Popen([PROMPT, "3", "noshare"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
+    s = W.ctl("state"); W.check(f"handover {'on' if on else 'off'}: a protected window {'hands over' if on else 'stays drawn'}", s["handedOver"] == on and s["drawn"] != on, f"handedOver {s['handedOver']} drawn {s['drawn']}")
+    p.wait(timeout=6); time.sleep(1.2)
+    s = W.ctl("state"); W.check(f"handover {'on' if on else 'off'}: drawn again after", s["drawn"] and not s["handedOver"], f"drawn {s['drawn']}")
+W.set_config(handover=None); W.ctl("level 1"); time.sleep(0.5)
+
 # Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).
 W.set_config(engine="draw"); time.sleep(1); W.ctl("level 3"); time.sleep(2)
 s = W.ctl("state"); W.check("Render captures, as the switch's starting point", s["drawCapturing"] and indicators() > 0, f"capturing {s['drawCapturing']}, {indicators()} indicators")

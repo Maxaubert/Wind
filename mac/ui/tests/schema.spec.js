@@ -95,11 +95,11 @@ test('Scaling: Render offers Nearest and xBR (Windows\' 0 and 1); Transform macO
   expect(t.options).toEqual(['0', '1']);
 });
 
-test('the engine select: Render or Transform (default), in the Engine card on Zoom', () => {
+test('the engine select: Render, Backdrop or Transform (default), in the Engine card on Zoom', () => {
   const zoom = groups.find((g) => g.id === 'zoom');
   const e = groupRows(zoom).find((r) => r.key === 'engine');
-  expect(e.options).toEqual(['draw', 'zoom']);
-  expect(e.optionLabels).toEqual({ draw: 'Render', zoom: 'Transform' });
+  expect(e.options).toEqual(['draw', 'backdrop', 'zoom']);
+  expect(e.optionLabels).toEqual({ draw: 'Render', backdrop: 'Backdrop', zoom: 'Transform' });
   expect(e.def).toBe('zoom');
   expect(schemaDefaults().engine).toBe('zoom');
 });

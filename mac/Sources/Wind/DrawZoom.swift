@@ -45,6 +45,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// A system prompt is up: macOS's zoom shows it (prompts sit above the overlay or cannot be
     /// captured, so they showed twice or not at all). The config still selects the draw engine.
     nonisolated(unsafe) static var handedOver = false
+    /// Config `handover`: off, only the lock screen goes to macOS's zoom (it sits above the overlay and is
+    /// not captured, so it would stay unmagnified, and that screen must stay readable).
+    nonisolated(unsafe) static var handoverAllowed = true
     private var promptTimer: Timer?
     private var handoverWindow: Int?           // the window that made the engine hand over
     /// The handover's window when it is stacked above the overlay (a system alert, the lock screen): it is
@@ -368,6 +371,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if ignore.contains(owner) { continue }
             let id = w[kCGWindowNumber as String] as? Int ?? 0
             if lockOwners.contains(owner) { return (id, true) }
+            if !handoverAllowed { continue }
             if sharing == 0 { return (id, false) }
             // Above the overlay (listed before it). With the overlay not on screen, judge by level:
             // prompts at or above the screen-saver level would stack over it, unless the overlay
@@ -411,6 +415,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
     }
 
+    /// Handover switched off: stop waiting for the window that caused one, the next look takes the view back.
+    func stopWaitingForHandover() { handoverWindow = nil; handoverAbove = nil }
+
     /// Hand the view to macOS's zoom while something is up the overlay cannot show right, and take it
     /// back after. Also called at once when a screenshot or colour-sampler mode starts or ends
     /// (PointerTakeover): it forces the real cursor visible, which render never magnifies (the small
@@ -419,7 +426,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     func checkPrompts(read: (waitedFor: Bool, blocking: (id: Int, above: Bool)?)? = nil) {
         let zoomed = visible || DrawZoom.handedOver
         if !zoomed { promptTimer?.invalidate(); promptTimer = nil; return }
-        let takeover = PointerTakeover.shared.active
+        let takeover = PointerTakeover.shared.active && DrawZoom.handoverAllowed
         // Handed over, wait for the window that caused it to close: with the overlay hidden, a
         // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
         // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
