@@ -215,15 +215,29 @@ private:
 // A caret window's client point in physical screen px. GetGUIThreadInfo reports rcCaret in the caret
 // window's own client units, which for a DPI-unaware app (Python's Tk, issue #536) are logical: at 225%
 // a plain ClientToScreen on this per-monitor-aware thread put the view at a fraction of the real offset,
-// up and left of the caret. So map it in the window's own DPI context, then to physical pixels.
+// up and left of the caret. So the offset is scaled by the window's physical/logical size. Not
+// LogicalToPhysicalPointForPerMonitorDPI: it refuses a logical point that lies outside the window's
+// PHYSICAL rect, so the first letters of a line near the window's left edge stayed unscaled (field).
 static bool CaretClientToScreen(HWND h, POINT& p) {
     const DPI_AWARENESS_CONTEXT ctx = GetWindowDpiAwarenessContext(h);
-    const DPI_AWARENESS_CONTEXT prev = ctx ? SetThreadDpiAwarenessContext(ctx) : nullptr;
-    const bool ok = ClientToScreen(h, &p) != FALSE;
-    if (prev) SetThreadDpiAwarenessContext(prev);
-    if (ok && ctx && GetAwarenessFromDpiAwarenessContext(ctx) != DPI_AWARENESS_PER_MONITOR_AWARE)
-        LogicalToPhysicalPointForPerMonitorDPI(h, &p);
-    return ok;
+    if (ctx && GetAwarenessFromDpiAwarenessContext(ctx) != DPI_AWARENESS_PER_MONITOR_AWARE) {
+        RECT phys{}, logical{};
+        POINT o{ 0, 0 };                                       // the client origin, physical px
+        const bool okPhys = GetWindowRect(h, &phys) && ClientToScreen(h, &o);
+        const DPI_AWARENESS_CONTEXT prev = SetThreadDpiAwarenessContext(ctx);
+        const bool okLog = GetWindowRect(h, &logical) != FALSE;
+        if (prev) SetThreadDpiAwarenessContext(prev);
+        const LONG pw = phys.right - phys.left, ph = phys.bottom - phys.top;
+        const LONG lw = logical.right - logical.left, lh = logical.bottom - logical.top;
+        if (okPhys && okLog && lw > 0 && lh > 0 && (pw != lw || ph != lh)) {
+            const LONG dx = MulDiv(p.x, pw, lw);
+            // A mirrored (RTL) window's client x runs leftwards from its origin.
+            p.x = (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_LAYOUTRTL) ? o.x - dx : o.x + dx;
+            p.y = o.y + MulDiv(p.y, ph, lh);
+            return true;
+        }
+    }
+    return ClientToScreen(h, &p) != FALSE;
 }
 
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
