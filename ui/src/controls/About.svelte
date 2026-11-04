@@ -2,7 +2,7 @@
      Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // About page body: logo, name, tagline, version and the GitHub link (today's About content).
-  import { iconSvg } from '../design/icons.js';
+  import { iconSvg } from '$shared/design/icons.js';
   let { version = '', onRepo = () => {} } = $props();
 </script>
 

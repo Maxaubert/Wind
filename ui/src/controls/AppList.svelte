@@ -4,7 +4,7 @@
   // An exe list kept as one comma-separated ini string. The row shows a summary and a Manage button;
   // the dialog lists the apps with Remove and adds through the host's file picker (`pick`).
   import { pickExe } from '../bridge.js';
-  import { dialog } from '../lib/dialog.js';
+  import { dialog } from '$shared/lib/dialog.js';
   let { value = '', title = '', onChange = () => {}, disabled = false, labelledby, describedby, valueId,
         pick = pickExe } = $props();
   let open = $state(false);

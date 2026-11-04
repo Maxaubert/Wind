@@ -10,14 +10,14 @@
   //   live      live(patch) for keybind captures (written immediately by the page)
   //   tab       optional quiet tab name shown beside the label (search results)
   //   extra     { version, mac (the latest macStatus), onAction(name), onMacAction(action, value) }
-  import Toggle from './Toggle.svelte';
+  import Toggle from '$shared/controls/Toggle.svelte';
   import Slider from './Slider.svelte';
   import Select from './Select.svelte';
   import Bindings from './Bindings.svelte';
   import PanBinding from './PanBinding.svelte';
-  import './bindings.css';
+  import '$shared/controls/bindings.css';
   import MacStatus from './MacStatus.svelte';
-  import ThemePicker from '../prefs/ThemePicker.svelte';
+  import ThemePicker from '$shared/prefs/ThemePicker.svelte';
   import About from './About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false, tab = '' } = $props();
 

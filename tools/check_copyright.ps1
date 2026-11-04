@@ -33,9 +33,8 @@ $ExcludedPrefixes = 'third_party/', 'docs/', 'tests/fixtures/', 'build/', 'dist/
 # Ports of third-party code that keep the upstream copyright (THIRD-PARTY-NOTICES.md).
 $ThirdParty = 'src/render/upscale_nis.h', 'src/render/upscale_shaders.h'
 # Written by a generator; the header would be lost on the next regeneration.
-$Generated = 'src/tray_app/flyout_palettes.h', 'ui/src/design/themes.css',
-             'ui/src/design/themes.js', 'installer/over.nsh',
-             'mac/ui/src/design/themes.css', 'mac/ui/src/design/themes.js'
+$Generated = 'src/tray_app/flyout_palettes.h', 'ui-shared/src/design/themes.css',
+             'ui-shared/src/design/themes.js', 'installer/over.nsh'
 
 function Test-Covered([string]$path) {
     foreach ($p in $ExcludedPrefixes) { if ($path.StartsWith($p)) { return $false } }

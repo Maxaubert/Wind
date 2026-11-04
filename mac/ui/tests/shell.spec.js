@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { iconNames, iconSvg } from '../src/design/icons.js';
+import { iconNames, iconSvg } from '../../../ui-shared/src/design/icons.js';
 import { mockHost, open, go, css } from './mock.js';
 
 test.beforeEach(async ({ page }) => { await mockHost(page); });

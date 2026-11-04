@@ -36,7 +36,9 @@ are frozen history cited from code, not kept in step with it.
   do not revive either. See 03, 04, 05.
 - Profiles: `profiles\<Name>.ini` next to the live ini; the live ini is the session, the profile file
   the saved state. See 08.
-- Settings UI: schema-driven Svelte (`ui/src/settings-schema.js`); `HandleWebMessage` in
+- Settings UI: schema-driven Svelte (`ui/src/settings-schema.js`). Files both settings apps use (Windows `ui/`,
+  Mac `mac/ui/`) live once in `ui-shared/src`, imported as `$shared/...`: a change there ships on both, so run
+  both UI suites (`ui/` and `mac/ui/`). `HandleWebMessage` in
   `src/config_ui/main.cpp` is the authoritative bridge message set; extend the Playwright mocks when
   adding one. See 09.
 - Defaults live in `config.h` and the template, and are copied by the schema: `tests/fixtures/config_defaults.txt`

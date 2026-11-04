@@ -11,15 +11,15 @@
   //   tab       optional quiet tab name shown beside the label (search results)
   //   extra     { runningModel, onRestart,
   //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
-  import Toggle from './Toggle.svelte';
+  import Toggle from '$shared/controls/Toggle.svelte';
   import Slider from './Slider.svelte';
   import Select from './Select.svelte';
   import Bindings from './Bindings.svelte';
   import PanBinding from './PanBinding.svelte';
-  import './bindings.css';
+  import '$shared/controls/bindings.css';
   import AppList from './AppList.svelte';
   import EngineRow from './EngineRow.svelte';
-  import ThemePicker from '../prefs/ThemePicker.svelte';
+  import ThemePicker from '$shared/prefs/ThemePicker.svelte';
   import ProfilePicker from '../prefs/ProfilePicker.svelte';
   import About from './About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false, tab = '' } = $props();

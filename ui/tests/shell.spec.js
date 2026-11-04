@@ -2,7 +2,7 @@
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { iconNames, iconSvg } from '../src/design/icons.js';
+import { iconNames, iconSvg } from '../../ui-shared/src/design/icons.js';
 
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
 
@@ -14,8 +14,8 @@ test('icon set covers the plan list and renders static svg', () => {
 });
 
 test('tokens and design files contain no em-dash', () => {
-  for (const f of ['../src/design/tokens.css', '../src/design/icons.js', '../src/shell/TitleBar.svelte',
-    '../src/shell/Sidebar.svelte', '../src/shell/Banner.svelte', '../src/shell/Card.svelte', '../src/shell/SaveCapsule.svelte'])
+  for (const f of ['../src/design/tokens.css', '../../ui-shared/src/design/icons.js', '../src/shell/TitleBar.svelte',
+    '../src/shell/Sidebar.svelte', '../../ui-shared/src/shell/Banner.svelte', '../../ui-shared/src/shell/Card.svelte', '../src/shell/SaveCapsule.svelte'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain('\u2014');
 });
 

@@ -5,7 +5,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { groups, allRows } from '../src/settings-schema.js';
-import { search, editDistance, words } from '../src/search/search.js';
+import { search, editDistance, words } from '../../ui-shared/src/search/search.js';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -164,7 +164,7 @@ test('Pin to taskbar is found by its natural words (#436)', () => {
 });
 
 test('search files contain no em-dash', () => {
-  for (const f of ['../src/search/search.js', '../src/search/Results.svelte', '../src/settings-schema.js'])
+  for (const f of ['../../ui-shared/src/search/search.js', '../src/search/Results.svelte', '../src/settings-schema.js'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
 });
 
