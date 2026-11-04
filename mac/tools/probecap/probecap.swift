@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // probecap <seconds> <outfile> [savePNGevery]
 // The ZOOMED screen frame by frame (a ScreenCaptureKit stream with the cursor whose filter excludes only
 // this windowless process is WindowServer's zoomed output, docs/architecture.md) for Wind's own screenshot

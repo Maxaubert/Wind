@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // scalecard card <x> <y> <w> <h> <seconds>   a test card window at that desktop rect (points, top-left
 //                                            origin): text light and dark, thin lines, a 1 px checker,
 //                                            circles, a button, noise. Prints "ready" once it is on screen.

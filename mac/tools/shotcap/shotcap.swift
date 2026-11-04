@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // shotcap <seconds> <outfile> <level> <x0> <y0> <x1> <y1> [savePNGevery]
 // Ground truth for macOS screenshot mode while zoomed (scripts/screenshot_truth.py): the ZOOMED screen
 // frame by frame (a ScreenCaptureKit stream with the cursor whose filter excludes only this windowless

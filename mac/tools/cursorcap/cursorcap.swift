@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // cursorcap <seconds> <outfile> [savePNGevery] [width]
 // Ground truth for the ZOOMED screen, frame by frame (what the owner sees). Measured 2026-10-31,
 // macOS 27.2: a ScreenCaptureKit stream with showsCursor = true whose filter excludes only this

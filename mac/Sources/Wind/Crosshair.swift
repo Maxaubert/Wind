@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import AppKit
 
 // Inspect mode's crosshair at the view centre. Like Wind's own cursor it is a layer in a

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // twin <title> <x> <seconds> [hide]: a plain test window app; with "hide" it hides the cursor while active (like a game)
 import AppKit
 let A = CommandLine.arguments

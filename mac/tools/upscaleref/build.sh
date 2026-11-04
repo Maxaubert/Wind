@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Builds tools/upscaleref/up: the CPU reference for the Render engine's scaling filters (scripts/e2e_draw.py).
 # xBR comes straight from the Windows shader (gen_ported.py); nearest is plain.
 set -euo pipefail

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import AppKit
 
 // macOS's own Zoom drives the same WindowServer zoom as Wind. When one of its shortcuts fires while

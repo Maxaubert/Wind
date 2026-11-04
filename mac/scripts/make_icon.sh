@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Compiles assets/Wind.icon (an Icon Composer icon: black fill, the white wind strokes as a layer)
 # into assets/icon/Assets.car (macOS 26+, no grey plate) and assets/icon/Wind.icns (older macOS).
 # Needs Xcode (actool). The results are committed, so a normal build does not need Xcode; rerun

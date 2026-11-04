@@ -98,8 +98,10 @@ locally too when anything under `ui/` changes.
 `Copyright (c) 2026 Max Aubert. All rights reserved.` and `Proprietary
 source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary`, in
 the file's own comment syntax (`//`, `#`, `;`, `rem` after `@echo off`, `/* */`, `<!-- -->` after
-`<!doctype html>`). `tools/check_copyright.ps1` fails when a covered file lacks the SPDX line in its
-first 5 lines; it is the first gate in `build-installer`, and `-List` prints the files it covers.
+`<!doctype html>`, `#` after a `#!` line, `//` after `// swift-tools-version` in `Package.swift`).
+`tools/check_copyright.ps1` fails when a covered file lacks the SPDX line in its first 5 lines; it is
+the first gate in `build-installer` and in `mac.yml` (Wind for Mac's Swift, Objective-C and shell
+files are covered too), and `-List` prints the files it covers.
 It skips third-party code (`third_party/`, `upscale_nis.h`, `upscale_shaders.h`, which keep their
 upstream notices), generated files (`flyout_palettes.h`, `themes.css`, `themes.js`, `over.nsh`),
 `docs/` and `tests/fixtures/`. A new source file needs the header; a new generated or vendored
