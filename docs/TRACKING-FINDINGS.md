@@ -115,3 +115,14 @@ different box (2 px higher, 5 px taller) and far to the right after a single key
 8-30 px). `IsLineEndGhost` (src/track/caret_rect.h) skips a caret on the same line whose box changed by 2 px or
 more and that jumped right by more than 3 line heights; End and clicks keep the caret's box, so they are
 followed. trackLog logs `caret skipped (line-end ghost)`.
+
+## Terminal TUIs: the parked cursor (Claude Code, ported from Wind for Mac)
+
+Measured on Wind for Mac in Terminal.app: Claude Code hides the terminal cursor and draws its own,
+and while it redraws its prompt (on every space) it leaves the real cursor at the right edge of the
+text area; the next letter brings it back. Following it swung the view to the far right and back on
+every word. In Windows Terminal and the classic console (`IsTerminalWindow`), an insertion caret in
+the last two columns of the focused text area is skipped (`IsParkedTerminalCaret`,
+`src/track/caret_rect.h`; trackLog `caret skipped (parked terminal cursor)`). A selection reaching
+the edge is still followed. Not applied to xterm.js terminals, whose focused element is the cursor
+cell, so the text area's right edge is unknown. Not yet field-verified on Windows.
