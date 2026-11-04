@@ -212,6 +212,20 @@ private:
     std::thread th_;
 };
 
+// A caret window's client point in physical screen px. GetGUIThreadInfo reports rcCaret in the caret
+// window's own client units, which for a DPI-unaware app (Python's Tk, issue #536) are logical: at 225%
+// a plain ClientToScreen on this per-monitor-aware thread put the view at a fraction of the real offset,
+// up and left of the caret. So map it in the window's own DPI context, then to physical pixels.
+static bool CaretClientToScreen(HWND h, POINT& p) {
+    const DPI_AWARENESS_CONTEXT ctx = GetWindowDpiAwarenessContext(h);
+    const DPI_AWARENESS_CONTEXT prev = ctx ? SetThreadDpiAwarenessContext(ctx) : nullptr;
+    const bool ok = ClientToScreen(h, &p) != FALSE;
+    if (prev) SetThreadDpiAwarenessContext(prev);
+    if (ok && ctx && GetAwarenessFromDpiAwarenessContext(ctx) != DPI_AWARENESS_PER_MONITOR_AWARE)
+        LogicalToPhysicalPointForPerMonitorDPI(h, &p);
+    return ok;
+}
+
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
 static bool Win32Caret(RECT& out) {
     HWND fg = GetForegroundWindow();
@@ -221,7 +235,7 @@ static bool Win32Caret(RECT& out) {
     RECT rc = gi.rcCaret;
     if (rc.right <= rc.left && rc.bottom <= rc.top) return false;
     POINT a{ rc.left, rc.top }, b{ rc.right, rc.bottom };
-    if (!ClientToScreen(gi.hwndCaret, &a) || !ClientToScreen(gi.hwndCaret, &b)) return false;
+    if (!CaretClientToScreen(gi.hwndCaret, a) || !CaretClientToScreen(gi.hwndCaret, b)) return false;
     // A mirrored (RTL) window flips x in ClientToScreen: normalise so left <= right.
     out = { (std::min)(a.x, b.x), (std::min)(a.y, b.y), (std::max)(a.x, b.x), (std::max)(a.y, b.y) };
     return true;
