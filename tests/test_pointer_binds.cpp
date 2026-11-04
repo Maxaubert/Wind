@@ -58,6 +58,39 @@ TEST_CASE("the glide is smooth: the first tick moves part of the way, not the wh
     z.tick(0.007);
     CHECK(z.level() > 1.0); CHECK(z.level() < 1.3);
 }
+TEST_CASE("the wheel glide eases in from rest, ~95% of a notch in 0.25 s, never past the target") {
+    // A spring, not a first-order glide: the first frame moves a sliver (the exponential it replaced
+    // moved +8.4% of the log step at 7 ms), then it reaches ~95% at 250 ms and settles on the target.
+    ZoomController z(1.0, 10.0);
+    z.stepTarget(1, 1.0);                                // target 2.0
+    z.tick(0.007);
+    CHECK(std::log(z.level()) / std::log(2.0) < 0.02);   // under 2% of the notch on the first frame
+    double prev = z.level(), t = 0.007;
+    bool past95 = false;
+    while (t < 0.25 - 1e-9) {
+        z.tick(0.007); t += 0.007;
+        CHECK(z.level() >= prev);                        // monotonic
+        CHECK(z.level() <= 2.0 + 1e-9);                  // no overshoot
+        prev = z.level();
+    }
+    past95 = std::log(z.level()) / std::log(2.0) > 0.93;
+    CHECK(past95);
+    for (int i = 0; i < 200; ++i) z.tick(0.007);
+    CHECK(z.level() == doctest::Approx(2.0));
+    CHECK_FALSE(z.hasTarget());
+}
+TEST_CASE("notches in a row keep the glide's speed: no restart from rest per notch") {
+    ZoomController a(1.0, 10.0);
+    a.stepTarget(1, 0.25);
+    for (int i = 0; i < 10; ++i) a.tick(0.007);
+    const double at = a.level();                         // 70 ms in, still gliding
+    a.stepTarget(1, 0.25);                               // a second notch: target 1.25^2
+    ZoomController fresh(1.0, 10.0);                     // the same level and target, from rest
+    fresh.setLevel(at); fresh.stepTarget(1, 1.25 * 1.25 / at - 1.0);
+    a.tick(0.007); fresh.tick(0.007);
+    // Carrying its speed, the continuing glide moves further this frame than one starting from rest.
+    CHECK(std::log(a.level() / at) > 2.0 * std::log(fresh.level() / at));
+}
 TEST_CASE("a wheel notch zooms as far as holding does in 0.1 s at the same speed slider") {
     // hold rate = speed x 2.5 doublings/s, so a notch = 2^(speed x 0.25)
     CHECK(WheelNotchStep(1.0) == doctest::Approx(0.18921).epsilon(0.001));   // x1.19
@@ -72,6 +105,15 @@ TEST_CASE("a wheel notch zooms as far as holding does in 0.1 s at the same speed
     z.wheelNotches(-2);                                   // down uses the OUT speed
     for (int i = 0; i < 300; ++i) z.tick(0.007);
     CHECK(z.level() == doctest::Approx(before / std::pow(1.0 + WheelNotchStep(0.5), 2)).epsilon(0.001));
+}
+TEST_CASE("wheelZoomSpeed scales how far a notch zooms, relative to the hold speed") {
+    ZoomController z(1.0, 100.0);
+    z.setProfile(2.0, 2.0, false, 3.0, 0.6);
+    z.setWheelSpeed(0.5);                                // half of 0.1 s of holding per notch
+    z.wheelNotches(2);
+    for (int i = 0; i < 300; ++i) z.tick(0.007);
+    CHECK(z.level() == doctest::Approx(std::pow(2.0, 2 * 2.0 * 0.25 * 0.5)).epsilon(0.001));
+    CHECK(WheelNotchStep(2.0 * 0.5) == doctest::Approx(WheelNotchStep(1.0)));
 }
 TEST_CASE("holding a zoom key takes over from a wheel glide at once") {
     ZoomController z(1.0, 10.0);

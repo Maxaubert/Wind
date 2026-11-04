@@ -35,13 +35,17 @@ public:
     void stepTarget(int steps, double step);
     // The wheel at the user's zoom speeds: up uses inSpeed, down uses outSpeed (see WheelNotchStep).
     void wheelNotches(int steps);
+    // How far a notch zooms relative to the hold speed (wheelZoomSpeed; 1 = a notch is 0.1 s of holding).
+    void setWheelSpeed(double s) { wheelSpeed_ = s > 0.0 ? s : 1.0; }
     bool hasTarget() const { return target_ > 0.0; }
 private:
     double minLevel_, maxLevel_;
     double level_;
     double target_ = 0.0;                      // wheel target level (0 = none)
+    double wheelVel_ = 0.0;                    // wheel glide speed, log(level) per second
     ZoomDir dir_ = ZoomDir::None;
     double inSpeed_ = 1.0, outSpeed_ = 1.0;   // defaults reproduce today's behavior
+    double wheelSpeed_ = 1.0;                  // wheel notch size relative to the hold speed
     bool   smooth_ = false;
     double accel_ = 3.0, rampSeconds_ = 0.6;
     double heldIn_ = 0.0;                      // continuous seconds zoom-in held (drives accel ramp)
