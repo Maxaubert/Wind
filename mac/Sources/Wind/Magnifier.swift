@@ -188,7 +188,7 @@ final class Magnifier {
         }
         if SkyLight.isZoomed { SkyLight.reset() }
         guard installTap() else { return false }
-        coverTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkCursorCover() }
+        coverTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in Stall.time("cover") { self?.checkCursorCover() } }
         // Wind's own cursor moves to match each view write just before it (carries and level writes
         // come before the frame's last write; a cursor moved only once per frame showed a frame of
         // the new view with the old cursor place, measured on the zoomed screen).
@@ -570,7 +570,7 @@ final class Magnifier {
     // MARK: tick
 
     func wake() {
-        if let l = link, l.isPaused { lastTick = 0; l.isPaused = false }
+        if let l = link, l.isPaused { lastTick = 0; l.isPaused = false; Stall.linkWoke() }
     }
 
     /// Test hook (A/B, `wcur delay N`): run the frame's work this many seconds after the display link
@@ -613,6 +613,8 @@ final class Magnifier {
     }
 
     private func step(_ l: CADisplayLink) {
+        let started = Stall.begin()
+        defer { if !l.isPaused { Stall.end(started) } else { Stall.linkWoke() } }
         let now = l.timestamp
         let dt = lastTick == 0 ? l.duration : min(0.1, now - lastTick)
         lastTick = now

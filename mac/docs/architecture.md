@@ -209,7 +209,9 @@ followed by its own switch.
 - A trackpad gesture is zoom or scroll as decided when it begins, momentum included.
 - A config key with the wrong type falls back to its default alone. An unreadable file is backed
   up before Wind writes over it.
-- Accessibility calls time out after 0.25 s (0.5 s in System Settings) so a hung app cannot stall the tap.
+- Accessibility calls time out after 0.25 s (the system-wide element sets it for all of them). `CaretTracker` makes
+  them on its own thread (`wind.ax`), never the main thread, which runs the tick and the tap; only
+  `snapshot` and `onChange` reach main. See "Hitches as apps open".
 
 ## Pointer while the caret owns the view
 
@@ -746,6 +748,18 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   `active` before putting the app's cursor back). After: 0 of ~1100 samples, both cursors on render.
   `e2e_settings_mouse.py` sweeps the zoomed page with an outside sampler. Transform with Wind's cursor
   hides the real cursor, so it never showed there (0 before and after).
+- Chromium apps (ChatGPT, Chrome; Electron not checked) set the cursor on every mouse move
+  (`-[RenderWidgetHostViewCocoa mouseEvent:]`), not on shape changes. AppKit's `_reallySet` drops a repeat
+  unless the cursor seed moved since, and Wind's transparent set moves it, so at 1x those sets cost
+  nothing (0 seed bumps) and zoomed each one showed the real cursor until the poll's re-set (owner
+  2026-11-04, ChatGPT: flicker while moving). `ClearCursor` reads the same shape (pixels) set twice within
+  1 s as that signature: for 1 s after each such set the poll thread also hides the real cursor, which no
+  set shows through. It hides on that thread with its own balanced hide count (per process): on the main
+  thread each hide stopped the tick 10-30 ms. The poll keeps re-setting the transparent image meanwhile:
+  an app switch force-shows even a hidden cursor (the poll re-hides it). `scripts/churn_truth.py`, 1 ms outside
+  sampler at 3x: `tools/cursorchurn` 3.92% -> 0.05-0.08%, the real ChatGPT window 0.98% -> 0.08% (the first
+  two sets of a burst still show). SwiftUI hover is off only meanwhile; a panel above
+  `cursorchurn` kept it (checked with the test app only, not with a real Chromium window under it).
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor
@@ -1039,3 +1053,20 @@ Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-sp
   are checked against `Tests/fixtures/mac_keybind_cases.txt` (wind-checks and `npm run test:rules`).
   The schema defaults and ranges are checked against `Tests/fixtures/config_defaults.json`
   (regenerate with `swift run wind-checks --write-defaults` after changing `Config`).
+
+## Hitches as apps open (owner 2026-11-04)
+"As if it's getting scheduled out", when a prompt appears or an app opens: a brief freeze on Render. The OS was
+not demoting Wind (main thread at priority 46 throughout). `Stall` logs at logLevel 1 any tick with a gap over 20 ms
+or a step over 10 ms, naming what ran and the main thread's CPU; `slow present` is a drawable shown over 30 ms after
+its tick. `scripts/hitch_truth.py` pans at 3x while apps open and quit, running apps come forward and an alert shows.
+- **Accessibility on the main thread**: attaching to the newly active app took 27-58 ms at about 1 ms of CPU, waiting
+  for the app's reply, and the tick and tap waited with it. All of `CaretTracker` now runs on `wind.ax`.
+- **Dock resize read as a display change**: an app opening or quitting changes the Dock, which posts
+  `didChangeScreenParameters`; `screensChanged` blanked the overlay and restarted the capture for 135-166 ms, on every
+  launch and quit of an app not in the Dock. It now returns when only `visibleFrame` changed.
+- **Prompt watch**: its window list took up to 22 ms on main at those moments; read on a queue now (`promptTick`).
+- **`ClearCursor`'s lock**: held across the poll thread's transparent set, it held the tick 10-19 ms whenever a set met a
+  busy WindowServer. Those calls now hold a lock of their own (`wsLock`), which only `stop()` takes on main.
+- Worst gap in `hitch_truth.py`: 66 ms -> 25 ms, no `slow present`, no recapture; `pan_truth.py` late ticks 10-15 -> 0. What is left comes from WindowServer being
+  busy at those moments: 10-17 ms in `CATransaction.commit`, and 20-25 ms gaps with nothing of Wind's
+  running (the display link's callback itself came late). Not removable from Wind without moving the tick off the main thread.

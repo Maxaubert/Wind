@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import AppKit
 
 enum Paths {
@@ -52,6 +53,59 @@ enum Log {
     private static func write(_ s: String) {
         let line = "\(fmt.string(from: Date())) \(s)\n"
         queue.async { handle?.write(Data(line.utf8)) }
+    }
+}
+
+/// Where a late tick's time went (owner 2026-11-04: the view hitches as an app opens or a prompt appears).
+/// The main thread runs the tick, the event tap and everything else, so a stall of any of them stops the
+/// view. Each suspect is timed here; a slow tick logs at logLevel 1 what ran since the tick before, with
+/// the main thread's CPU time, which tells work (CPU close to the gap) from waiting (a reply from another
+/// process, WindowServer or the GPU). Writes only on a slow tick. Main thread only.
+enum Stall {
+    nonisolated(unsafe) private static var stages: [(String, Double)] = []
+    nonisolated(unsafe) private static var lastAt = 0.0
+    nonisolated(unsafe) private static var lastCpu = 0.0
+    nonisolated(unsafe) private(set) static var worstGap = 0.0
+    nonisolated(unsafe) private(set) static var slowTicks = 0
+    static let gapLimit = 0.020, stepLimit = 0.010
+
+    private static var cpuNow: Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e9 }
+
+    static func add(_ what: String, _ seconds: Double) {
+        if seconds > 0.0005 { stages.append((what, seconds)) }
+    }
+
+    @inline(__always) static func time<T>(_ what: String, _ body: () -> T) -> T {
+        let t0 = CACurrentMediaTime()
+        defer { add(what, CACurrentMediaTime() - t0) }
+        return body()
+    }
+
+    /// The link woke from a pause: the gap to the next tick is not a stall.
+    static func linkWoke() { lastAt = 0 }
+
+    /// Start of a tick: the gap since the last tick ended. Returns the time to give to `end`.
+    static func begin() -> Double { CACurrentMediaTime() }
+
+    static func end(_ started: Double) {
+        let now = CACurrentMediaTime(), cpu = cpuNow
+        let gap = lastAt == 0 ? 0 : started - lastAt
+        let step = now - started
+        if gap > gapLimit || step > stepLimit {
+            slowTicks += 1
+            worstGap = max(worstGap, gap)
+            let list = stages.map { String(format: "%@ %.1f", $0.0, $0.1 * 1000) }.joined(separator: ", ")
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
+            Log.info(String(format: "slow tick: gap %.1f ms, step %.1f ms, main CPU %.1f ms, front %@; %@", gap * 1000, step * 1000, (cpu - lastCpu) * 1000, front, list))
+        }
+        stages.removeAll(keepingCapacity: true)
+        lastAt = now; lastCpu = cpu
+    }
+
+    /// For the session's last log line; clears.
+    static func report() -> String {
+        defer { worstGap = 0; slowTicks = 0 }
+        return String(format: "%d slow ticks, worst gap %.0f ms", slowTicks, worstGap * 1000)
     }
 }
 

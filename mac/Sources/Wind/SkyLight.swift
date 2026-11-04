@@ -201,10 +201,14 @@ enum SkyLight {
         if clear && !wantHidden {
             realHide(false)                             // no hide count of Wind's own underneath
         } else {
-            let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
-            realHide(true, force: !cursorHidden || shown)   // re-hidden if macOS showed it (Dock, app switch)
+            realHide(true, force: !cursorHidden || scoreboardShown)   // re-hidden if macOS showed it (Dock, app switch)
         }
         if clear { ClearCursor.shared.start() } else { ClearCursor.shared.stop() }
+    }
+
+    /// WindowServer's hide count reads zero (one shared byte, no message).
+    static var scoreboardShown: Bool {
+        scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
     }
 
     /// Wind's cursor off: the real cursor as Wind wants it.

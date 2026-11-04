@@ -20,6 +20,16 @@ import QuartzCore
 // cursor in none of ~580 captured frames). When Wind exits or crashes WindowServer drops its cursor and
 // shows the app's again; if Wind's main thread stalls, the thread stops re-setting it and puts the app's
 // cursor back, so a stuck Wind never leaves the pointer invisible.
+//
+// Chromium apps (ChatGPT, Chrome, Electron) set the cursor on every mouse move, not on a shape change:
+// -[RenderWidgetHostViewCocoa mouseEvent:]. AppKit normally drops such a repeat, unless the cursor seed
+// moved since, and Wind's own transparent set moves it. So every move put the real, unmagnified cursor up
+// until the poll cleared it: the tiny cursor flickering over ChatGPT (owner 2026-11-04; 1-4% of samples,
+// scripts/churn_truth.py). The same shape set twice within a second is that signature: the poll thread then
+// hides the real cursor as well, which no set can show through, until the sets stop. On that thread and
+// with a hide of its own (the hide count is per process, so it balances with the main thread's): each is a
+// WindowServer call of 10-30 ms as windows change, too long for the tick. SwiftUI hover is off only for
+// that long, and an app under a banner gets no moves.
 final class ClearCursor: @unchecked Sendable {
     static let shared = ClearCursor()
 
@@ -27,6 +37,16 @@ final class ClearCursor: @unchecked Sendable {
     private var active = false
     private var session = 0                 // a thread runs while its session is the current one
     private var appCursor: NSCursor?        // what apps set last: the shape Wind draws
+    private var appKey: Data?               // its pixels: a repeat of the same shape is not a change
+    private var repeatAt = 0.0              // the last set repeating the shape
+    private var busyUntil = 0.0
+    // Held across the poll thread's WindowServer calls, so that none outlives stop(). Separate from `lock`,
+    // which the tick takes every frame: across a set it held the tick 10-19 ms as windows came and went
+    // (2026-11-04). Order: wsLock, then lock.
+    private let wsLock = NSLock()
+    private var repeatHidden = false        // the poll thread's own hide
+    private var lastForeign = 0.0
+    private static let repeatWithin = 1.0, busyHold = 1.0
     private var shapeGen = 0
     private var ours: UInt32 = 0            // the seed of Wind's own transparent set
     private var beat = 0.0                  // main thread alive (a timer while active)
@@ -94,11 +114,14 @@ final class ClearCursor: @unchecked Sendable {
     func stop() {
         lock.lock()
         guard active else { lock.unlock(); return }
-        active = false; session += 1
+        active = false; session += 1; busyUntil = 0
         let app = appCursor
         lock.unlock()
         beatTimer?.invalidate(); beatTimer = nil
+        wsLock.lock()                                   // an in-flight set of the poll thread finishes first
         (app ?? NSCursor.arrow).set()                   // while Wind still owns the cursor (over the Dock)
+        if repeatHidden { CGDisplayShowCursor(CGMainDisplayID()); repeatHidden = false }
+        wsLock.unlock()
         SkyLight.updateOwnsCursor()                     // then give it back, unless Wind still hides it
     }
 
@@ -110,18 +133,27 @@ final class ClearCursor: @unchecked Sendable {
     }
 
     /// Set the transparent cursor. From the poll thread (`session`) only while that session is still
-    /// the active one, checked under the lock held across the set: otherwise stop() could put the app's
+    /// the active one, checked under `wsLock` held across the set: otherwise stop() could put the app's
     /// cursor back between the check and the set, leaving the real cursor transparent at 1x.
     @discardableResult
     private func setClear(session s: Int? = nil) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if let s, !(active && session == s) { return false }
+        wsLock.lock()
+        lock.lock()
+        let mine = session
+        let current = s.map { active && mine == $0 } ?? true
+        lock.unlock()
+        guard current else { wsLock.unlock(); return false }
         clear.set()
         let seed = SkyLight.cursorSeed
+        wsLock.unlock()
         // An app's set can land between Wind's set and the seed read: then that seed is the app's, and
         // taking it as Wind's would leave the app's cursor showing unzoomed until its next set. 0 never
-        // matches, so the poll handles it as an app's set.
-        ours = NSCursor.currentSystem.map(isClear) == true ? seed : 0
+        // matches, so the poll handles it as an app's set. Read outside the lock: it is a WindowServer
+        // round trip (up to 10 ms) and the main thread takes this lock every tick.
+        let clearNow = NSCursor.currentSystem.map(isClear) == true
+        lock.lock()
+        if session == mine { ours = clearNow ? seed : 0 }
+        lock.unlock()
         return true
     }
 
@@ -150,7 +182,7 @@ final class ClearCursor: @unchecked Sendable {
         // Passed through when not active (stop() puts the app's cursor back after clearing `active`) or
         // while the main thread is stalled (the poll thread puts the app's cursor back).
         guard active && !stalled else { lock.unlock(); orig(c, ClearCursor.setSel); return }
-        appCursor = c; shapeGen += 1; ownCount += 1
+        appCursor = c; appKey = nil; shapeGen += 1; ownCount += 1
         orig(clear, ClearCursor.setSel)
         // Not taken as Wind's seed without a read of the system cursor (a WindowServer round trip, too
         // slow for every hover change on the main thread): 0 lets the poll check it off the main thread.
@@ -158,16 +190,37 @@ final class ClearCursor: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// The poll thread's hide while an app repeats its cursor. Checked again under `wsLock`: stop() has
+    /// the last word, or a hide could land after its show and leave the cursor hidden at 1x.
+    private func repeatHide(_ on: Bool, session s: Int) {
+        wsLock.lock(); defer { wsLock.unlock() }
+        lock.lock(); let current = active && session == s; lock.unlock()
+        guard current else { return }
+        let shownAnyway = on && repeatHidden && SkyLight.scoreboardShown    // an app switch shows it through a hide
+        if on == repeatHidden && !shownAnyway { return }
+        if !on || shownAnyway { CGDisplayShowCursor(CGMainDisplayID()) }
+        if on { CGDisplayHideCursor(CGMainDisplayID()) }
+        repeatHidden = on
+    }
+
     private func poll(session s: Int) {
         lock.lock(); var last = ours; lock.unlock()     // 0 (start's set raced with an app's): look at once
+        var quick = false, hidden = false
         while true {
-            usleep(2000)
+            usleep(quick ? 500 : 2000)                  // faster while an app is setting its cursor
             lock.lock()
             guard active, session == s else { lock.unlock(); return }
-            let stale = CACurrentMediaTime() - beat > 1.5
+            let now = CACurrentMediaTime()
+            quick = now - lastForeign < 2
+            let stale = now - beat > 1.5
             let wasStalled = stalled, mine = ours, app = appCursor
             if stale != stalled { stalled = stale }
+            let hideNow = !stale && now < busyUntil
             lock.unlock()
+            if hideNow || hidden {
+                repeatHide(hideNow, session: s)
+                hidden = hideNow
+            }
             if stale {
                 // Wind's main thread is stuck: show the app's cursor until it is back.
                 if !wasStalled { (app ?? NSCursor.arrow).set(); Log.info("clear cursor: main thread quiet 1.5 s, the app's cursor shown") }
@@ -178,11 +231,20 @@ final class ClearCursor: @unchecked Sendable {
             last = seed
             if seed == mine && !wasStalled { continue }
             // Someone else set the cursor (or Wind's own set raced with it): keep theirs as the shape.
-            lock.lock(); foreignCount += 1; lock.unlock()
+            lock.lock(); foreignCount += 1; lastForeign = now; lock.unlock()
             if let c = NSCursor.currentSystem, !isClear(c) {
+                guard setClear(session: s) else { return }   // first: the app's cursor is on screen until then
+                let key = c.image.tiffRepresentation    // pixels: same size and hotspot can be another cursor
                 lock.lock()
-                if active && session == s { appCursor = c; shapeGen += 1 }
+                resetCount += 1; last = ours
+                if active && session == s {
+                    if key == appKey {
+                        if now - repeatAt < ClearCursor.repeatWithin { busyUntil = now + ClearCursor.busyHold }
+                        repeatAt = now
+                    } else { appCursor = c; appKey = key; shapeGen += 1 }
+                }
                 lock.unlock()
+                continue
             } else if !wasStalled {
                 lock.lock(); ours = seed; lock.unlock()   // it is Wind's own transparent cursor
                 continue
