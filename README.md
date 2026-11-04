@@ -3,7 +3,7 @@
 
   # Wind
 
-  Fullscreen magnifier for Windows.
+  Fullscreen magnifier for Windows. Also on the Mac: [Wind for Mac](mac/README.md).
 
   [![Latest release](https://img.shields.io/github/v/release/Maxaubert/Wind?style=flat-square&color=5b5bd6&label=release)](https://github.com/Maxaubert/Wind/releases/latest)
   [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-5b5bd6?style=flat-square)](https://github.com/Maxaubert/Wind/releases/latest)
@@ -49,6 +49,9 @@ anyway**. Some browsers and work computers block the download. Setup signs Wind 
 because Windows gives Wind the UIAccess permission it needs only when it is signed. If that step
 fails, setup says so, and Wind will not start until you run the installer again.
 
+**On a Mac?** Wind for Mac lives in [`mac/`](mac/README.md) and ships as its own zip on the
+[releases page](https://github.com/Maxaubert/Wind/releases) (tags `mac-v*`).
+
 ## Usage
 
 The first launch walks you through choosing zoom keys: mouse side buttons, keyboard keys, or both.
@@ -87,6 +90,7 @@ A plain `build.bat` build has no UIAccess, so Wind refuses to start; run it with
 `WIND_ALLOW_NO_UIACCESS=1` set, or deploy the signed build with `tools\uiaccess_setup.ps1`. In `ui/`,
 `npm run test:rules` runs the JS bind-rule and config-defaults tests and `npx playwright test` the Settings UI tests.
 The developer docs are in [docs/architecture](docs/architecture/README.md).
+Wind for Mac (Swift) builds and tests on its own from `mac/`; see [mac/README.md](mac/README.md).
 
 ## Licence
 
