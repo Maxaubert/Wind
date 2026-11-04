@@ -12,6 +12,7 @@ import argparse, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import windtest as W
 from PIL import Image
+os.environ["WIND_FAKE_LOCK"] = "fakeprompt"
 
 ap = argparse.ArgumentParser(); ap.add_argument("--level", type=int, default=3); a = ap.parse_args()
 T = os.path.join(W.ROOT, "tools/cursorchurn"); OUT = os.path.join(W.ROOT, "build/backdrop-truth"); os.makedirs(OUT, exist_ok=True)
@@ -92,6 +93,13 @@ for on in (True, False):
     s = W.ctl("state"); W.check(f"handover {'on' if on else 'off'}: a protected window {'hands over' if on else 'stays drawn'}", s["handedOver"] == on and s["drawn"] != on, f"handedOver {s['handedOver']} drawn {s['drawn']}")
     p.wait(timeout=6); time.sleep(1.2)
     s = W.ctl("state"); W.check(f"handover {'on' if on else 'off'}: drawn again after", s["drawn"] and not s["handedOver"], f"drawn {s['drawn']}")
+# Handover off and the lock screen (a test window stands in, WIND_FAKE_LOCK): no switch, and the real cursor shows.
+W.set_config(handover=False); time.sleep(0.8)
+p = subprocess.Popen([PROMPT, "4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
+s = W.ctl("state")
+W.check("handover off: no switch on the lock screen, and the real cursor shows", not s["handedOver"] and s["drawn"] and s["realCursorVisible"] and not s.get("realCursorClear"), f"handedOver {s['handedOver']} drawn {s['drawn']} real {s['realCursorVisible']} clear {s.get('realCursorClear')}")
+p.wait(timeout=7); time.sleep(1.2)
+s = W.ctl("state"); W.check("handover off: the cursor drawn again after the lock screen", s["drawn"] and s.get("realCursorClear"), f"drawn {s['drawn']} clear {s.get('realCursorClear')}")
 W.set_config(handover=None); W.ctl("level 1"); time.sleep(0.5)
 
 # Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).

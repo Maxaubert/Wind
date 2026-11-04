@@ -44,7 +44,7 @@ public struct Config: Codable, Equatable {
     public var precisionBelow = 100.0             // hand speed (pt/s at 1x) below which it applies; full 1x speed at twice that
     public var panMaxLagPt = 24.0                 // most the view may trail the pointer, screen points
     public var cursor = "wind"                   // "system" = the real cursor; "wind" = Wind draws it (steady on whole-point zoom)
-    public var handover = true                    // Render and Backdrop hand over to macOS's zoom (off: for the lock screen only)
+    public var handover = true                    // Render and Backdrop hand over to macOS's zoom (off: never)
     public var ownScreenshot = true               // while zoomed, Wind runs the screenshot-area shortcuts itself (smooth crosshair and box)
     public var slowPanGlide = false               // experimental: WindowServer glides each whole-point step of slow pans (issue #13)
 
