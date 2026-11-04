@@ -92,14 +92,11 @@ zoom all profile=2.7,1,0,3,0.6 wheel=1 t=120*480 =1.596596773
 zoom all wheel=5 in t=120*60 =2.215445564
 zoom all ease=0 wheel=5 in t=120*60 =2.37841423
 
+# The wheel glide: a critically damped spring in log space on both (250 ms to 95%, an ease-in from
+# rest; Mac 2026-10-31, Windows #548). 50 ms into a 1x -> 1.189x notch both are at 1.0432.
+zoom all wheel=1 t=120*6 =1.0432116 t=120*6 =1.102663116 t=120*12 =1.167030389
+zoom all wheel=3 t=120*12 =1.340690536 t=120*24 =1.66195293
 # Differs on purpose, so per platform:
-# The wheel glide: Windows is a first-order glide in log space (tau 80 ms); the Mac moved to a
-# critically damped spring (250 ms to 95%, an ease-in from rest; owner ask 2026-10-31). Same target,
-# different path: 50 ms into a 1x -> 1.189x notch Windows is at 1.0839 and the Mac at 1.0432.
-zoom win wheel=1 t=120*6 =1.083864676 t=120*6 =1.131607623 t=120*12 =1.172411277
-zoom win wheel=3 t=120*12 =1.449064088 t=120*24 =1.661356506
-zoom mac wheel=1 t=120*6 =1.0432116 t=120*6 =1.102663116 t=120*12 =1.167030389
-zoom mac wheel=3 t=120*12 =1.340690536 t=120*24 =1.66195293
 # setLevel during the release ease-out: Windows keeps the decaying rate (the level drifts on), the
 # Mac's setLevel stops it.
 zoom win in t=120*60 none set=2 t=120*5 =2.087584575
