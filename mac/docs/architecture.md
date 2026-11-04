@@ -1085,6 +1085,8 @@ above the overlay, so it stays unmagnified on the zoomed view. It cannot be cove
 - `handover` (Settings, under Engine; greyed on Transform; Render too): off, nothing goes to macOS's zoom (owner 2026-11-04, the lock screen too).
   Protected windows and windows above the overlay stay as drawn, macOS's screenshot modes run under the overlay with their real crosshair
   unmagnified, and the lock screen shows unmagnified above the overlay: `DrawZoom.lockUp` gives the real cursor back meanwhile and restarts a capture it stopped.
+  loginwindow also owns the Restart and Shut Down prompts: only `CGSSessionScreenIsLocked`, or a window above the overlay, counts as the lock screen (owner
+  2026-11-04: the prompt brought the tiny cursor). Tests never open the real prompt, which restarts by itself after 60 s.
 - No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
 - What is below reaches the screen only as far as a commit dirties the backdrop, so `keepAliveTick` nudges the backdrop layer itself 0.001 pt
   on every refresh the view does not move it. A nudge of the cursor layer alone, or a tick with the view still, redrew part of the view: a
