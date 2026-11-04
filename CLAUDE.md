@@ -21,6 +21,8 @@ are frozen history cited from code, not kept in step with it.
 - `pwsh -File tools\check_copyright.ps1`: CI gate; every new source file needs the copyright/SPDX header. See 11.
 
 ## Stack and map
+- `mac/` is Wind for Mac (Swift, its own `mac/CLAUDE.md`, build and tests; imported from Maxaubert/Wind-Mac
+  2026-11-02). The Windows workflows ignore it; it releases on its own `mac-v*` tags.
 - Three binaries: `Wind.exe` (core, UIAccess when installed), `WindConfig.exe` (WebView2 settings),
   `WindTray.exe` (tray flyout, never UIAccess). Settings travel only through `magnifier.ini`. See 01.
 - `src/` is grouped by area (`core`, `engine`, `render`, `transform`, `color`, `input`, `cursor`,

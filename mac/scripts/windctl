@@ -1,0 +1,7 @@
+#!/bin/zsh
+# Send a command to the running Wind and print its state (see Sources/Wind/CommandChannel.swift).
+D="$HOME/Library/Application Support/Wind"
+rm -f "$D/state.json"
+print -r -- "$*" > "$D/command"
+for i in {1..40}; do [[ -f "$D/state.json" ]] && break; sleep 0.05; done
+cat "$D/state.json" 2>/dev/null || echo '{"error": "Wind did not answer"}'

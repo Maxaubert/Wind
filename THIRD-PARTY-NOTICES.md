@@ -38,9 +38,23 @@ Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved. Ported 
 in `src/render/upscale_nis.h` (the render engine's NVIDIA Image Scaling) via agyild's mpv port.
 https://github.com/NVIDIAGameWorks/NVIDIAImageScaling
 
+## Shipped in Wind for Mac (Wind-mac-<version>.zip)
+
+### Svelte 5 (MIT)
+Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `mac/ui/dist`, which ships
+inside `Wind.app/Contents/Resources/ui`. https://github.com/sveltejs/svelte
+
+### xBR-lv2 shader (MIT)
+Copyright (C) 2011-2022 Hyllian (sergiogdb@gmail.com). Ported to Metal in `mac/Sources/Wind/UpscaleShaders.swift`
+(Render scaling xBR) from Wind's HLSL port above, itself from the libretro slang-shaders
+`edge-smoothing/xbr/shaders/xbr-lv2-standalone.slang`. https://github.com/libretro/slang-shaders
+
+Wind for Mac links only Apple's system frameworks. This file and the licence ship inside the app
+(`Contents/Resources`).
+
 ## Build and test only, not shipped
 
-doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary.
+doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary. On the Mac, the test tool `mac/tools/vmouse` uses the Karabiner-DriverKit-VirtualHIDDevice headers (public domain), and is never shipped.
 
 ---
 
