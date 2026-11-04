@@ -12,7 +12,7 @@ import WindCore
 //   post key <bind> down|up    synthetic key event    post mouse <n> down|up
 //   post move <dx> <dy>        synthetic mouse move   post scroll <lines> [mods]
 //   warp <x> <y>               move the pointer       lock on|off   force the game-lock regime
-//   settoggle on|off <label>   a macOS Zoom shortcut or shake-to-locate switch (exact label)
+//   settoggle on|off <label>   a macOS Zoom shortcut switch (exact label)
 //   fixzoom                    switch every macOS Zoom shortcut off
 //   menu <secs>                open Wind's own menu-bar menu; it closes itself after secs (no command
 //                              is read while it tracks)
@@ -56,10 +56,9 @@ enum CommandChannel {
         case "settoggle":
             // settoggle on|off <label>: only the switches Wind itself manages (security review:
             // the channel must not become a general System Settings remote).
-            let allowed = [SystemZoom.keyboardLabel, SystemZoom.trackpadLabel, SystemZoom.scrollLabel, SystemZoom.shakeLabel]
+            let allowed = [SystemZoom.keyboardLabel, SystemZoom.trackpadLabel, SystemZoom.scrollLabel]
             if w.count > 2, let label = allowed.first(where: { $0.lowercased() == w[2...].joined(separator: " ").lowercased() }) {
-                let pane = label == SystemZoom.shakeLabel ? SettingsToggle.displayPane : SettingsToggle.zoomPane
-                SettingsToggle.set(pane: pane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
+                SettingsToggle.set(pane: SettingsToggle.zoomPane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
             }
         case "settings": app.testSettings(Array(w.dropFirst()))   // settings [onboard|close] | settings js <base64>
         case "menu": app.testMenu(w.count > 1 ? Double(w[1]) ?? 2 : 2)   // menu <secs>: Wind's own menu-bar menu, closed after secs

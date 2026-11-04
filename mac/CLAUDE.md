@@ -40,6 +40,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   further); every movement start must be as smooth as its middle.
 - `python3 scripts/handover_truth.py`: panning with a system alert up on the zoomed screen (Transform, Render drawing
   it, `--states zoomalert,handover --tier 250` the hand-over to macOS's zoom); run it after touching `DrawZoom` prompts or the capture.
+- `python3 scripts/churn_truth.py [--target ChatGPT]`: the real cursor over an app that sets it on every move (Chromium), measured outside Wind; run it after touching `ClearCursor`.
+- `python3 scripts/hitch_truth.py`: view stalls as apps open, quit and alerts show, from Wind's `slow tick` lines (`Stall`); run it after touching anything on the main thread's tick path.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
 - `python3 scripts/e2e_screenshot.py`: screenshot mode (area, window, Cmd+Shift+5) and the colour sampler while
@@ -76,4 +78,5 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   only into test builds (`#if WIND_TEST_CHANNEL`). Never compile it into the installed app.
 - The crash guard runs as `Contents/MacOS/WindGuard` (a copy of the binary) so `pkill -x Wind`
   does not kill it.
+- Accessibility calls never go on the main thread (`CaretTracker`'s `wind.ax` thread): each one waits for the app and stops the view.
 - Tests zoom the real screen; the owner allowed that for this machine.

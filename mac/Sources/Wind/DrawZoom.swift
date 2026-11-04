@@ -223,7 +223,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             let st = u.stats(reset: true)
             passes = String(format: "; %d %@ passes, GPU median %.2f ms, p95 %.2f ms, %d late", st.passes, scaling.label, st.median, st.p95, lateWaits)
         }
-        Log.info("draw engine: off after \(frames) frames\(passes)")
+        Log.info("draw engine: off after \(frames) frames\(passes); \(Stall.report())")
         frames = 0; lateWaits = 0
         inFlight = nil; drawnView = nil; encodedView = nil; prevTick = nil
         publishCapView(nil, size: .zero, px: 1)
@@ -305,7 +305,29 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// While the engine is wanted and Wind is zoomed, look for prompts 4 times a second.
     private func startPromptWatch() {
         guard promptTimer == nil else { return }
-        promptTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkPrompts() }
+        promptTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.promptTick() }
+    }
+
+    /// The timer's look for prompts. The window list is read off the main thread: it blocked the tick up
+    /// to 22 ms just as windows came and went (2026-11-04, scripts/hitch_truth.py). A read that a change
+    /// of hand-over overtook is dropped; the next one is 0.25 s away.
+    private static let promptQueue = DispatchQueue(label: "wind.draw.prompts", qos: .userInitiated)
+    private var promptReading = false
+    private func promptTick() {
+        guard visible || DrawZoom.handedOver else { checkPrompts(); return }
+        if promptReading || PointerTakeover.shared.active { if !promptReading { checkPrompts() }; return }
+        promptReading = true
+        let id = DrawZoom.handedOver ? handoverWindow : nil
+        DrawZoom.promptQueue.async { [weak self] in
+            let waitedFor = id.map(DrawZoom.windowOnScreen) ?? false
+            let blocking = waitedFor ? nil : DrawZoom.blockingWindow()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.promptReading = false
+                guard (DrawZoom.handedOver ? self.handoverWindow : nil) == id else { return }
+                self.checkPrompts(read: (waitedFor, blocking))
+            }
+        }
     }
 
     /// Hand the view to macOS's zoom while something is up the overlay cannot show right, and take it
@@ -313,15 +335,15 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// (PointerTakeover): it forces the real cursor visible, which render never magnifies (the small
     /// free crosshair beside Wind's big one), and its selection band stacks above the overlay. Handed
     /// over only once the band appeared (0.25 s into a drag), the view jumped mid-drag (2026-11-01).
-    func checkPrompts() {
+    func checkPrompts(read: (waitedFor: Bool, blocking: (id: Int, above: Bool)?)? = nil) {
         let zoomed = visible || DrawZoom.handedOver
         if !zoomed { promptTimer?.invalidate(); promptTimer = nil; return }
         let takeover = PointerTakeover.shared.active
         // Handed over, wait for the window that caused it to close: with the overlay hidden, a
         // window that sat above it (a UserNotificationCenter alert, layer 8) is judged by its
         // level and looked gone, so the engine flipped 4 times a second (2026-11-01).
-        if DrawZoom.handedOver, let id = handoverWindow, DrawZoom.windowOnScreen(id) { return }
-        let blocking = takeover ? nil : DrawZoom.blockingWindow()
+        if DrawZoom.handedOver, let id = handoverWindow, read?.waitedFor ?? DrawZoom.windowOnScreen(id) { return }
+        let blocking = takeover ? nil : (read != nil ? read!.blocking : DrawZoom.blockingWindow())
         let prompt = takeover || blocking != nil
         if DrawZoom.handedOver && DrawZoom.failed {     // the capture failed meanwhile: macOS's zoom stays
             DrawZoom.handedOver = false; handoverWindow = nil; handoverAbove = nil
@@ -447,7 +469,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // (one shared-memory byte), so it shows for a frame at most (it stayed up to 0.1 s, 2026-11-02).
         // Not in the 0.1 s after taking it: the scoreboard can still read shown then, and a forced
         // show+hide right after the order-in blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
-        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor(clear: true) }
+        if SkyLight.forceHidden && now - cursorTakenAt > 0.1 { Stall.time("cursor keep") { SkyLight.hideRealCursor(clear: true) } }
         // Something else gave the real cursor back while the overlay shows a picture (Wind's cursor on
         // macOS's zoom going off right after a handover back): take it again at once.
         if haveFrame && !SkyLight.forceHidden { takeCursor() }
@@ -464,12 +486,12 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // set on its own (outside this transaction) the new image and the new size reached the screen
         // a frame apart, and the cursor showed big for a frame at every shape change (owner
         // 2026-10-31: I-beam, scroll bar, resize edge).
-        if shapeDue { cursorShape() }
+        if shapeDue { Stall.time("cursor shape") { cursorShape() } }
         var st = Drawn(center: center, scale: scale, pointer: p, crosshair: crosshair, shot: shot?.geom)
         if gpu { st = gpuTick(st) }
         else if pendingCapture { showCapture() }
         drawOverlay(st)
-        CATransaction.commit()
+        Stall.time("commit") { CATransaction.commit() }
     }
 
     /// What the overlay draws on top of the picture: the view it maps desktop points with, the pointer
@@ -574,6 +596,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         w.contentView = v
         SkyLight.ignoreForWindowPicker(windowNumber: w.windowNumber)    // screenshot window mode picked it
         window = w
+        if let s = NSScreen.screens.first { screenKey = key(of: s) }
         if !observing {
             observing = true
             NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -582,10 +605,23 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
     }
 
+    /// What the capture depends on, and the usable area, which the Dock and menu bar change.
+    private struct ScreenKey: Equatable { var frame: CGRect; var scale: CGFloat; var id: NSNumber?; var usable: CGRect }
+    private var screenKey: ScreenKey?
+    private func key(of s: NSScreen) -> ScreenKey {
+        ScreenKey(frame: s.frame, scale: s.backingScaleFactor, id: s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber, usable: s.visibleFrame)
+    }
+
     /// Resolution, scaling or the main display changed: resize the overlay and recapture.
     private func screensChanged() {
         guard let w = window, let screen = NSScreen.screens.first else { return }
         if NSScreen.screens.count > 1 && visible { fail("a second display was attached (not supported yet)"); return }
+        // The Dock growing or shrinking as an app opens or quits posts this too, with nothing changed for
+        // the capture: restarting it blanked the overlay 135-166 ms each time (owner 2026-11-04). Only
+        // that case is skipped: other notifications with an equal frame (a console switch) still recapture.
+        let now = key(of: screen), was = screenKey
+        screenKey = now
+        if let was, was != now, was.frame == now.frame, was.scale == now.scale, was.id == now.id { return }
         w.setFrame(screen.frame, display: false)
         w.contentView?.frame = CGRect(origin: .zero, size: screen.frame.size)
         stopStream()
@@ -680,7 +716,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                     }
                     return
                 }
-                self.presentNow()
+                Stall.time("present") { _ = self.presentNow() }
                 return
             }
             // While the zoom ticks, a captured frame goes up with the tick's own commit: committed
@@ -845,6 +881,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 let t0 = CACurrentMediaTime()
                 f.buffer.waitUntilCompleted()
                 if CACurrentMediaTime() - t0 > 0.001 { lateWaits += 1 }
+                Stall.add("gpu wait", CACurrentMediaTime() - t0)
             }
             guard f.buffer.status == .completed else { upscaleFailed("a pass failed (\(f.buffer.error?.localizedDescription ?? "?"))"); return now }
             show(f.drawable)
@@ -931,7 +968,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             metalColorSpaceSet = src
             if let cs = Upscaler.colorSpace(of: src), metal.colorspace != cs { metal.colorspace = cs }
         }
-        return metal.nextDrawable()
+        return Stall.time("drawable") { metal.nextDrawable() }
     }
     private var metalColorSpaceSet: IOSurface?
 
@@ -940,6 +977,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// every refresh made WindowServer show only 166-177 of 216 refreshes while panning (every other one
     /// skipped), whatever the pass cost; drawables show all of them, like Nearest (2026-11-03).
     private func show(_ d: CAMetalDrawable) {
+        // How long WindowServer took to put it up. A long one with the tick on time means the stall is
+        // in the composite, not in Wind (0 = it was never shown).
+        let asked = CACurrentMediaTime()
+        d.addPresentedHandler { p in
+            if p.presentedTime > 0 && p.presentedTime - asked > 0.030 {
+                Log.info(String(format: "slow present: %.1f ms after the tick", (p.presentedTime - asked) * 1000))
+            }
+        }
         d.present()
         if metal.isHidden {
             metal.isHidden = false; image.isHidden = true
