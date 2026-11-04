@@ -56,4 +56,14 @@ for k in range(8):
     seen.add(Image.open(png).convert("L").getpixel((im.width // 2 + 30, 300)) > 128); time.sleep(0.13)
 W.check("content below an idle overlay reaches the magnified view", len(seen) == 2, f"polarities seen {seen}")
 W.ctl("level 1"); time.sleep(0.6); churn.kill()
+
+# Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).
+W.set_config(engine="draw"); time.sleep(1); W.ctl("level 3"); time.sleep(2)
+s = W.ctl("state"); W.check("Render captures, as the switch's starting point", s["drawCapturing"] and indicators() > 0, f"capturing {s['drawCapturing']}, {indicators()} indicators")
+W.set_config(engine="backdrop"); time.sleep(1.5)
+for k in range(3): W.ctl("level 1"); time.sleep(0.5); W.ctl("level 3"); time.sleep(1)    # zoom-ins cancelled the idle stop
+time.sleep(2)
+s = W.ctl("state")
+W.check("switched from Render while zoomed: capture and indicator gone", s["drawn"] and not s["drawCapturing"] and indicators() == 0, f"drawn {s['drawn']} capturing {s['drawCapturing']}, {indicators()} indicators")
+W.ctl("level 1"); time.sleep(0.5)
 W.finish()

@@ -1078,6 +1078,8 @@ above the overlay, so it stays unmagnified on the zoomed view. It cannot be cove
 - `DrawZoom.backdrop`: Render's overlay made clear, with a `CABackdropLayer` magnifying what WindowServer composites below
   (`zoom = (1/L - 1)/2`, layer centre `(C L - W/2)/(L - 1)`). The drawn cursor, ClearCursor, prompts, hand-over and the 1x pointer
   are Render's. No stream, no Screen Recording, no `hasFrame` wait. No class or key: falls back to macOS's zoom.
+- A capture running when the engine is switched is stopped at the switch and at any zoom-in: left alone, each zoom-in
+  cancelled the idle stop and it ran on with the dot (owner 2026-11-04, `backdrop_truth.py` covers the switch while zoomed).
 - No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
 - What is below reaches the screen only while the overlay commits, so `keepAliveTick` nudges the cursor layer 0.001 pt on every
   refresh the tick does not commit. Cost, WindowServer CPU with the view still at 3x on a busy desktop (1x about 34-43%): Backdrop 59%,

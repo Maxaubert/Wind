@@ -146,12 +146,13 @@ final class Magnifier {
         }
         // Switched to Transform: also stop a capture a hand back was warming (it ran under macOS's zoom).
         if c.engine == "zoom" { DrawZoom.handedOver = false }
-        if c.engine != "draw" { DrawZoom.shared.stopCapture() }
         if (c.engine == "backdrop") != DrawZoom.backdrop {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.backdrop = c.engine == "backdrop"
             lastWritten = nil
         }
+        // After the zoom-out above: stopCapture does nothing while the overlay is up.
+        if c.engine != "draw" { DrawZoom.shared.stopCapture() }
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw

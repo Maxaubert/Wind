@@ -100,6 +100,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if window == nil { makeWindow() }
         if !visible {
             if DrawZoom.backdrop && !prepareBackdrop() { fail("no backdrop layer on this macOS"); return }
+            // Whatever way a capture got here (Render warm when the engine was switched), it must not stay:
+            // each zoom-in cancels the idle stop, so it ran on and kept the recording dot (owner 2026-11-04).
+            if DrawZoom.backdrop && (stream != nil || starting) { idleStop?.cancel(); idleStop = nil; stopStream() }
             if !DrawZoom.backdrop { prepareCapturedOverlay() }
             if scaling.usesShader && !DrawZoom.backdrop { loadUpscaler() }
             visible = true
