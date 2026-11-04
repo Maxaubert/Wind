@@ -25,6 +25,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     static let shared = DrawZoom()
     /// On when the config selects the draw engine.
     nonisolated(unsafe) static var enabled = false
+    /// Backdrop (config engine "backdrop", owner 2026-11-04): the same overlay, but a CABackdropLayer
+    /// magnifies what WindowServer composites below it instead of a captured picture. No capture, so no
+    /// recording indicator and no Screen Recording permission. No pixels reach Wind, so no xBR: Nearest or
+    /// cubic. Everything else (the drawn cursor, prompts, the hand-over, the 1x pointer) is Render's.
+    nonisolated(unsafe) static var backdrop = false
+    private var backdropLayer: CALayer?
+    private var keepAlive: CADisplayLink?
+    private var nudge = false
     /// The engine failed this run (no permission, capture stopped, several displays): Wind stays on
     /// macOS's zoom until it restarts.
     nonisolated(unsafe) static var failed = false
@@ -91,14 +99,16 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         center = c; scale = s
         if window == nil { makeWindow() }
         if !visible {
-            if scaling.usesShader { loadUpscaler() }
+            if DrawZoom.backdrop && !prepareBackdrop() { fail("no backdrop layer on this macOS"); return }
+            if !DrawZoom.backdrop { prepareCapturedOverlay() }
+            if scaling.usesShader && !DrawZoom.backdrop { loadUpscaler() }
             visible = true
             DrawZoom.overlayUp = true
             DrawZoom.beat = CACurrentMediaTime()
             startWatchdog()
             idleStop?.cancel(); idleStop = nil
             // A warm stream already has the screen: show it at once (a cold start takes ~80 ms).
-            haveFrame = latest != nil
+            haveFrame = hasFrame
             pendingCapture = false
             if latest != nil {
                 if gpu { presentNow() }                 // the upscaled view, from its first frame
@@ -123,7 +133,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 }
             }
             shownAt = CACurrentMediaTime()
-            if stream == nil { startStream() }
+            if stream == nil && !DrawZoom.backdrop { startStream() }
+            if DrawZoom.backdrop { startKeepAlive() }
             startPromptWatch()
             // Zoomed in during a screenshot or sampler mode: hand over right away, not at the next poll.
             if PointerTakeover.shared.active { DispatchQueue.main.async { self.checkPrompts() } }
@@ -134,6 +145,67 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             }
         }
         layout()
+    }
+
+    /// The overlay clear with the backdrop in it, or nil if this macOS has no such layer.
+    private func prepareBackdrop() -> Bool {
+        if backdropLayer == nil, let cls = NSClassFromString("CABackdropLayer") as? CALayer.Type {
+            let b = cls.init()
+            guard b.responds(to: NSSelectorFromString("setZoom:")) else { return false }
+            b.setValue(true, forKey: "windowServerAware"); b.setValue(true, forKey: "enabled")
+            window?.contentView?.layer?.insertSublayer(b, at: 0)
+            backdropLayer = b
+        }
+        guard let b = backdropLayer else { return false }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        window?.isOpaque = false; window?.backgroundColor = .clear
+        window?.contentView?.layer?.backgroundColor = nil
+        b.isHidden = false; image.isHidden = true; metal.isHidden = true
+        CATransaction.commit()
+        return true
+    }
+
+    /// Back from the backdrop (the engine was switched): the overlay is an opaque picture again.
+    private func prepareCapturedOverlay() {
+        guard let b = backdropLayer, !b.isHidden else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        b.isHidden = true
+        window?.isOpaque = true; window?.backgroundColor = .black
+        window?.contentView?.layer?.backgroundColor = NSColor.black.cgColor
+        CATransaction.commit()
+    }
+
+    /// The backdrop's zoom about the layer's centre: a layer of side S at P shows the region of side
+    /// S (1 + 2z) around P, so the desktop point `center` sits at the screen centre with
+    /// z = (1/L - 1) / 2 and P = (C L - W/2) / (L - 1). re/2026-11-01-noslow-transform.md
+    private func placeBackdrop(_ W: CGFloat, _ H: CGFloat) {
+        guard let b = backdropLayer else { return }
+        let L = max(scale, 1.0002)
+        let px = (center.x * L - W / 2) / (L - 1), py = (center.y * L - H / 2) / (L - 1)
+        let side = 2 * max(abs(px), abs(W - px), abs(py), abs(H - py)) + 8
+        b.setValue((1 / L - 1) / 2, forKey: "zoom")
+        b.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        b.position = CGPoint(x: px, y: H - py)
+        b.magnificationFilter = scaling == .nearest ? .nearest : CALayerContentsFilter(rawValue: "cubic")
+    }
+
+    /// What is below the overlay reaches the screen only while the overlay commits: with it idle, a window
+    /// changing below showed at its 1x place, never magnified (re/2026-11-01-noslow-transform.md). The
+    /// tick sleeps with the pointer still, so a cursor nudge too small to see commits every refresh.
+    private func startKeepAlive() {
+        guard keepAlive == nil, let s = NSScreen.screens.first else { return }
+        let l = s.displayLink(target: self, selector: #selector(keepAliveTick))
+        l.add(to: .main, forMode: .common)
+        keepAlive = l
+    }
+
+    @objc private func keepAliveTick() {
+        guard visible else { keepAlive?.invalidate(); keepAlive = nil; return }
+        if CACurrentMediaTime() - lastTickAt < 0.012 { return }     // the tick commits
+        nudge.toggle()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        cursorLayer.position.x += nudge ? 0.001 : -0.001
+        CATransaction.commit()
     }
 
     /// The overlay shows a picture: hide the real cursor, Wind draws it from now on.
@@ -165,7 +237,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// The capture stream is running (tests).
     var capturing: Bool { stream != nil }
     /// A captured frame is at hand, so the overlay can show the zoom from its first frame.
-    var hasFrame: Bool { latest != nil }
+    var hasFrame: Bool { latest != nil || DrawZoom.backdrop }
     /// The overlay shows a picture and Wind draws the cursor in it (the real one is render's).
     var drawsCursor: Bool { visible && haveFrame }
 
@@ -213,6 +285,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     func hide() {
         guard visible else { return }
         visible = false
+        keepAlive?.invalidate(); keepAlive = nil
         DrawZoom.overlayUp = false
         window?.orderOut(nil)
         SkyLight.forceHidden = false
@@ -374,7 +447,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         } else if !prompt && DrawZoom.handedOver {
             // Back only with a fresh frame at hand, so the overlay shows the zoom at once (a cold start
             // takes ~100 ms; the first frame calls this again).
-            if latest == nil {
+            if !hasFrame {
                 if stream == nil && !starting {
                     Log.info("draw engine: it is gone; capturing again before drawing")
                     scheduleIdleStop()                  // lets startStream keep the stream while not drawing
@@ -531,7 +604,11 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         CATransaction.begin(); CATransaction.setDisableActions(true)
         cursorLayer.magnificationFilter = activeScaling == .nearest ? .nearest : .linear   // xBR without its pass is Nearest
         metal.frame = CGRect(x: 0, y: 0, width: W, height: H)
-        if gpu {
+        if DrawZoom.backdrop {
+            placeBackdrop(W, H)
+            crossRoot.isHidden = crosshair == nil
+            if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
+        } else if gpu {
             // Wind's own pass draws a screen-sized picture into the Metal layer (shown by show()). The view
             // moves with the next pass, the crosshair with it (drawOverlay at the tick).
         } else {
@@ -631,7 +708,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     }
 
     private func startStream() {
-        guard stream == nil, !starting, let win = window else { return }
+        guard stream == nil, !starting, !DrawZoom.backdrop, let win = window else { return }
         starting = true
         let windowID = CGWindowID(win.windowNumber)
         generation += 1
@@ -778,7 +855,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var upscalerLoading = false
     private var upscalerFailed = false
     /// Wind's own pass draws the picture.
-    var gpu: Bool { scaling.usesShader && upscaler != nil }
+    var gpu: Bool { scaling.usesShader && upscaler != nil && !DrawZoom.backdrop }
     /// The filter actually in use (xBR falls back to Nearest without Metal).
     var activeScaling: RenderScaling { scaling.usesShader && !gpu ? .nearest : scaling }
     private var captureSeq = 0, encodedSeq = -1
@@ -797,7 +874,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     func setScaling(_ s: RenderScaling) {
         guard s != scaling else { return }
         scaling = s
-        if s.usesShader && DrawZoom.enabled { loadUpscaler() }
+        if s.usesShader && DrawZoom.enabled && !DrawZoom.backdrop { loadUpscaler() }
         if !gpu { inFlight = nil; drawnView = nil; encodedView = nil; upscaler?.release(); publishCapView(nil, size: .zero, px: 1) }
         Log.info("render scaling: \(s.label)\(s.usesShader && !gpu ? " (Nearest until Wind's Metal pass is ready)" : "")")
         refreshPicture()

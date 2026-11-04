@@ -1070,3 +1070,21 @@ its tick. `scripts/hitch_truth.py` pans at 3x while apps open and quit, running 
 - Worst gap in `hitch_truth.py`: 66 ms -> 25 ms, no `slow present`, no recapture; `pan_truth.py` late ticks 10-15 -> 0. What is left comes from WindowServer being
   busy at those moments: 10-17 ms in `CATransaction.commit`, and 20-25 ms gaps with nothing of Wind's
   running (the display link's callback itself came late). Not removable from Wind without moving the tick off the main thread.
+
+## Backdrop engine (config `engine = "backdrop"`, prototype, owner 2026-11-04)
+Why: Render's capture brings macOS's recording indicator, a WindowServer window (`StatusIndicator`, 28x28, top right) stacked
+above the overlay, so it stays unmagnified on the zoomed view. It cannot be covered: its space is level 800 and anything above
+799 needs `com.apple.private.skylight.privacy-indicator`. The only way to have no dot is not to capture.
+- `DrawZoom.backdrop`: Render's overlay made clear, with a `CABackdropLayer` magnifying what WindowServer composites below
+  (`zoom = (1/L - 1)/2`, layer centre `(C L - W/2)/(L - 1)`). The drawn cursor, ClearCursor, prompts, hand-over and the 1x pointer
+  are Render's. No stream, no Screen Recording, no `hasFrame` wait. No class or key: falls back to macOS's zoom.
+- No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
+- What is below reaches the screen only while the overlay commits, so `keepAliveTick` nudges the cursor layer 0.001 pt on every
+  refresh the tick does not commit. Cost, WindowServer CPU with the view still at 3x on a busy desktop (1x about 34-43%): Backdrop 59%,
+  Render 43%, Transform 33%.
+- ScreenCaptureKit never shows the magnification: `tools/cursorchurn/dispcap` (CGDisplayStream) does, and shows the indicator itself.
+  `scripts/backdrop_truth.py`: no indicator or capture, stripes at the level, the point at the centre, content changing below an idle overlay.
+- `WIND_ENGINE=backdrop` suites: e2e_hover, e2e_focus, e2e_screenshot, e2e_settings_mouse pass. e2e_draw and e2e_mouse fail only on checks of
+  capture, xBR and macOS's speed, on Transform sections the override forces (same with `WIND_ENGINE=draw`), and in one of two runs Inspect's
+  crosshair (89 pt against 69 pt).
+- Not checked: HDR, DRM video, capture-protected windows, Spaces and full-screen apps, and what the panel itself shows (software only).

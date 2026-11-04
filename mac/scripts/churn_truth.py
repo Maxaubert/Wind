@@ -16,6 +16,7 @@ import windtest as W
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--target", default="churn")
+ap.add_argument("--engine", default="draw")
 ap.add_argument("--secs", type=float, default=5)
 ap.add_argument("--report-ms", type=int, default=1)
 ap.add_argument("--limit", type=float, default=0.2)
@@ -42,7 +43,7 @@ if not os.path.exists(SAMP):
     with open(SAMP + ".swift", "w") as f: f.write(SRC)
     subprocess.run(["swiftc", "-O", SAMP + ".swift", "-o", SAMP], check=True, capture_output=True)
 
-W.relaunch_with_channel(direct=True, extra={"engine": "draw", "cursor": "wind", "renderScaling": 1})
+W.relaunch_with_channel(direct=True, extra={"engine": a.engine, "cursor": "wind", "renderScaling": 1})
 vm = subprocess.Popen(["sudo", os.path.join(W.ROOT, "tools/vmouse/vmouse")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse not ready")
 def vmc(cmd): vm.stdin.write(cmd + "\n"); vm.stdin.flush(); vm.stdout.readline()

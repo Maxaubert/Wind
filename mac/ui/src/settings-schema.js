@@ -99,7 +99,7 @@ export const groups = [
           showIf: { key: 'engine', eq: 'draw' } },
         // Switches live; Wind falls back to Transform (macOS's zoom) when it cannot capture the screen.
         { key: 'engine', type: 'select', label: 'Engine', keywords: ['renderer', 'render', 'transform', 'mode', 'model', 'backend', 'method', 'magnifier', 'capture', 'draw', 'system zoom', 'macos zoom', 'accessibility zoom'],
-          desc: 'How the screen is zoomed', options: ['draw', 'zoom'], optionLabels: { draw: 'Render', zoom: 'Transform' }, def: 'zoom' },
+          desc: 'How the screen is zoomed', options: ['draw', 'backdrop', 'zoom'], optionLabels: { draw: 'Render', backdrop: 'Backdrop', zoom: 'Transform' }, def: 'zoom' },
       ] },
     ] },
 
