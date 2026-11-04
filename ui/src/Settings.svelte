@@ -437,6 +437,9 @@
   @keyframes pagein { from { opacity: 0; } }
   .tail { height: 110px; padding: 0; }   /* clearance so the capsule never covers the last row */
   .main[data-page="tray"] .tail { height: 120px; }   /* k01: the scroller pads 120px under the last card */
+  /* About: its one card sits centred in the space under the banner, not right up against it (as on the Mac, #531). */
+  .main[data-page="about"] .page { min-height: calc(100% - 110px); display: flex; flex-direction: column; }
+  .main[data-page="about"] .page > :global(.card) { margin-block: auto; }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>
