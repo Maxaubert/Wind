@@ -4,7 +4,7 @@
   // The two item lists of the "Tray menu" tab: Sliders (at most four on) and Toggles. The
   // Performance switch above them is an ordinary schema row. Each change writes that list's two ini
   // keys through onChange(key, value); the page owns nothing else. Spec 2026-10-01-tray-flyout.
-  import { iconSvg } from '../design/icons.js';
+  import { iconSvg } from '$shared/design/icons.js';
   import DragList from './DragList.svelte';
   import { parseList, serialiseList, onCount, MAX_SLIDERS } from './trayModel.js';
   let { values = {}, onChange = () => {}, announce = () => {} } = $props();

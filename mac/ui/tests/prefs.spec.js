@@ -3,7 +3,7 @@
 // Preferences page on the Mac: the four built-in dark themes (uiPalette), applied at once and loaded
 // at launch, and the General card. Profiles are gone on the Mac.
 import { test, expect } from '@playwright/test';
-import { themes } from '../src/design/themes.js';
+import { themes } from '../../../ui-shared/src/design/themes.js';
 import { mockHost, open, go, row, sent, css } from './mock.js';
 
 const app = (page) => page.locator('.app');

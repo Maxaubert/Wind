@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import Foundation
 
 // The Metal source of the Render engine's xBR kernels, compiled at runtime (Upscaler): the

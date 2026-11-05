@@ -4,7 +4,7 @@
   // One modal prompt. buttons: [{ label, kind: 'primary' | 'danger' | '', onClick }]. Esc calls onEsc (omit to
   // make Esc do nothing). Focus moves into the box and Tab is held there by the dialog action.
   // checkLabel (optional) adds a labelled checkbox between the text and the buttons; bind:checked reads it.
-  import { dialog } from '../lib/dialog.js';
+  import { dialog } from '$shared/lib/dialog.js';
   let { id = 'p', title = '', text = '', buttons = [], onEsc = undefined, checkLabel = '', checked = $bindable(false) } = $props();
 </script>
 

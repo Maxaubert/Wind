@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import AppKit
 
 // macOS modes that take the pointer over: screenshot selection (Cmd+Shift+4 and its window/camera mode,

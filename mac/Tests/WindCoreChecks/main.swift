@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import Foundation
 
 // A tiny test runner: Command Line Tools ship neither XCTest nor the swift-testing macros.
@@ -60,6 +62,10 @@ let sh = ShotTests()
 run("hotkeysFollowTheUsersSettings", sh.hotkeysFollowTheUsersSettings)
 run("rectRoundsToNearestPoints", sh.rectRoundsToNearestPoints)
 run("defaultsFixtureIsCurrent", DefaultsFixture.isCurrent)
+let sf = SharedFixtureTests()
+run("sharedViewMathCases", sf.viewMathCases)
+run("sharedZoomControllerCases", sf.zoomControllerCases)
+run("sharedViewOwnerCases", sf.viewOwnerCases)
 
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Generates src/tray_app/flyout_palettes.h (the tray flyout's 4 themes, dark only since 0.20.0 / #324) from the same mockup palettes
-// as ui/tools/gen-themes.cjs, evaluating the tokens tray08.css derives (all color-mix(in srgb) done here):
+// as ui-shared/tools/gen-themes.cjs, evaluating the tokens tray08.css derives (all color-mix(in srgb) done here):
 //   off = chip, offh = fg 6% over chip, ton = segon || swon (solid), tonh = segon || fg 12% over swon,
 //   tonic = segonfg || accenton, scrim = bg at 62%, segline = card (the 1px gap shows the group's card).
 //
 //   node tools/gen-flyout-palettes.cjs [mockup-ia-dir]
 //
 // WindConfig paints its window background from kPalettes[i].dark.menu before the page loads; tests/test_flyout_palettes.cpp
-// checks it against each theme's --bg in ui/src/design/themes.css (gen-themes.cjs), so rerun both generators together.
+// checks it against each theme's --bg in ui-shared/src/design/themes.css (gen-themes.cjs), so rerun both generators together.
 // Wind grey keeps the values the flyout already drew (docs/design/tray-2026-10/j01), like Settings keeps today's tokens.
 const fs = require('fs');
 const path = require('path');

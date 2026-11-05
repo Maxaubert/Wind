@@ -3,9 +3,9 @@
 <script>
   import { onMount } from 'svelte';
   import { setConfig, setConfigPersist, windowControl } from './bridge.js';
-  import { iconSvg } from './design/icons.js';
+  import { iconSvg } from '$shared/design/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
-  import { normalizePalette } from './design/themes.js';
+  import { normalizePalette } from '$shared/design/themes.js';
   export let onDone;
   // The chosen theme (#359), from the host's first-paint config like Settings. A first run has none: Wind grey.
   const palette = normalizePalette(window.__windInit && window.__windInit.values && window.__windInit.values.uiPalette);

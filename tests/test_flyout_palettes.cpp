@@ -16,14 +16,14 @@ using namespace wind::Flyout;
 
 // The generated C++ themes and the generated Settings themes must not drift apart: WindConfig paints its
 // window with kPalettes[i].dark.menu before the page loads, so it must equal that theme's --bg in
-// ui/src/design/themes.css (both generators read the same mockup palettes).
+// ui-shared/src/design/themes.css (both generators read the same mockup palettes).
 TEST_CASE("flyout palettes: each menu background equals the Settings --bg of the same theme") {
     std::string here = __FILE__;
     const size_t cut = here.find_last_of("/\\");
     std::vector<std::string> tries;
-    if (cut != std::string::npos) tries.push_back(here.substr(0, cut) + "/../ui/src/design/themes.css");
+    if (cut != std::string::npos) tries.push_back(here.substr(0, cut) + "/../ui-shared/src/design/themes.css");
     for (const char* up : { "", "../", "../../", "../../../" })
-        tries.push_back(std::string(up) + "ui/src/design/themes.css");
+        tries.push_back(std::string(up) + "ui-shared/src/design/themes.css");
     std::ifstream f;
     for (const std::string& p : tries) { f.open(p); if (f.good()) break; f.clear(); }
     REQUIRE(f.good());

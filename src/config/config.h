@@ -70,6 +70,7 @@ struct Config {
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.75;      // 0.25-4.0
     double zoomOutSpeed = 1.75;      // 0.25-4.0
+    double wheelZoomSpeed = 0.6;     // 0.1-3: how far a wheel notch zooms, relative to the hold speed (as on the Mac)
     int    zoomTrace    = 0;         // 1 = log a zoom-in/zoom-out timeline per zoom (#310, diagnostics)
     // Hitch recorder (#361): log every long zoomed frame with its classified cause, plus a
     // per-minute summary. On by default: the record costs ~0.5 us per tick and logs nothing on a

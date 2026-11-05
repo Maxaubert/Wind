@@ -198,7 +198,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 
 | Keys | Meaning |
 |---|---|
-| `maxLevel` (30), `zoomInSpeed` and `zoomOutSpeed` (1.75), `zoomEaseOutMs` (115), `smoothZoom*` | Range and feel of the zoom |
+| `maxLevel` (30), `zoomInSpeed` and `zoomOutSpeed` (1.75), `wheelZoomSpeed` (0.6, a notch relative to the hold speed), `zoomEaseOutMs` (115), `smoothZoom*` | Range and feel of the zoom; the wheel glides to its target on a 250 ms spring (`ZoomController`, as on the Mac) |
 | `cursorSensitivity` (1.0), `panSpeed` (1.0), `panGlideMaxPx` (0) | Mouse and arrow-key pan speed; the pan glide's distance, which also sets its ease (#430, #434) |
 | `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |

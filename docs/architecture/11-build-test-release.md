@@ -81,6 +81,13 @@ headlessly, so the unit tests are the only verification loop that runs everywher
   a slider may be narrower than the core's clamp only when listed there with a reason. After an
   intended change to a default or a clamp, regenerate the fixture with
   `set WIND_UPDATE_FIXTURES=1 && build.bat test` and review its diff.
+- `tests/fixtures/shared/` holds the cases Wind shares with Wind for Mac, whose view geometry, zoom
+  controller and view owner are Swift ports of `src/track` and `src/zoom`: `tests/test_shared_fixtures.cpp`
+  runs them here, `mac/Tests/WindCoreChecks/SharedFixtures.swift` on the Mac (`mac.yml` runs on
+  changes to the folder). Rows are tagged `all`, `win` or `mac`; deliberate differences (the wheel
+  glide, keyboard pan speed at low zoom, `setLevel` during the ease-out) are per-platform rows. The
+  `all` and `win` values come from the C++ code: the same `WIND_UPDATE_FIXTURES=1` run rewrites them,
+  then the Mac has to match.
 
 **UI suite.** `ui/tests/*.spec.js` are Playwright specs, run with `npx playwright test` in `ui/`
 (the config starts the Vite server). Each spec installs a fake `window.chrome.webview` that answers
@@ -98,8 +105,10 @@ locally too when anything under `ui/` changes.
 `Copyright (c) 2026 Max Aubert. All rights reserved.` and `Proprietary
 source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary`, in
 the file's own comment syntax (`//`, `#`, `;`, `rem` after `@echo off`, `/* */`, `<!-- -->` after
-`<!doctype html>`). `tools/check_copyright.ps1` fails when a covered file lacks the SPDX line in its
-first 5 lines; it is the first gate in `build-installer`, and `-List` prints the files it covers.
+`<!doctype html>`, `#` after a `#!` line, `//` after `// swift-tools-version` in `Package.swift`).
+`tools/check_copyright.ps1` fails when a covered file lacks the SPDX line in its first 5 lines; it is
+the first gate in `build-installer` and in `mac.yml` (Wind for Mac's Swift, Objective-C and shell
+files are covered too), and `-List` prints the files it covers.
 It skips third-party code (`third_party/`, `upscale_nis.h`, `upscale_shaders.h`, which keep their
 upstream notices), generated files (`flyout_palettes.h`, `themes.css`, `themes.js`, `over.nsh`),
 `docs/` and `tests/fixtures/`. A new source file needs the header; a new generated or vendored

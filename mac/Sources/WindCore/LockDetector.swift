@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import Foundation
 
 // Detects a game that has taken the pointer for mouse-look or for its own drawn cursor. macOS

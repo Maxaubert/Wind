@@ -9,6 +9,7 @@
         pwsh -File tools\check_copyright.ps1 -List    print the files the rule covers
 
     Covered: *.cpp *.h *.rc *.svelte *.js *.mjs *.cjs *.ts *.css *.ps1 *.py *.nsi *.nsh *.bat,
+    *.swift *.m *.sh (Wind for Mac; mac.yml runs this gate too),
     *.yml / *.yaml under .github/, and *.html under ui/ and installer/.
     Not covered: third-party code (third_party/, and the files in $ThirdParty below, which carry
     their own upstream copyright), generated files ($Generated: their generator owns the text),
@@ -16,7 +17,8 @@
     (Markdown, JSON, text, manifests, images, binaries).
 
     Header placement per language (see docs/architecture/11-build-test-release.md): line 1,
-    except after '@echo off' in .bat and after '<!doctype html>' in .html.
+    except after '@echo off' in .bat, after '<!doctype html>' in .html, after the '#!' line in .sh
+    and after '// swift-tools-version' in Package.swift.
 #>
 param([switch]$List)
 
@@ -25,15 +27,14 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Marker = 'SPDX-License-Identifier: LicenseRef-Wind-Proprietary'
 
 $Extensions = '.cpp', '.h', '.rc', '.svelte', '.js', '.mjs', '.cjs', '.ts', '.css', '.ps1', '.py',
-              '.nsi', '.nsh', '.bat'
+              '.nsi', '.nsh', '.bat', '.swift', '.m', '.sh'
 $ExcludedPrefixes = 'third_party/', 'docs/', 'tests/fixtures/', 'build/', 'dist/', 'ui/dist/',
                     'node_modules/', 'ui/node_modules/', 'mac/docs/', 'mac/build/', 'mac/ui/dist/', 'mac/ui/node_modules/'
 # Ports of third-party code that keep the upstream copyright (THIRD-PARTY-NOTICES.md).
 $ThirdParty = 'src/render/upscale_nis.h', 'src/render/upscale_shaders.h'
 # Written by a generator; the header would be lost on the next regeneration.
-$Generated = 'src/tray_app/flyout_palettes.h', 'ui/src/design/themes.css',
-             'ui/src/design/themes.js', 'installer/over.nsh',
-             'mac/ui/src/design/themes.css', 'mac/ui/src/design/themes.js'
+$Generated = 'src/tray_app/flyout_palettes.h', 'ui-shared/src/design/themes.css',
+             'ui-shared/src/design/themes.js', 'installer/over.nsh'
 
 function Test-Covered([string]$path) {
     foreach ($p in $ExcludedPrefixes) { if ($path.StartsWith($p)) { return $false } }

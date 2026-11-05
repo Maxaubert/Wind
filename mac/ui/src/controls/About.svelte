@@ -2,7 +2,7 @@
      Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // About page body: logo, name, tagline and version (no repo link on the Mac: Wind for Mac is private).
-  import { iconSvg } from '../design/icons.js';
+  import { iconSvg } from '$shared/design/icons.js';
   let { version = '' } = $props();
 </script>
 

@@ -1329,6 +1329,7 @@ static TickInput ResolveInputAndZoom(TickState& t, double dt) {
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
+    t.zoom.setWheelSpeed(t.cfg.wheelZoomSpeed);
     // The release glide runs at both sampling modes (#439). With the high resolution cursor it stops
     // just before its slow tail (EaseOutShouldStop below): the full tail lands in ladder hops, which
     // the field reads as shake (2026-10-10). Turned off in #427 because the tail also showed the image

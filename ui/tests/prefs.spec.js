@@ -5,7 +5,7 @@
 // implements the session and profile messages.
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { themes } from '../src/design/themes.js';
+import { themes } from '../../ui-shared/src/design/themes.js';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -398,8 +398,8 @@ test('Pin to taskbar (#436): off by default, writes trayPinned, never an unsaved
 
 test('prefs files contain no em-dash', () => {
   const dash = String.fromCharCode(0x2014);
-  for (const f of ['../src/prefs/ThemePicker.svelte', '../src/prefs/ProfilePicker.svelte', '../src/prefs/NewProfileDialog.svelte',
-    '../src/prefs/profileName.js', '../src/design/themes.css', '../src/design/themes.js',
-    '../tools/gen-themes.cjs'])
+  for (const f of ['../../ui-shared/src/prefs/ThemePicker.svelte', '../src/prefs/ProfilePicker.svelte', '../src/prefs/NewProfileDialog.svelte',
+    '../src/prefs/profileName.js', '../../ui-shared/src/design/themes.css', '../../ui-shared/src/design/themes.js',
+    '../../ui-shared/tools/gen-themes.cjs'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8'), f).not.toContain(dash);
 });

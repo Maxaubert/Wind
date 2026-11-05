@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import Foundation
 
 // Port of Wind's ZoomController (src/zoom/zoom_controller.*): the zoom level as a function of the

@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Builds tools/twin/TwinA.app and TwinB.app: two plain window apps (separate bundle ids, so Cmd+Tab
 # switches between them) for scripts/e2e_draw.py's app-switch check. Launch the binary directly:
 # Contents/MacOS/Twin <title> <x> <seconds> [hide].

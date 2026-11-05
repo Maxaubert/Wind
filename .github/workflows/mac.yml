@@ -11,13 +11,16 @@ on:
     branches: [ main ]
     paths:
       - 'mac/**'
+      - 'ui-shared/**'
       - '!mac/**.md'
       - '!mac/docs/**'
       - 'LICENSE'
       - 'THIRD-PARTY-NOTICES.md'
+      - 'tests/fixtures/shared/**'
       - '.github/workflows/mac.yml'
   pull_request:
-    paths: [ 'mac/**', '.github/workflows/mac.yml' ]
+    # The licence and notices ship inside the Mac zip too, so a PR that changes them runs these checks.
+    paths: [ 'mac/**', 'ui-shared/**', 'tests/fixtures/shared/**', '.github/workflows/mac.yml', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'tools/check_copyright.ps1' ]
   workflow_dispatch:
 
 permissions:
@@ -38,6 +41,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Same provenance gate as the Windows build: every first-party source file carries the header.
+      - name: Copyright headers
+        working-directory: .
+        shell: pwsh
+        run: ./tools/check_copyright.ps1
       - name: Unit checks
         run: swift run wind-checks
       - name: Settings UI (rules and Playwright, WebKit + Chromium)

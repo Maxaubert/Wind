@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import AppKit
 
 // Wind's own cursor for macOS's zoom (config cursor = "wind"). The zoom shows whole desktop
