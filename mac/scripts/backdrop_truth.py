@@ -102,6 +102,19 @@ p.wait(timeout=7); time.sleep(1.2)
 s = W.ctl("state"); W.check("handover off: the cursor drawn again after the lock screen", s["drawn"] and s.get("realCursorClear"), f"drawn {s['drawn']} clear {s.get('realCursorClear')}")
 W.set_config(handover=None); W.ctl("level 1"); time.sleep(0.5)
 
+# Handover off and a loginwindow prompt with nothing locked (Restart, owner 2026-11-04): not the lock screen, so
+# the drawn cursor stays and the real one stays out of sight. A test window stands in: never the real prompt,
+# which restarts the Mac by itself after 60 s.
+W.kill_all_wind()
+os.environ.pop("WIND_FAKE_LOCK"); os.environ["WIND_FAKE_LOGIN_DIALOG"] = "fakeprompt"
+subprocess.Popen([os.path.join(W.ROOT, "build/test/Wind.app/Contents/MacOS/Wind")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+time.sleep(2); W.set_config(handover=False); time.sleep(0.8)
+W.ctl("warp 960 500"); time.sleep(0.3); W.ctl(f"level {a.level}"); time.sleep(1.5)
+p = subprocess.Popen([PROMPT, "4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(1.5)
+s = W.ctl("state")
+W.check("handover off: a login prompt with nothing locked keeps the drawn cursor", s["drawn"] and not s["handedOver"] and s.get("realCursorClear") and not s["realCursorVisible"], f"drawn {s['drawn']} clear {s.get('realCursorClear')} real {s['realCursorVisible']}")
+p.wait(timeout=7); W.set_config(handover=None); W.ctl("level 1"); time.sleep(0.5)
+
 # Switched from Render while zoomed, the capture running: it must end, and the dot with it (owner 2026-11-04).
 W.set_config(engine="draw"); time.sleep(1); W.ctl("level 3"); time.sleep(2)
 s = W.ctl("state"); W.check("Render captures, as the switch's starting point", s["drawCapturing"] and indicators() > 0, f"capturing {s['drawCapturing']}, {indicators()} indicators")

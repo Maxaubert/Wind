@@ -345,10 +345,24 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private static let lockOwners: Set<String> = {
         var s: Set<String> = ["loginwindow", "ScreenSaverEngine"]
         #if WIND_TEST_CHANNEL
-        if let v = ProcessInfo.processInfo.environment["WIND_FAKE_LOCK"] { s.insert(v) }   // a test window stands in for it
+        for k in ["WIND_FAKE_LOCK", "WIND_FAKE_LOGIN_DIALOG"] { if let v = ProcessInfo.processInfo.environment[k] { s.insert(v) } }   // a test window stands in
         #endif
         return s
     }()
+
+    /// Owners whose windows are not always the lock screen.
+    private static let loginDialogOwners: Set<String> = {
+        var s: Set<String> = ["loginwindow"]
+        #if WIND_TEST_CHANNEL
+        if let v = ProcessInfo.processInfo.environment["WIND_FAKE_LOGIN_DIALOG"] { s.insert(v) }   // a test window stands in for one
+        #endif
+        return s
+    }()
+
+    /// The session really is locked, whatever windows are up.
+    private static var screenLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
 
     /// Whether something is on screen the drawn zoom cannot show right: a window stacked above the
     /// overlay (it would show twice, unzoomed on top of its magnified copy), a window that opts out
@@ -380,7 +394,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
             if ignore.contains(owner) { continue }
             let id = w[kCGWindowNumber as String] as? Int ?? 0
-            if lockOwners.contains(owner) { return (id, true, true) }
+            if lockOwners.contains(owner) {
+                // loginwindow also shows the Restart and Shut Down prompts with nothing locked. Taken for the
+                // lock screen with Handover off, they gave the real cursor back: the tiny cursor beside
+                // the magnified view (owner 2026-11-04). Below the overlay such a prompt is simply drawn;
+                // above it the drawn cursor cannot reach it, and the real one has to work.
+                if handoverAllowed || !loginDialogOwners.contains(owner) || screenLocked || aboveOverlay { return (id, true, true) }
+                continue
+            }
             if !handoverAllowed { continue }
             if sharing == 0 { return (id, false, false) }
             // Above the overlay (listed before it). With the overlay not on screen, judge by level:
