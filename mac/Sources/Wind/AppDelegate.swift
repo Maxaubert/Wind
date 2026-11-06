@@ -374,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // transparent one (read back, so a set refused over the Dock shows up as visible).
             // Shown alone = what SwiftUI hover checks (it must stay true while Wind draws the cursor).
             "realCursorVisible": SkyLight.realCursorVisible && !ClearCursor.shared.systemIsClear,
-            "realCursorShown": SkyLight.realCursorVisible, "tooltipFlashes": TooltipNudge.shared.flashes, "realCursorClear": ClearCursor.shared.isActive,
+            "realCursorShown": SkyLight.realCursorVisible, "realCursorClear": ClearCursor.shared.isActive,
             "ownsCursor": SkyLight.ownsCursor,
             "clearCursorCounts": ClearCursor.shared.counts,
             "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
