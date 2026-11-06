@@ -17,6 +17,7 @@ import windtest as W
 ap = argparse.ArgumentParser()
 ap.add_argument("--target", default="churn")
 ap.add_argument("--engine", default="draw")
+ap.add_argument("--mode", default="", help="cursorchurn mode: hover (a shape change per stripe, set once)")
 ap.add_argument("--secs", type=float, default=5)
 ap.add_argument("--report-ms", type=int, default=1)
 ap.add_argument("--limit", type=float, default=0.2)
@@ -52,7 +53,7 @@ churn = None
 if a.target == "churn":
     tool = os.path.join(W.ROOT, "tools/cursorchurn/cursorchurn")
     subprocess.run([os.path.join(W.ROOT, "tools/cursorchurn/build.sh")], check=True, stdout=subprocess.DEVNULL)
-    churn = subprocess.Popen([tool, str(a.secs + 12)], stdout=subprocess.PIPE, text=True)
+    churn = subprocess.Popen([tool, str(a.secs + 12)] + ([a.mode] if a.mode else []), stdout=subprocess.PIPE, text=True)
     x, y, w, h = map(int, churn.stdout.readline().split())
     cx, cy = x + w // 2, y + h // 2
 else:
@@ -113,11 +114,11 @@ W.ctl("level 1"); time.sleep(0.5); W.ctl(f"warp {px + 300} {py - 60}"); time.sle
 events.clear()
 for k in range(30): vmc(f"move {2 if k % 2 else -2} 0 20 {a.report_ms}")
 vmc(f"move 0 12 10 {a.report_ms}")                # one quick move onto the panel, about 82 pt, then the hand stops
-stopped = time.time(); time.sleep(2.5)
-print("stopped at", W.ctl("state")["pointer"], "panel top", py)
+stopped = time.time(); at_stop = W.ctl("state")["pointer"]; time.sleep(2.5)
+print("stopped at", at_stop, "panel top", py)
 got = [t - stopped for t, l in events if l == "SUI hover true"]
 W.check("render: hover comes after arriving and stopping, with no further move", bool(got), f"{got[0]:+.2f} s from stopping" if got else "none in 2.5 s")
-s = W.ctl("state"); W.check("render: the pointer stayed put", abs(s["pointer"][1] - (py + 22.5)) < 3, f"pointer {s['pointer']}")
+s = W.ctl("state"); W.check("render: the pointer stayed put", abs(s["pointer"][0] - at_stop[0]) + abs(s["pointer"][1] - at_stop[1]) < 0.5, f"pointer {at_stop} -> {s['pointer']}")
 pp.kill(); W.ctl("level 1")
 if churn: churn.kill()
 vm.stdin.close()

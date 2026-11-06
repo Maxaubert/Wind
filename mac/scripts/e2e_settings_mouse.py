@@ -94,7 +94,8 @@ while time.time() - t0 < 4.8:                     # across the sidebar and the r
     vmc(f"move {4 if (k // 25) % 2 == 0 else -4} 1 5 8"); k += 1
 n, shown, real = map(int, sp.stdout.read().split())
 s = ctl("state"); own1 = (s.get("clearCursorCounts", []) + [0, 0, 0])[:3]
-check("render: no real cursor over the zoomed Settings window", n > 400 and shown > n * 0.9 and real <= 2 and s["drawn"],
+# Hidden while the pointer moves, transparent at rest (ClearCursor, 2026-11-06): the shown share no longer says anything.
+check("render: no real cursor over the zoomed Settings window", n > 400 and real <= 2 and s["drawn"],
       f"real cursor in {real}/{n} samples (shown transparent {shown - real}), drawn {s['drawn']}")
 check("render: the page's cursor sets are taken by Wind", own1[2] > own0[2], f"own sets {own0[2]} -> {own1[2]}")
 ctl("level 1"); time.sleep(0.5)
