@@ -770,9 +770,9 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   about 35 changes per run, 7 frames before (3-12), 3 with the hide first, 0.3 with both. Wind's CPU at 3x: 3.8% -> 3.9%.
 - Still not zero: in the owner's browser 88 sets a minute brought 5 flashes they saw (each set exposed 0.2 ms median, against a
   6.9 ms refresh). So the real cursor is now HIDDEN while the pointer moves and transparent only at rest (owner 2026-11-06):
-  the tap's first mouse move hides it (on `motionQueue`, sent before the app gets the event), and 0.15 s without moves shows it
+  the tap's first mouse move hides it (on `motionQueue`, sent before the app gets the event), and 0.06 s without moves shows it
   transparent again and posts the zero-distance move (`recheckHover`, marked so the tap ignores it). Apps set their cursor on
-  moves, so no set meets a shown cursor. SwiftUI hover comes about 0.1-0.15 s after the pointer stops; AppKit and web hover are
+  moves, so no set meets a shown cursor. SwiftUI hover comes about 0.06 s after the pointer stops (0.15 s until 2026-11-06; 60 and 40 ms both showed 0 frames in `glimpse_truth.py --pauses`, 60 keeps a margin for slow trackpad moves whose events come further apart); AppKit and web hover are
   unchanged. Event driven, no polling. `glimpse_truth.py`: 0 frames in 4 runs on both engines; `churn_truth.py` 0.00%.
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.

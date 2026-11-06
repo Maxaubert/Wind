@@ -8,13 +8,14 @@ tools/cursorchurn/curseen captures every frame WITH the cursor and finds the rea
 spot; Wind's drawn cursor is a magenta probe (WIND_CURSOR_PROBE) it skips. About 35 changes per sweep at 3x.
 PASS: at most --limit frames with the real cursor per engine, and none with no changes at all.
 usage: glimpse_truth.py [--engines backdrop,draw] [--limit 2]"""
-import argparse, os, subprocess, sys, time
+import argparse, os, random, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import windtest as W
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--engines", default="backdrop,draw")
 ap.add_argument("--limit", type=int, default=2)
+ap.add_argument("--pauses", action="store_true", help="stop for 20-200 ms between strokes, like a hand (rest and resume)")
 a = ap.parse_args()
 T = os.path.join(W.ROOT, "tools/cursorchurn")
 subprocess.run([T + "/build.sh"], check=True, stdout=subprocess.DEVNULL)
@@ -33,6 +34,7 @@ for eng in a.engines.split(","):
         t = time.time(); k = 0
         while time.time() - t < 4.8:
             vm.stdin.write(f"move {3 if (k // 8) % 2 == 0 else -3} 0 40 1\n"); vm.stdin.flush(); vm.stdout.readline(); k += 1
+            if a.pauses and k % 8 == 0: time.sleep(random.uniform(0.02, 0.2))
         out = cs.stdout.read().split(); frames, seen = int(out[1]), int(out[3])
         lim = 0 if mode == "none" else a.limit
         W.check(f"{eng}: real cursor frames, {'no cursor changes' if mode == 'none' else 'hover changes'}", frames > 250 and seen <= lim, f"{seen} of {frames} frames")

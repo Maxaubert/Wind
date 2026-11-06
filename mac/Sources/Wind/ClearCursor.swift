@@ -237,7 +237,13 @@ final class ClearCursor: @unchecked Sendable {
     // `restDelay` late, AppKit and web hover are unchanged. Event driven: the tap's mouse moves start it, a timer
     // ends it; no polling. The hide is sent from the tap before the event reaches the app, on its own queue.
     static let recheckMark: Int64 = 0x57494E44         // "WIND": Wind's own zero-distance move
-    static let restDelay = 0.15
+    // 60 ms (owner 2026-11-06, was 150): 60 and 40 both 0 frames with hand-like pauses (glimpse_truth --pauses).
+    static let restDelay: Double = {
+        #if WIND_TEST_CHANNEL
+        if let v = ProcessInfo.processInfo.environment["WIND_REST_MS"].flatMap(Double.init) { return v / 1000 }
+        #endif
+        return 0.06
+    }()
     private var motionHidden = false                    // under wsLock
     private var moving = false                          // under lock (short holds only)
     private let motionQueue = DispatchQueue(label: "wind.clearcursor.motion", qos: .userInteractive)
