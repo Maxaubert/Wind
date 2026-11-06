@@ -778,11 +778,12 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   asks `+[NSCursor _isHidden]` (= `!SLCursorIsVisible()`, scoreboard) once, when the pointer ENTERS the tooltip's rect,
   and starts no timer if hidden; later moves (Wind's recheck, a moved or delta-carrying recheck, a second recheck) never
   start one (each tried, `ipsw dyld disass`, 2026-11-06). Every entry happens mid-motion, hidden, so none came.
-  `TooltipNudge`: at every rest a 4x4 near-transparent nonactivating panel (`.screenSaver`, `sharingType = .none`)
-  sits under the pointer for 25 ms: the app sees the pointer leave and come back with the cursor shown, and the tooltip
-  starts (1.8 s after the stop against 1.4 s at 1x with an AX look first). Flashes shorter than ~20 ms miss (12 ms: 3 of
-  4, 8 ms: 1 of 4). A first version looked for AXHelp under the pointer first and flashed once per element; the owner saw
-  no flicker and asked for it at once on every stop (2026-11-07). Cost: the hover under the pointer is off for
+  `TooltipNudge`: at rest, one AX look (own queue, 0.25 s timeout) for AXHelp on the element under the pointer or its
+  first ancestors, frontmost app only (AppKit shows tooltips only for the active app). If there is one, a 4x4
+  near-transparent nonactivating panel (`.screenSaver`, `sharingType = .none`) sits under the pointer for 25 ms: the
+  app sees the pointer leave and come back with the cursor shown, and the tooltip starts (1.8 s after the stop against
+  1.4 s at 1x). Flashes shorter than ~20 ms miss (12 ms: 3 of 4, 8 ms: 1 of 4). Once per visit: the same element is not
+  flashed again until a hand move leaves its AX frame (`moved`, from the tap). Cost: that element's hover is off for
   one or two frames. Transform with Wind's cursor keeps the real cursor hidden throughout, so it has no tooltips (not
   changed). `scripts/tooltip_truth.py` (TipProbe.app: `open`ed so it is the active app; its log lives outside ~/Documents,
   where a LaunchServices-started app cannot write, `open` fails with -10810).
