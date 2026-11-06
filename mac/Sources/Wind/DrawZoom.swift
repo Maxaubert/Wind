@@ -412,6 +412,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         return nil
     }
 
+    /// "owner, layer, size" of a window for the log.
+    static func windowDescription(_ id: Int?) -> String {
+        guard let id, let l = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(id)) as? [[String: Any]], let w = l.first else { return "window \(id ?? 0)" }
+        let b = w[kCGWindowBounds as String] as? [String: Double] ?? [:]
+        return "\(w[kCGWindowOwnerName as String] as? String ?? "?") layer \(w[kCGWindowLayer as String] as? Int ?? 0) \(Int(b["Width"] ?? 0))x\(Int(b["Height"] ?? 0))"
+    }
+
     /// Is this window still on screen?
     static func windowOnScreen(_ id: Int) -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
@@ -487,7 +494,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
         if prompt && !DrawZoom.handedOver {
             Log.info(takeover ? "draw engine: screenshot or colour-sampler mode; macOS zoom shows it"
-                              : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay\(blocking?.above == true ? ", over Wind's cursor too" : "")); macOS zoom shows it")
+                              : "draw engine: a window the capture cannot show is up (lock screen, capture-protected or above the overlay\(blocking?.above == true ? ", over Wind's cursor too" : "")): \(DrawZoom.windowDescription(blocking?.id)); macOS zoom shows it")
             DrawZoom.handedOver = true
             handoverWindow = blocking?.id
             handoverAbove = blocking?.above == true ? blocking?.id : nil

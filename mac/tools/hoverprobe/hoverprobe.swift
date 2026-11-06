@@ -41,9 +41,11 @@ func banner() {
 }
 
 final class TV: NSView {
+    var mine: NSTrackingArea?
     override func updateTrackingAreas() {
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        if let t = mine { removeTrackingArea(t) }      // only ours: the tooltip's tracking area stays
+        mine = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(mine!)
     }
     override func mouseEntered(with e: NSEvent) { print("AK entered") }
     override func mouseExited(with e: NSEvent) { print("AK exited") }
@@ -61,14 +63,36 @@ func panel() {
     app.setActivationPolicy(.accessory)
     let at = CommandLine.arguments.dropFirst(2).compactMap { Double($0) }     // panel [x y]: bottom left
     let r = NSRect(x: at.first ?? 60, y: at.dropFirst().first ?? 60, width: 400, height: 120)
-    let p = NSPanel(contentRect: r, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+    let act = CommandLine.arguments.contains("active")
+    let p = act ? NSWindow(contentRect: r, styleMask: [.titled], backing: .buffered, defer: false)
+                : NSPanel(contentRect: r, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
     p.level = .statusBar; p.collectionBehavior = [.canJoinAllSpaces]
     p.title = "WINDTEST hover"
     let tv = TV(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
     let host = NSHostingView(rootView: HV()); host.frame = NSRect(x: 200, y: 0, width: 200, height: 120)
     p.contentView = NSView(frame: NSRect(origin: .zero, size: r.size))
     p.contentView!.addSubview(tv); p.contentView!.addSubview(host)
+    tv.toolTip = "WINDTEST tip"; tv.setAccessibilityElement(true); tv.setAccessibilityRole(.button); tv.setAccessibilityHelp("WINDTEST tip")                                       // AppKit tooltip: "TIP on"/"TIP off"
+    var tip = false, wasActive = false, lastDump = "", lastUnder = ""
+    Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+        let pid = Int(getpid())
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let on = list.contains { ($0[kCGWindowOwnerPID as String] as? Int) == pid && ($0[kCGWindowNumber as String] as? Int) != p.windowNumber }
+        if on != tip { tip = on; print(on ? "TIP on" : "TIP off"); fflush(stdout) }
+        if act {
+            let all = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []).filter { ($0[kCGWindowOwnerPID as String] as? Int) == pid }
+            let d = all.map { "\($0[kCGWindowNumber as String] ?? 0)/L\($0[kCGWindowLayer as String] ?? 0)/on\($0[kCGWindowIsOnscreen as String] ?? 0)" }.joined(separator: " ")
+            if d != lastDump { lastDump = d; print("WINS", d, NSApp.windows.map { "\(type(of: $0)):\($0.isVisible)" }) }
+        }
+        if act {
+            let n = NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+            let u = n == p.windowNumber ? "own" : "other \(n)"
+            if u != lastUnder { lastUnder = u; print("UNDER", u) }
+        }
+        if act, NSApp.isActive != wasActive { wasActive = NSApp.isActive; print("ACTIVE", wasActive) }
+    }
     p.orderFrontRegardless()
+    if CommandLine.arguments.contains("active") { app.setActivationPolicy(.regular); app.activate(ignoringOtherApps: true); p.level = .normal; p.makeKeyAndOrderFront(nil) }
     let h = NSScreen.screens[0].frame.height
     print("panel", Int(r.minX), Int(h - r.maxY), Int(r.width), Int(r.height))
     app.run()

@@ -254,9 +254,15 @@ final class ClearCursor: @unchecked Sendable {
         return t
     }()
 
+    static let motionHide: Bool = {
+        #if WIND_TEST_CHANNEL
+        if ProcessInfo.processInfo.environment["WIND_MOTION_HIDE"] == "0" { return false }
+        #endif
+        return true
+    }()
     /// Main thread (the event tap), on every mouse move or drag: cheap when already moving.
     func pointerMoved() {
-        guard isActive else { return }
+        guard isActive, ClearCursor.motionHide else { return }
         restTimer.schedule(deadline: .now() + ClearCursor.restDelay, leeway: .milliseconds(5))
         lock.lock(); let starting = !moving; moving = true; let s = session; lock.unlock()
         if !starting { return }
@@ -275,8 +281,9 @@ final class ClearCursor: @unchecked Sendable {
         let was = motionHidden
         if motionHidden { CGDisplayShowCursor(CGMainDisplayID()); motionHidden = false }
         wsLock.unlock()
-        if was && isActive { recheckHover() }
+        if was && isActive { recheckHover(); TooltipNudge.shared.rested(isMoving: { [weak self] in self?.isMoving ?? true }) }
     }
+    var isMoving: Bool { lock.lock(); defer { lock.unlock() }; return moving }
 
     /// A hide around the read of an app's cursor. Its own count, balanced by quickShow whatever stop() did
     /// meanwhile (the hide count is per process).
