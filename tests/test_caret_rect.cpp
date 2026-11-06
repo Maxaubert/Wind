@@ -177,17 +177,60 @@ TEST_CASE("caret ghost: End and a click far right keep the caret's box, so they 
     CHECK_FALSE(wind::IsLineEndGhost(3375, 1942, 1996, none));         // nothing followed yet
 }
 
-TEST_CASE("caret ghost: a suppressed report that persists is confirmed as the caret (review #56)") {
+TEST_CASE("caret ghost: a held ghost is never confirmed by time; a pause after a trailing space stays put (2026-11-06)") {
+    // Discord's ghost is the caret after a trailing space, reported for as long as the user pauses.
     wind::CaretGhostState s;
-    wind::NoteFollowedCaret(1000, 1944, 1993, s);
-    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 5000, s));    // nothing held yet
-    wind::NoteGhostHeld(3375, 1942, 1996, 1000, s);
-    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 1100, s));    // too fresh: still a ghost
-    wind::NoteGhostHeld(3375, 1942, 1996, 1200, s);                    // same rect again keeps the first stamp
-    CHECK(wind::GhostHoldExpired(3375, 1942, 1996, 1000 + wind::kGhostConfirmMs, s));
-    CHECK_FALSE(wind::GhostHoldExpired(3376, 1942, 1996, 9000, s));    // a different report is not the held one
-    wind::NoteFollowedCaret(3375, 1942, 1996, s);                      // followed: the hold is cleared
-    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 9000, s));
+    wind::NoteFollowedCaret(2543, 1733, 1782, s);
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));                  // first one in this focus
+    wind::NoteGhostHeld(2921, 1735, 1781, s);
+    wind::NoteGhostHeld(2921, 1735, 1781, s);                          // still reported seconds later
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));                  // still a ghost: no jump
+    CHECK_FALSE(s.known);                                              // not proven yet
+    wind::NoteFollowedCaret(2405, 1733, 1782, s);                      // typing again: the real caret
+    CHECK(s.known);
+}
+
+TEST_CASE("caret ghost: a ghost the real caret replaced is always skipped, even close by (Discord 2026-11-06)") {
+    // Field trace: typing at 2466..2879 (2x49 at y 1733), Discord reported 2921,1735 2x46 after spaces.
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(2533, 1733, 1782, s);
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));                  // 388 px right in a new box
+    wind::NoteGhostHeld(2921, 1735, 1781, s);
+    wind::NoteFollowedCaret(2573, 1733, 1782, s);                      // the next key: the real caret is back
+    CHECK(s.known);
+    wind::NoteFollowedCaret(2879, 1733, 1782, s);                      // typing close to the box end
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));                  // only 42 px right, still skipped
+    CHECK_FALSE(wind::IsLineEndGhost(2921, 1733, 1782, s));            // the real caret there keeps its own box
+    wind::NoteFollowedCaret(2921, 1735, 1781, s);                      // a following of the same rect never unlearns it
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));
+}
+
+TEST_CASE("caret ghost: in a wrapped message the ghost sits a line up and is still skipped (Discord 2026-11-06)") {
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(2562, 1733, 1782, s);                      // 2x49, typing on the second line
+    CHECK(wind::IsLineEndGhost(2921, 1686, 1731, s));                  // 2x45 one line up, at the box end
+    CHECK_FALSE(wind::IsLineEndGhost(2600, 1684, 1733, s));            // Up to the line above keeps the height
+    CHECK_FALSE(wind::IsLineEndGhost(2921, 1684, 1733, s));            // End there too
+    wind::NoteGhostHeld(2921, 1686, 1731, s);
+    wind::NoteFollowedCaret(2668, 1733, 1782, s);
+    CHECK(s.known);
+    wind::NoteFollowedCaret(2900, 1733, 1782, s);                      // close to the box end now
+    CHECK(wind::IsLineEndGhost(2921, 1686, 1731, s));                  // known: skipped on any line
+    CHECK(wind::IsLineEndGhost(2921, 1735, 1781, s));                  // 1 px taller on the typing line, same ghost
+    CHECK_FALSE(wind::IsLineEndGhost(2921, 1733, 1782, s));            // a real caret there (49 px) is followed
+}
+
+TEST_CASE("caret ghost: an off-height UIA report is suspect; a ghost MSAA contradicts is skipped on any line (2026-11-06)") {
+    CHECK(wind::IsOffLineHeight(1636, 1682, 49));                       // 46 px in 49 px lines
+    CHECK(wind::IsOffLineHeight(1686, 1731, 48));                       // 45 px in 48 px lines
+    CHECK_FALSE(wind::IsOffLineHeight(1733, 1782, 48));                 // 49 vs 48: the same line
+    CHECK_FALSE(wind::IsOffLineHeight(1733, 1782, 0));                  // no line known yet
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(2547, 1735, 1783, s);
+    wind::NoteKnownGhost(2921, 1636, 1682, s);                          // two lines up, MSAA said 2547
+    CHECK(wind::IsLineEndGhost(2921, 1636, 1682, s));
+    CHECK(wind::IsLineEndGhost(2921, 1686, 1731, s));                   // a line lower, 1 px shorter: the same ghost
+    CHECK_FALSE(wind::IsLineEndGhost(2921, 1735, 1783, s));             // End: the caret's own box (MSAA arbitrates a UIA one)
 }
 
 TEST_CASE("selection rect: the last line's rectangle is used so Shift+arrow growth is followed (review #64)") {

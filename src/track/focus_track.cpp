@@ -725,6 +725,28 @@ struct FocusRun {
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "focus repeat (same control): caret still followed");
                 }
                 if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; caretGhost = wind::CaretGhostState{}; }
+                // Chromium's UIA selection puts the caret after a trailing space, or near the end of a
+                // line about to wrap, at the line's right end (#387 ghosts; Discord field 2026-11-06:
+                // for most letters in the last ~380 px of a line it reported only that ghost, so the
+                // view moved once per word). Its MSAA system caret had every letter right, with no
+                // ghost. So when UIA reports a ghost, ask MSAA and follow it instead; only when MSAA
+                // has nothing better is the ghost skipped below.
+                // A wrapped message moves the ghost up a line per line of text, and close to the box
+                // end it is too near to look like a jump, but its height is always off the line's.
+                if (!java && src[0] == 'u' &&
+                    (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost) ||
+                     wind::IsOffLineHeight((int)rc.top, (int)rc.bottom, caretLine.lineH))) {
+                    RECT m{};
+                    if (MsaaCaret(m) && !EqualRect(&m, &rc) &&
+                        !wind::IsLineEndGhost((int)m.left, (int)m.top, (int)m.bottom, caretGhost)) {
+                        if (log_.load() && !EqualRect(&m, &lastCaret))
+                            wind::Log(wind::LogLevel::Info, "track", "uia suspect %ld,%ld %ldx%ld: msaa caret %ld,%ld instead",
+                                      rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, m.left, m.top);
+                        if (rc.left - m.left > (m.bottom - m.top) * wind::kGhostJumpLines)
+                            wind::NoteKnownGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
+                        rc = m; src = "msaa";
+                    }
+                }
                 if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;
@@ -763,18 +785,11 @@ struct FocusRun {
                         // A line-end ghost (#387): the view stays on the text until the next real caret.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",
                                                    src, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
-                        wind::NoteGhostHeld((int)rc.left, (int)rc.top, (int)rc.bottom, (long long)GetTickCount64(), caretGhost);
+                        wind::NoteGhostHeld((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                     } else {
                         wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                         publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                     }
-                } else if (caretGhost.holding &&
-                           wind::GhostHoldExpired((int)rc.left, (int)rc.top, (int)rc.bottom, (long long)GetTickCount64(), caretGhost)) {
-                    // The suppressed report never went away: a real ghost is replaced by the next key,
-                    // so this is the caret, and holding it forever would strand the view.
-                    if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "line-end ghost confirmed as the caret via %s: %ld,%ld", src, rc.left, rc.top);
-                    wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
-                    publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                 }
             }
         }
