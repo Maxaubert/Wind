@@ -132,7 +132,9 @@ final class ClearCursor: @unchecked Sendable {
         wsLock.lock()                                   // an in-flight set of the poll thread finishes first
         (app ?? NSCursor.arrow).set()                   // while Wind still owns the cursor (over the Dock)
         if repeatHidden { CGDisplayShowCursor(CGMainDisplayID()); repeatHidden = false }
+        if motionHidden { CGDisplayShowCursor(CGMainDisplayID()); motionHidden = false }
         wsLock.unlock()
+        lock.lock(); moving = false; lock.unlock()
         SkyLight.updateOwnsCursor()                     // then give it back, unless Wind still hides it
     }
 
@@ -223,7 +225,51 @@ final class ClearCursor: @unchecked Sendable {
         lock.lock(); repeatAt = 0; lock.unlock()
         guard let at = CGEvent(source: nil)?.location,
               let e = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: at, mouseButton: .left) else { return }
+        e.setIntegerValueField(.eventSourceUserData, value: ClearCursor.recheckMark)   // not a hand move (pointerMoved)
         e.post(tap: .cghidEventTap)
+    }
+
+    // Hidden while the pointer moves, transparent once it rests (owner 2026-11-06). Apps set their cursor on
+    // mouse moves (hover changes), and even with the hide first and a look every 0.25 ms about 1 in 20 such sets
+    // reached the screen: the tiny cursor on a frame (a browser's file label: 88 sets, 5 seen in a minute). Hidden
+    // by the hide count no set shows. SwiftUI ignores hover while hidden (Notification Center's banners), so at
+    // rest the transparent cursor comes back and the hover is looked at again: SwiftUI hover comes about
+    // `restDelay` late, AppKit and web hover are unchanged. Event driven: the tap's mouse moves start it, a timer
+    // ends it; no polling. The hide is sent from the tap before the event reaches the app, on its own queue.
+    static let recheckMark: Int64 = 0x57494E44         // "WIND": Wind's own zero-distance move
+    static let restDelay = 0.15
+    private var motionHidden = false                    // under wsLock
+    private var moving = false                          // under lock (short holds only)
+    private let motionQueue = DispatchQueue(label: "wind.clearcursor.motion", qos: .userInteractive)
+    private lazy var restTimer: DispatchSourceTimer = {
+        let t = DispatchSource.makeTimerSource(queue: motionQueue)
+        t.setEventHandler { [weak self] in self?.rested() }
+        t.resume()
+        return t
+    }()
+
+    /// Main thread (the event tap), on every mouse move or drag: cheap when already moving.
+    func pointerMoved() {
+        guard isActive else { return }
+        restTimer.schedule(deadline: .now() + ClearCursor.restDelay, leeway: .milliseconds(5))
+        lock.lock(); let starting = !moving; moving = true; let s = session; lock.unlock()
+        if !starting { return }
+        motionQueue.async { [weak self] in
+            guard let self else { return }
+            self.wsLock.lock(); defer { self.wsLock.unlock() }
+            self.lock.lock(); let ok = self.active && self.session == s; self.lock.unlock()
+            if ok && !self.motionHidden { CGDisplayHideCursor(CGMainDisplayID()); self.motionHidden = true }
+        }
+    }
+
+    private func rested() {
+        // Cleared before the show: a move from now on queues its hide behind this on the same queue.
+        lock.lock(); moving = false; lock.unlock()
+        wsLock.lock()
+        let was = motionHidden
+        if motionHidden { CGDisplayShowCursor(CGMainDisplayID()); motionHidden = false }
+        wsLock.unlock()
+        if was && isActive { recheckHover() }
     }
 
     /// A hide around the read of an app's cursor. Its own count, balanced by quickShow whatever stop() did
