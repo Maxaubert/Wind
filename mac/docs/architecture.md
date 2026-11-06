@@ -774,6 +774,20 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   transparent again and posts the zero-distance move (`recheckHover`, marked so the tap ignores it). Apps set their cursor on
   moves, so no set meets a shown cursor. SwiftUI hover comes about 0.06 s after the pointer stops (0.15 s until 2026-11-06; 60 and 40 ms both showed 0 frames in `glimpse_truth.py --pauses`, 60 keeps a margin for slow trackpad moves whose events come further apart); AppKit and web hover are
   unchanged. Event driven, no polling. `glimpse_truth.py`: 0 frames in 4 runs on both engines; `churn_truth.py` 0.00%.
+- AppKit tooltips (owner 2026-11-06: none in Xcode while zoomed). `-[NSToolTipManager mouseEnteredToolTip:inWindow:pointInWindow:]`
+  asks `+[NSCursor _isHidden]` (= `!SLCursorIsVisible()`, scoreboard) once, when the pointer ENTERS the tooltip's rect,
+  and starts no timer if hidden; later moves (Wind's recheck, a moved or delta-carrying recheck, a second recheck) never
+  start one (each tried, `ipsw dyld disass`, 2026-11-06). Every entry happens mid-motion, hidden, so none came.
+  `TooltipNudge`: at rest, one AX look (own queue, 0.25 s timeout) for AXHelp on the element under the pointer or its
+  first ancestors, frontmost app only (AppKit shows tooltips only for the active app). If there is one, a 4x4
+  near-transparent nonactivating panel (`.screenSaver`, `sharingType = .none`) sits under the pointer for 25 ms: the
+  app sees the pointer leave and come back with the cursor shown, and the tooltip starts (1.8 s after the stop against
+  1.4 s at 1x). Flashes shorter than ~20 ms miss (12 ms: 3 of 4, 8 ms: 1 of 4). Once per visit: the same element is not
+  flashed again until a hand move leaves its AX frame (`moved`, from the tap). Cost: that element's hover is off for
+  one or two frames. Flashing at once on every stop without the AX look was tried and was worse for the owner
+  (2026-11-07). Transform with Wind's cursor keeps the real cursor hidden throughout, so it has no tooltips (not
+  changed). `scripts/tooltip_truth.py` (TipProbe.app: `open`ed so it is the active app; its log lives outside ~/Documents,
+  where a LaunchServices-started app cannot write, `open` fails with -10810).
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
   cursor showing, measured), and if Wind's main thread stalls 1.5 s the thread puts the app's cursor back.
 - Not usable instead: cursor scale below 1 (draws at 1x), `SLSShieldCursor` (empty stub), cursor

@@ -373,7 +373,7 @@ final class Magnifier {
             return pass
 
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-            if e.getIntegerValueField(.eventSourceUserData) != ClearCursor.recheckMark { ClearCursor.shared.pointerMoved() }
+            if e.getIntegerValueField(.eventSourceUserData) != ClearCursor.recheckMark { ClearCursor.shared.pointerMoved(); TooltipNudge.shared.moved(e.location) }
             let dx = Double(e.getIntegerValueField(.mouseEventDeltaX))
             let dy = Double(e.getIntegerValueField(.mouseEventDeltaY))
             let loc = e.location

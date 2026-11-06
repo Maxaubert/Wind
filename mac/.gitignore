@@ -20,3 +20,4 @@ tools/upscaleref/build-ported.inc
 tools/scalecard/scalecard
 tools/cursorchurn/dispcap
 tools/cursorchurn/curseen
+tools/hoverprobe/TipProbe.app/
