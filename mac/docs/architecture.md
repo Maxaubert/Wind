@@ -784,7 +784,8 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   app sees the pointer leave and come back with the cursor shown, and the tooltip starts (1.8 s after the stop against
   1.4 s at 1x). Flashes shorter than ~20 ms miss (12 ms: 3 of 4, 8 ms: 1 of 4). Once per visit: the same element is not
   flashed again until a hand move leaves its AX frame (`moved`, from the tap). Cost: that element's hover is off for
-  one or two frames. Transform with Wind's cursor keeps the real cursor hidden throughout, so it has no tooltips (not
+  one or two frames. Flashing at once on every stop without the AX look was tried and was worse for the owner
+  (2026-11-07). Transform with Wind's cursor keeps the real cursor hidden throughout, so it has no tooltips (not
   changed). `scripts/tooltip_truth.py` (TipProbe.app: `open`ed so it is the active app; its log lives outside ~/Documents,
   where a LaunchServices-started app cannot write, `open` fails with -10810).
 - Safe by construction: WindowServer drops a dead connection's cursor (a killed Wind leaves the app's
