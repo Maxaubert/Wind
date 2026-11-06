@@ -12,9 +12,21 @@ final class V: NSView {
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
     }
-    override func mouseMoved(with e: NSEvent) { NSCursor.arrow.set(); sets += 1 }
+    // hover: like a page's hover effect, the pointing hand over white stripes and the arrow over grey ones,
+    // set only when it changes (owner 2026-11-04, a file label in a browser).
+    var hand = false
+    override func mouseMoved(with e: NSEvent) {
+        if CommandLine.arguments.contains("hover") {
+            let i = Int(convert(e.locationInWindow, from: nil).x / (bounds.width / 40))
+            let want = i % 2 == 0
+            if want != hand { hand = want; (want ? NSCursor.pointingHand : NSCursor.arrow).set(); sets += 1 }
+            return
+        }
+        NSCursor.arrow.set(); sets += 1
+    }
     override func draw(_ r: NSRect) {
         if solid { (inverted ? NSColor.white : NSColor.black).setFill(); bounds.fill(); return }
+        if CommandLine.arguments.contains("grey") { NSColor(white: 0.5, alpha: 1).setFill(); bounds.fill(); return }
         for i in 0..<40 { ((i % 2 == 0) != inverted ? NSColor.white : NSColor.darkGray).setFill(); NSRect(x: CGFloat(i) * bounds.width / 40, y: 0, width: bounds.width / 40, height: bounds.height).fill() }
     }
 }

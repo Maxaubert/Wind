@@ -28,6 +28,10 @@ def ws_cpu(secs=4):
     v = [l.split() for l in out.splitlines() if "WindowServer" in l]
     return float(v[-1][1]) if v else -1
 
+# macOS keeps the dot up a few seconds after any recording ends (a suite run just before this one).
+for _ in range(30):
+    if indicators() == 0: break
+    time.sleep(1)
 W.relaunch_with_channel(direct=True, extra={"engine": "backdrop", "cursor": "wind", "renderScaling": 1})
 churn = subprocess.Popen([T + "/cursorchurn", "60"], stdout=subprocess.PIPE, text=True)
 x, y, w, h = map(int, churn.stdout.readline().split()); time.sleep(0.8)

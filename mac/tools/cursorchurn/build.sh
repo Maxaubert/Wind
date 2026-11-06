@@ -7,3 +7,4 @@ cd "${0:A:h}"
 swiftc -O cursorchurn.swift -o cursorchurn
 echo "built tools/cursorchurn/cursorchurn"
 clang -fobjc-arc -O1 -framework Cocoa -framework IOSurface dispcap.m -o dispcap
+clang -fobjc-arc -O1 -framework Cocoa -framework IOSurface curseen.m -o curseen

@@ -49,6 +49,15 @@ final class ClearCursor: @unchecked Sendable {
     private var repeatHidden = false        // the poll thread's own hide
     private var lastForeign = 0.0
     private static let repeatWithin = 1.0, busyHold = 0.5
+    /// The poll's sleep in microseconds: normally, and for 2 s after an app set its cursor. 250 both: an app's
+    /// hover change showed the real cursor on screen in about 1 of 35 changes at 2000/500 with the hide first,
+    /// and 0.3 at 250 (scripts/glimpse_truth.py), for no measurable CPU (Wind 3.8% against 3.9% at 3x).
+    static let pollUs: (UInt32, UInt32) = {
+        #if WIND_TEST_CHANNEL
+        if let v = ProcessInfo.processInfo.environment["WIND_CLEAR_POLL_US"]?.split(separator: ",").compactMap({ UInt32($0) }), v.count == 2 { return (v[0], v[1]) }
+        #endif
+        return (250, 250)
+    }()
     private var shapeGen = 0
     private var ours: UInt32 = 0            // the seed of Wind's own transparent set
     private var beat = 0.0                  // main thread alive (a timer while active)
@@ -217,11 +226,31 @@ final class ClearCursor: @unchecked Sendable {
         e.post(tap: .cghidEventTap)
     }
 
+    /// A hide around the read of an app's cursor. Its own count, balanced by quickShow whatever stop() did
+    /// meanwhile (the hide count is per process).
+    private func quickHide(session s: Int) -> Bool {
+        wsLock.lock(); defer { wsLock.unlock() }
+        lock.lock(); let current = active && session == s; lock.unlock()
+        guard current else { return false }
+        CGDisplayHideCursor(CGMainDisplayID())
+        return true
+    }
+    private func quickShow() {
+        wsLock.lock(); CGDisplayShowCursor(CGMainDisplayID()); wsLock.unlock()
+    }
+    static let hideFirst: Bool = {
+        #if WIND_TEST_CHANNEL
+        if ProcessInfo.processInfo.environment["WIND_HIDE_FIRST"] == "0" { return false }
+        #endif
+        return true
+    }()
+
     private func poll(session s: Int) {
         lock.lock(); var last = ours; lock.unlock()     // 0 (start's set raced with an app's): look at once
         var quick = false, hidden = false
+        let (slow, fast) = ClearCursor.pollUs
         while true {
-            usleep(quick ? 500 : 2000)                  // faster while an app is setting its cursor
+            usleep(quick ? fast : slow)                 // faster while an app is setting its cursor
             lock.lock()
             guard active, session == s else { lock.unlock(); return }
             let now = CACurrentMediaTime()
@@ -247,6 +276,11 @@ final class ClearCursor: @unchecked Sendable {
             if seed == mine && !wasStalled { continue }
             // Someone else set the cursor (or Wind's own set raced with it): keep theirs as the shape.
             lock.lock(); foreignCount += 1; lastForeign = now; lock.unlock()
+            // Hidden first, then read: reading the app's cursor (its image, a WindowServer round trip) took
+            // longer than the wait between looks, and the app's cursor showed meanwhile, on 1-2 frames at a
+            // hover change (owner 2026-11-05, a file label in a browser; faster looks changed nothing).
+            let flash = ClearCursor.hideFirst && !hidden && !wasStalled && quickHide(session: s)
+            defer { if flash { quickShow() } }
             if let c = NSCursor.currentSystem, !isClear(c) {
                 guard setClear(session: s) else { return }   // first: the app's cursor is on screen until then
                 let key = c.image.tiffRepresentation    // pixels: same size and hotspot can be another cursor
