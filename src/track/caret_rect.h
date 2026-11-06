@@ -139,45 +139,80 @@ inline bool HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, Caret
 struct CaretGhostState {
     bool have = false;
     int left = 0, top = 0, h = 0;   // the last caret followed
-    // The report currently being suppressed as a ghost, and since when. A real ghost is transient
-    // (the next keystroke replaces it); one that just sits there is the caret, so the suppression
-    // must not be sticky (review 2026-10-09 #56).
+    // The report currently being suppressed as a ghost. It is NOT confirmed by time any more: review
+    // 2026-10-09 #56 had a held report become the caret after 300 ms, but Discord's ghost is the caret
+    // after a TRAILING SPACE (Chromium draws it at the line's right end) and it stays reported for as
+    // long as the user pauses after that space (field 2026-11-06), so every pause jumped the view to
+    // the end of the box. The real caret then is one space past the last one followed, so the view
+    // staying put is right; the next key brings a real report.
     bool holding = false;
     int hLeft = 0, hTop = 0, hBottom = 0;
-    long long since = 0;
+    // A ghost PROVEN transient (the real caret came back after it) in this focus. Discord reports
+    // the same right-edge rect after many keystrokes, not only at a wrap (field 2026-11-06: 2921,1735
+    // 2x46 while typing at 2466..2879 in 2x49): a pause after one of them confirmed it as the caret
+    // and the view jumped to the end of the box, and the next ones sat too close to that new baseline
+    // to read as ghosts, so the view swung between the text and the box end. A known ghost is always
+    // skipped and never confirmed. Reset with the state on a focus change.
+    bool known = false;
+    int kLeft = 0, kTop = 0, kBottom = 0;
 };
-
-inline constexpr long long kGhostConfirmMs = 300;   // a suppressed report this stable is a real caret
 
 inline constexpr double kGhostJumpLines = 3.0;   // further right than this many line heights in one report
 inline constexpr int    kGhostBoxPx = 2;         // the box changed by at least this much (top or height)
 
+// A known ghost is matched by its x and height on ANY line: once the message wraps, Discord's box
+// grows and the ghost moves to another line (field 2026-11-06: 2921,1735 2x46, then 2921,1686 2x45
+// one line up while typing at y 1733 in 49 px lines). The real caret at that x keeps its own height.
+inline bool IsKnownGhost(int left, int top, int bottom, const CaretGhostState& s) {
+    if (!s.known) return false;
+    const int dx = left - s.kLeft, dh = (bottom - top) - (s.kBottom - s.kTop);
+    // Height within 1 px: the ghost was 45-46 px, a real caret 48-49 px in the same lines.
+    return (dx < 0 ? -dx : dx) <= kGhostBoxPx && (dh < 0 ? -dh : dh) <= 1;
+}
+
 inline bool IsLineEndGhost(int left, int top, int bottom, const CaretGhostState& s) {
+    if (IsKnownGhost(left, top, bottom, s)) return true;
     if (!s.have || s.h <= 0) return false;
     const int h = bottom - top;
     const int dTop = top - s.top, dH = h - s.h;
-    const bool sameLine = (dTop < 0 ? -dTop : dTop) < s.h / 2;
-    const bool otherBox = (dTop < 0 ? -dTop : dTop) >= kGhostBoxPx || (dH < 0 ? -dH : dH) >= kGhostBoxPx;
-    return sameLine && otherBox && left - s.left > s.h * kGhostJumpLines;
+    const int adTop = dTop < 0 ? -dTop : dTop, adH = dH < 0 ? -dH : dH;
+    const bool sameLine = adTop < s.h / 2;
+    const bool otherBox = adTop >= kGhostBoxPx || adH >= kGhostBoxPx;
+    // The line above or below (a wrapped message, see IsKnownGhost) counts only with a different
+    // HEIGHT: Up or Down to another line keeps the caret's own height.
+    const bool nextLine = !sameLine && adTop <= s.h * 3 / 2 && adH >= kGhostBoxPx;
+    return ((sameLine && otherBox) || nextLine) && left - s.left > s.h * kGhostJumpLines;
 }
 
-// Remember a caret that was followed (never a ghost, so a held ghost stays a ghost).
+// A UIA caret whose height is off the line's (Discord's ghost is 45-46 px in 48-49 px lines, field
+// 2026-11-06) is suspect: the caller asks MSAA for a second opinion before following it.
+inline bool IsOffLineHeight(int top, int bottom, int lineH) {
+    const int d = (bottom - top) - lineH;
+    return lineH > 0 && (d < 0 ? -d : d) >= kGhostBoxPx;
+}
+
+// MSAA put the caret elsewhere than a suspect UIA report far to its right: that report is a ghost,
+// remembered so it is skipped on any line even when MSAA has nothing to say next time.
+inline void NoteKnownGhost(int left, int top, int bottom, CaretGhostState& s) {
+    s.known = true; s.kLeft = left; s.kTop = top; s.kBottom = bottom;
+}
+
+// Remember a caret that was followed (never a ghost, so a held ghost stays a ghost). A real caret
+// replacing a held ghost proves that ghost transient: it is remembered as a known ghost.
 inline void NoteFollowedCaret(int left, int top, int bottom, CaretGhostState& s) {
+    if (s.holding && !(s.hLeft == left && s.hTop == top && s.hBottom == bottom)) {
+        s.known = true; s.kLeft = s.hLeft; s.kTop = s.hTop; s.kBottom = s.hBottom;
+    }
     s.have = true; s.left = left; s.top = top; s.h = bottom - top;
     s.holding = false;
 }
 
 // A report was just suppressed as a ghost: start (or keep) timing it.
-inline void NoteGhostHeld(int left, int top, int bottom, long long nowMs, CaretGhostState& s) {
+inline void NoteGhostHeld(int left, int top, int bottom, CaretGhostState& s) {
     if (s.holding && s.hLeft == left && s.hTop == top && s.hBottom == bottom) return;
-    s.holding = true; s.hLeft = left; s.hTop = top; s.hBottom = bottom; s.since = nowMs;
+    s.holding = true; s.hLeft = left; s.hTop = top; s.hBottom = bottom;
 }
 
-// The same rect that was suppressed has now persisted long enough to be the real caret: follow it.
-inline bool GhostHoldExpired(int left, int top, int bottom, long long nowMs, const CaretGhostState& s) {
-    return s.holding && s.hLeft == left && s.hTop == top && s.hBottom == bottom &&
-           nowMs - s.since >= kGhostConfirmMs;
-}
 
 // Terminal TUIs park the cursor (field: Wind for Mac, Claude Code in Terminal.app, 2026-11). Claude
 // Code hides the terminal cursor and draws its own; while it redraws its prompt it leaves the real
