@@ -101,7 +101,9 @@ final class ClearCursor: @unchecked Sendable {
         let first = NSCursor.currentSystem
         lock.lock()
         active = true; stalled = false; session += 1
-        if let c = first, !isClear(c) { appCursor = c; shapeGen += 1 }
+        // The key goes with the shape: a key left from the last session (an arrow) made the next arrow read
+        // a repeat, and a first-frame I-beam was drawn until Wind zoomed out (owner 2026-11-07).
+        if let c = first, !isClear(c) { appCursor = c; appKey = nil; shapeGen += 1 }
         beat = CACurrentMediaTime()
         let s = session
         lock.unlock()

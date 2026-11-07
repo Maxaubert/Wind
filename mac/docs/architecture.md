@@ -767,7 +767,9 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   unless the cursor seed moved since, and Wind's transparent set moves it, so at 1x those sets cost
   nothing (0 seed bumps) and zoomed each one showed the real cursor until the poll's re-set (owner
   2026-11-04, ChatGPT: flicker while moving). `ClearCursor` reads the same shape (pixels) set twice within
-  1 s as that signature: for 0.5 s after each such set the poll thread also hides the real cursor, which no
+  1 s as that signature (the pixel key is cleared with each new shape `start` takes: a key left from the
+  last session made the next arrow a "repeat" and a first-frame I-beam stuck until zoom-out, owner
+  2026-11-07): for 0.5 s after each such set the poll thread also hides the real cursor, which no
   set shows through. It hides on that thread with its own balanced hide count (per process): on the main
   thread each hide stopped the tick 10-30 ms. The poll keeps re-setting the transparent image meanwhile:
   an app switch force-shows even a hidden cursor (the poll re-hides it). Hover arriving during the hide is ignored, and
