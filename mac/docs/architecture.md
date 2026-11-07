@@ -558,6 +558,20 @@ rest it trailed by 9 pt and carried it in one frame). Explorer, zooming scenario
 - **Chromium.** Chromium browsers get `AXEnhancedUserInterface` while they are frontmost (switched
   off when they lose focus and when Wind quits). Without it Chrome sent no caret after a zoom-in;
   turning it on only at zoom-in was too late for the first keys.
+- **Chromium shells (ChatGPT, 2026-11-07).** An app with Chromium renderer helpers in its bundle
+  (Electron's `Frameworks/<X> Helper (Renderer).app`, or a framework's `Helpers/`, like ChatGPT's
+  `Codex Framework.framework`) that is not in the browser list. ChatGPT (`com.openai.codex`) refuses
+  both switches (`AXManualAccessibility` -25205, `AXEnhancedUserInterface` -25208 on the app) and keeps
+  its web content out of the tree: the window is six empty groups and the focused element a native
+  one in the title bar. Reading the application element's role, subrole and description turns the tree
+  on (bisected: reads of the window's elements, setting either switch on the content view, waiting,
+  typing or clicking did not). Wind does that on attach and again on every key press while zoomed.
+  Even then its text has no character bounds (`AXBoundsForRange` and the text-marker bounds give an
+  empty rect), so the caret comes from the frames of the field's `AXStaticText` runs: exact at a
+  run's end, estimated by character share inside a run (line by line when it wraps), and past the
+  run's end by one average character per trailing space (a run leaves them out). A text field whose
+  caret cannot be measured on one read keeps Wind's last caret inside it instead of publishing the
+  whole field as focus (the view jumped to the field and back while typing).
 - **Key-press poll.** Every key press while zoomed also polls the focused element 40 ms later, so
   tracking never depends on an app's notifications alone.
 - **Tests.** `scripts/e2e_caret.py` types real keys (the Karabiner virtual keyboard in

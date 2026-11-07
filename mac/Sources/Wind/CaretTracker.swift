@@ -93,6 +93,7 @@ final class CaretTracker {
         guard on, let app = front, app.processIdentifier != getpid() else { return }
         pid = app.processIdentifier
         reEnhanced = false
+        isShell = false
         isTerminal = CaretTracker.terminalBundles.contains(app.bundleIdentifier ?? "")
         let el = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(el, 0.25)
@@ -128,6 +129,41 @@ final class CaretTracker {
         }
         CFRunLoopAddSource(loop, AXObserverGetRunLoopSource(obs), .defaultMode)
         Log.verbose("caret: attached to \(app.localizedName ?? "?") (\(pid))")
+        isShell = !isChromium && CaretTracker.isChromiumShell(app)
+        if isShell { wakeTree(el); Log.verbose("caret: Chromium shell, its tree woken") }
+    }
+
+    /// Some Chromium shells refuse both switches (ChatGPT, com.openai.codex: AXManualAccessibility
+    /// unsupported, AXEnhancedUserInterface not implemented) and keep their web content's tree off: the
+    /// window is six empty groups, the focused element a native one in the title bar, so typing there
+    /// never moved the view (owner 2026-11-07). Reading the application element's role, subrole and
+    /// description switches it on, the way a screen reader's first look does (bisected 2026-11-07: no
+    /// read of the window's elements, no switch, no waiting, typing or clicking did). Repeated on every
+    /// key press, so the tree cannot go quiet while the owner types.
+    private func wakeTree(_ app: AXUIElement) {
+        for name in [kAXRoleAttribute, kAXSubroleAttribute, kAXDescriptionAttribute] {
+            var v: CFTypeRef?
+            AXUIElementCopyAttributeValue(app, name as CFString, &v)
+        }
+    }
+
+    /// The app carries Chromium renderer helpers (Electron, ChatGPT's own shell) and is not a browser
+    /// Wind already switches on. Looked up once per bundle.
+    nonisolated(unsafe) private static var shellCache: [String: Bool] = [:]
+    private static func isChromiumShell(_ app: NSRunningApplication) -> Bool {
+        guard let url = app.bundleURL else { return false }
+        if let hit = shellCache[url.path] { return hit }
+        // Electron: Frameworks/<App> Helper (Renderer).app. Other shells keep the helpers in the
+        // framework: ChatGPT's Codex Framework.framework/Helpers/Codex (Aperitif Renderer).app.
+        let fm = FileManager.default, fw = url.appendingPathComponent("Contents/Frameworks")
+        let top = (try? fm.contentsOfDirectory(atPath: fw.path)) ?? []
+        let isRenderer = { (name: String) in name.hasSuffix("Renderer).app") }
+        let found = top.contains(where: isRenderer) || top.contains { name in
+            name.hasSuffix(".framework") &&
+                ((try? fm.contentsOfDirectory(atPath: fw.appendingPathComponent(name).appendingPathComponent("Helpers").path)) ?? []).contains(where: isRenderer)
+        }
+        shellCache[url.path] = found
+        return found
     }
 
     /// Chromium's full accessibility mode slows window managers and costs CPU, so it is on only
@@ -175,7 +211,7 @@ final class CaretTracker {
         if notification == kAXFocusedUIElementChangedNotification as String {
             if let c = caretInfo(of: el) {
                 if !parkedInTerminal(c, el) { publish(.caret, c.rect) }
-            } else if let r = frame(of: el) {
+            } else if let r = frame(of: el), !keepsCaret(el, r) {
                 publish(.focus, r)
             }
         } else if let c = caretInfo(of: el), !parkedInTerminal(c, el) {
@@ -218,6 +254,7 @@ final class CaretTracker {
     private func poll() {
         guard live, pollTimer?.isValid != true, Date() >= pollPausedUntil else { return }
         if observer == nil { DispatchQueue.main.async { [weak self] in self?.attachFrontmost() } }
+        if isShell, let app = appElement { wakeTree(app) }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: false) { [weak self] _ in
             guard let self else { return }
             guard let el = self.focusedElement() else {
@@ -238,7 +275,7 @@ final class CaretTracker {
             let started = Date()
             if let c = self.caretInfo(of: el) {
                 if !self.parkedInTerminal(c, el) { self.publish(.caret, c.rect) }
-            } else if let r = self.frame(of: el) {
+            } else if let r = self.frame(of: el), !self.keepsCaret(el, r) {
                 // A focused control without a caret (button, link, list): keyboard focus. Chromium
                 // freshly launched sent no focus notifications, so Tab moved the focus and the view
                 // stayed put (e2e_focus, 2026-11-01); the poll after the key finds it. An unchanged
@@ -249,8 +286,19 @@ final class CaretTracker {
         }
     }
     private var pollPausedUntil = Date.distantPast
+    private var isShell = false                 // a Chromium shell outside chromiumBundles (wakeTree)
     private var reEnhanced = false              // the Chromium switch was re-applied once for this app
     private var pollTimer: Timer?
+
+    /// A text field whose caret could not be measured this time, with Wind's last caret inside it: keep
+    /// that caret rather than jump to the whole field (ChatGPT, a read now and then while typing).
+    private func keepsCaret(_ el: AXUIElement, _ field: Rc) -> Bool {
+        guard published.kind == .caret || pending?.0 == .caret else { return false }
+        let c = pending?.0 == .caret ? pending!.1 : published.rect
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &v) == .success else { return false }
+        return c.l >= field.l - 2 && c.r <= field.r + 2 && c.t >= field.t - 2 && c.b <= field.b + 2
+    }
 
     private func publish(_ kind: TrackKind, _ r: Rc) {
         if let p = pending, p.0 == kind, p.1 == r { return }    // a repeat does not restart the wait
@@ -302,7 +350,64 @@ final class CaretTracker {
            let r = bounds(el, CFRange(location: range.location - 1, length: 1)), r.height > 0 {
             return (Rc(l: r.r, t: r.t, r: r.r + 1, b: r.b), true)
         }
+        if range.length == 0, let r = textRunCaret(el, range.location) { return (r, true) }
         return nil
+    }
+
+    /// The insertion point from the frames of the text runs inside the field, for apps whose text has
+    /// no character bounds: ChatGPT (a Chromium shell without full accessibility) answers every
+    /// AXBoundsForRange with an empty rect, but its static text runs carry real frames (2026-11-07).
+    /// Exact at a run's end, where typing happens; inside a run the place is estimated from the share
+    /// of characters before it, line by line for a run that wraps.
+    private func textRunCaret(_ el: AXUIElement, _ index: Int) -> Rc? {
+        guard isShell else { return nil }               // a walk per key: only where it is needed
+        var val: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &val) == .success,
+              let full = val as? String else { return nil }
+        let all = full as NSString
+        var runs: [(start: Int, len: Int, rect: CGRect)] = []
+        var from = 0, seen = 0
+        func walk(_ e: AXUIElement, _ depth: Int) {
+            guard seen < 300, depth < 12 else { return }
+            seen += 1
+            var role: CFTypeRef?
+            AXUIElementCopyAttributeValue(e, kAXRoleAttribute as CFString, &role)
+            if (role as? String) == (kAXStaticTextRole as String) {
+                var tv: CFTypeRef?, fv: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(e, kAXValueAttribute as CFString, &tv) == .success,
+                      let text = tv as? String, !text.isEmpty,
+                      AXUIElementCopyAttributeValue(e, "AXFrame" as CFString, &fv) == .success, let fv,
+                      CFGetTypeID(fv) == AXValueGetTypeID() else { return }
+                var rect = CGRect.zero
+                guard AXValueGetValue(fv as! AXValue, .cgRect, &rect), rect.height > 0 else { return }
+                let at = all.range(of: text, range: NSRange(location: from, length: all.length - from))
+                guard at.location != NSNotFound else { return }
+                runs.append((at.location, at.length, rect)); from = at.location + at.length
+                return
+            }
+            var kids: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(e, kAXChildrenAttribute as CFString, &kids) == .success,
+                  let list = kids as? [AXUIElement] else { return }
+            for k in list { walk(k, depth + 1) }
+        }
+        walk(el, 0)
+        // A run leaves out the spaces that end its line: a caret after them lies past the run's end,
+        // by the run's average character width per space (the view jumped to the whole field at every
+        // space before, owner 2026-11-07).
+        var extra = 0
+        var hit = runs.first(where: { index >= $0.start && index <= $0.start + $0.len })
+        if hit == nil, let last = runs.last(where: { $0.start + $0.len < index }) {
+            let gap = all.substring(with: NSRange(location: last.start + last.len, length: index - last.start - last.len))
+            if gap.allSatisfy({ $0 == " " || $0 == "\u{a0}" }) { hit = last; extra = gap.count }
+        }
+        guard let run = hit else { return nil }
+        let lineH = runs.map(\.rect.height).min()!
+        let lines = max(1, Int((run.rect.height / lineH).rounded()))
+        let pos = Double(min(index, run.start + run.len) - run.start) / Double(max(1, run.len)) * Double(lines)
+        let line = min(lines - 1, Int(pos))
+        let x = run.rect.minX + run.rect.width * (pos - Double(line)) + Double(extra) * run.rect.width * Double(lines) / Double(max(1, run.len))
+        let top = run.rect.minY + Double(line) * run.rect.height / Double(lines)
+        return Rc(l: x, t: top, r: x + 1, b: top + run.rect.height / Double(lines))
     }
 
     private func bounds(_ el: AXUIElement, _ range: CFRange) -> Rc? {
