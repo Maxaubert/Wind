@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Max Aubert. All rights reserved.
 # Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
-"""AppKit tooltips while zoomed (owner 2026-11-06: none in Xcode). The real cursor is hidden while the pointer moves
-(ClearCursor), and AppKit starts a tooltip only if the cursor is shown when the pointer ENTERS its rect, so Wind
-flashes a tiny window under the pointer at rest when the element there has a tooltip (TooltipNudge).
+"""AppKit tooltips while zoomed (owner 2026-11-06: none in Xcode). AppKit starts a tooltip only if the cursor is shown
+when the pointer ENTERS its rect: any hide of the real cursor during motion kills them (0.5.2-0.5.3, docs/architecture.md).
 tools/hoverprobe's window, opened as TipProbe.app (the active app: tooltips need that): a teal AppKit view with a
-tooltip (and AXHelp) and a SwiftUI half without one. Real HID strokes into each half, then a stop.
-PASS: per engine at 1x and 3x a tooltip within 3 s of every stop on the teal half, the probe stays the active app,
-and no flash over the SwiftUI half. Takes the screen (an active window at the top left).
+tooltip. Real HID strokes into it, then a stop.
+PASS: per engine at 1x and 3x a tooltip within 3 s of every stop on the teal half. Takes the screen (an active window at the top left).
 usage: tooltip_truth.py [--engines backdrop,draw] [--n 3]"""
 import argparse, os, subprocess, sys, tempfile, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,23 +49,13 @@ try:
             tag = f"{eng} {lv}x"
             ctl("level 1"); time.sleep(0.4); ctl(f"warp {px - 60} {y}"); time.sleep(0.2)
             if lv > 1: ctl(f"level {lv}"); time.sleep(1.0)
-            got = []; fa = ctl("state").get("tooltipFlashes", 0)
+            got = []
             for _ in range(a.n):
                 go(px - 60, y, tol=8); time.sleep(0.6); del ev[:]
                 t0 = stroke_to(px + pw // 8); time.sleep(3.0)
                 on = [t - t0 for t, l in ev if l == "TIP on"]
                 got.append(round(on[0], 2) if on else None)
             W.check(f"{tag}: AppKit tooltip after every stop", all(g is not None for g in got), f"seconds after the stop {got}")
-            fb = ctl("state").get("tooltipFlashes", 0)
-            W.check(f"{tag}: one flash per visit", fb - fa <= a.n, f"{fb - fa} flashes over {a.n} visits")
-            go(px + pw // 4, y, tol=8); time.sleep(0.6)
-            f0 = ctl("state").get("tooltipFlashes", 0)
-            for _ in range(a.n):
-                stroke_to(px + 3 * pw // 4); time.sleep(0.6); go(px + pw // 2 + 20, y, tol=8); time.sleep(0.6)
-            f1 = ctl("state").get("tooltipFlashes", 0)
-            W.check(f"{tag}: no flash over an element without a tooltip", f1 == f0, f"flashes {f0} -> {f1}")
-    lines = open(LOG).read().split("\n")
-    W.check("the probe stayed the active app (the flash never takes focus)", "ACTIVE false" not in lines, "")
 finally:
     ctl("level 1"); tail.terminate(); subprocess.run(["pkill", "-f", "TipProbe.app/Contents/MacOS"])
     vm.stdin.write("quit\n"); vm.stdin.flush()

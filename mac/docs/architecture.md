@@ -769,12 +769,16 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
   real cursor ON SCREEN (CGDisplayStream with the cursor, Wind's drawn one a magenta probe) over `cursorchurn grey hover`:
   about 35 changes per run, 7 frames before (3-12), 3 with the hide first, 0.3 with both. Wind's CPU at 3x: 3.8% -> 3.9%.
 - Still not zero: in the owner's browser 88 sets a minute brought 5 flashes they saw (each set exposed 0.2 ms median, against a
-  6.9 ms refresh). So the real cursor is now HIDDEN while the pointer moves and transparent only at rest (owner 2026-11-06):
+  6.9 ms refresh). So 0.5.2-0.5.3 HID the real cursor while the pointer moved and kept it transparent only at rest (owner 2026-11-06; REMOVED in 0.5.4, see below):
   the tap's first mouse move hides it (on `motionQueue`, sent before the app gets the event), and 0.06 s without moves shows it
   transparent again and posts the zero-distance move (`recheckHover`, marked so the tap ignores it). Apps set their cursor on
   moves, so no set meets a shown cursor. SwiftUI hover comes about 0.06 s after the pointer stops (0.15 s until 2026-11-06; 60 and 40 ms both showed 0 frames in `glimpse_truth.py --pauses`, 60 keeps a margin for slow trackpad moves whose events come further apart); AppKit and web hover are
   unchanged. Event driven, no polling. `glimpse_truth.py`: 0 frames in 4 runs on both engines; `churn_truth.py` 0.00%.
-- AppKit tooltips (owner 2026-11-06: none in Xcode while zoomed). `-[NSToolTipManager mouseEnteredToolTip:inWindow:pointInWindow:]`
+- Removed in 0.5.4 (owner 2026-11-07): the motion hide made SwiftUI too unresponsive (hover only after the rest, and
+  some clicks did not register), so it and `TooltipNudge` went; the owner takes the occasional tiny cursor (hide-first
+  poll at 0.25 ms: about 0.3 frames per 35 hover changes in `glimpse_truth.py`) over that. Any future hide of the
+  real cursor has to keep these in mind:
+  - AppKit tooltips (owner 2026-11-06: none in Xcode while zoomed). `-[NSToolTipManager mouseEnteredToolTip:inWindow:pointInWindow:]`
   asks `+[NSCursor _isHidden]` (= `!SLCursorIsVisible()`, scoreboard) once, when the pointer ENTERS the tooltip's rect,
   and starts no timer if hidden; later moves (Wind's recheck, a moved or delta-carrying recheck, a second recheck) never
   start one (each tried, `ipsw dyld disass`, 2026-11-06). Every entry happens mid-motion, hidden, so none came.
