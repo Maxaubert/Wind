@@ -46,6 +46,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `python3 scripts/tooltip_truth.py`: AppKit tooltips while zoomed (takes the screen with an active probe window); run it after touching how Wind hides the real cursor.
 - `python3 scripts/hitch_truth.py`: view stalls as apps open, quit and alerts show, from Wind's `slow tick` lines (`Stall`); run it after touching anything on the main thread's tick path.
 - `python3 scripts/backdrop_truth.py`: the Backdrop engine (no capture); `WIND_ENGINE=backdrop` runs a suite on it. ScreenCaptureKit cannot see it (`tools/cursorchurn/dispcap` can).
+- `python3 scripts/backdrop_sharp.py`: Backdrop stays Nearest (sharp) with either `renderScaling`, scored on a 1 px checker.
 - `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
 - `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
 - `python3 scripts/e2e_screenshot.py`: screenshot mode (area, window, Cmd+Shift+5) and the colour sampler while

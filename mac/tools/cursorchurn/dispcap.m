@@ -38,7 +38,10 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "--tear")) return tear(argc, argv, create, start);
     NSDictionary *props = @{ @"kCGDisplayStreamShowCursor": @NO, @"kCGDisplayStreamMinimumFrameTime": @(1.0/240) };
     double t0 = CFAbsoluteTimeGetCurrent();
-    void *s = create(CGMainDisplayID(), 1920, 1080, 'BGRA', (__bridge CFDictionaryRef)props, dispatch_queue_create("cap", 0),
+    // DISPCAP_PIXELS=1: at the display's backing resolution (sharpness checks), not 1920x1080 points.
+    size_t W = 1920, Hh = 1080;
+    if (getenv("DISPCAP_PIXELS")) { CGDisplayModeRef m = CGDisplayCopyDisplayMode(CGMainDisplayID()); W = CGDisplayModeGetPixelWidth(m); Hh = CGDisplayModeGetPixelHeight(m); CGDisplayModeRelease(m); }
+    void *s = create(CGMainDisplayID(), W, Hh, 'BGRA', (__bridge CFDictionaryRef)props, dispatch_queue_create("cap", 0),
       ^(int status, uint64_t dt, IOSurfaceRef surf, void *upd) {
         if (status != 0 || !surf || CFAbsoluteTimeGetCurrent() - t0 < secs) return;
         IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
