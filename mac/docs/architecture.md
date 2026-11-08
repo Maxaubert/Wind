@@ -1138,7 +1138,10 @@ above the overlay, so it stays unmagnified on the zoomed view. It cannot be cove
   unmagnified, and the lock screen shows unmagnified above the overlay: `DrawZoom.lockUp` gives the real cursor back meanwhile and restarts a capture it stopped.
   loginwindow also owns the Restart and Shut Down prompts: only `CGSSessionScreenIsLocked`, or a window above the overlay, counts as the lock screen (owner
   2026-11-04: the prompt brought the tiny cursor). Tests never open the real prompt, which restarts by itself after 60 s.
-- No pixels reach Wind, so no xBR: `renderScaling` 0 is Nearest, 1 is `cubic` (the Scaling row is Render's only for now).
+- No pixels reach Wind, so no xBR: Backdrop is always Nearest, whatever `renderScaling` holds (the Scaling row is Render's).
+  Until 0.5.7 it mapped xBR to `cubic`, which blurred the view with no row to change it (owner 2026-11-08). Every
+  `magnificationFilter` but nearest smooths here: a 1 px checker at 3x is 87% grey on linear (lanczos and box read as
+  linear) and on cubic, 2% on nearest. `scripts/backdrop_sharp.py` checks it with both `renderScaling` values.
 - What is below reaches the screen only as far as a commit dirties the backdrop, so `keepAliveTick` nudges the backdrop layer itself 0.001 pt
   on every refresh the view does not move it. A nudge of the cursor layer alone, or a tick with the view still, redrew part of the view: a
   Terminal scrolled with the pointer still tore in half (owner 2026-11-04; `dispcap --tear`, whole-window flips: 666 of 828 frames torn, 2 of

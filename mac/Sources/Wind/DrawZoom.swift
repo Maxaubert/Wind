@@ -198,7 +198,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         let at = CGPoint(x: px, y: H - py)
         if abs(at.x - b.position.x) > 0.01 || abs(at.y - b.position.y) > 0.01 { backdropMovedAt = CACurrentMediaTime() }
         b.position = at
-        b.magnificationFilter = scaling == .nearest ? .nearest : CALayerContentsFilter(rawValue: "cubic")
+        // Always nearest: every other filter WindowServer takes here (cubic, linear, trilinear; lanczos and box
+        // read as linear) greys a 1 px checker to 72-89% at 3x and 4.37x, nearest to 2% (backdrop_sharp.py,
+        // owner 2026-11-08: "smoothness which makes things blurry", after xBR on Render had picked cubic here).
+        b.magnificationFilter = .nearest
     }
 
     /// What is below reaches the screen only as far as the overlay's commit dirties the backdrop. With it idle
