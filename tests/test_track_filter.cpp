@@ -11,6 +11,12 @@ TEST_CASE("caret inside its element is trusted; the field-recorded Firefox ifram
     CHECK(CaretInsideElement({ 3020, 1000, 3022, 1068 }, input));           // at the right end, inside
     CHECK(CaretInsideElement({ 5, 5, 6, 20 }, { 0, 0, 0, 0 }));             // unknown element: trust
 }
+TEST_CASE("Prism dialog (#561): the fixed UIA caret below the input is outside, MSAA's is inside") {
+    const TrackBox input{ 1520, 1022, 2372, 1108 };                         // 852x86, field 2026-11-10
+    CHECK_FALSE(CaretInsideElement({ 2070, 1170, 2072, 1208 }, input));     // UIA: below the input
+    CHECK(CaretInsideElement({ 1541, 1046, 1543, 1083 }, input));           // MSAA caret
+    CHECK(CaretInsideElement({ 1540, 1046, 1697, 1084 }, input));           // the selected name
+}
 TEST_CASE("terminal caret beside its cell stays trusted") {
     CHECK(CaretInsideElement({ 332, 1692, 343, 1737 }, { 322, 1692, 346, 1737 }));
 }
