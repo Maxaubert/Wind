@@ -733,11 +733,19 @@ struct FocusRun {
                 // has nothing better is the ghost skipped below.
                 // A wrapped message moves the ghost up a line per line of text, and close to the box
                 // end it is too near to look like a jump, but its height is always off the line's.
+                // #561: a UIA caret outside its own focused element is suspect too (Prism's new-folder
+                // dialog, Electron, field 2026-11-10: a fixed 2070,1170 below the 1520,1022 852x86
+                // input on every keystroke). MSAA's caret replaces it only from inside the element.
+                const wind::TrackBox elemBox{ b.left, b.top, b.right, b.bottom };
+                const bool uiaOutside = !java && src[0] == 'u' &&
+                    !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, elemBox);
                 if (!java && src[0] == 'u' &&
-                    (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost) ||
+                    (uiaOutside ||
+                     wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost) ||
                      wind::IsOffLineHeight((int)rc.top, (int)rc.bottom, caretLine.lineH))) {
                     RECT m{};
                     if (MsaaCaret(m) && !EqualRect(&m, &rc) &&
+                        CaretInsideElement({ m.left, m.top, m.right, m.bottom }, elemBox) &&
                         !wind::IsLineEndGhost((int)m.left, (int)m.top, (int)m.bottom, caretGhost)) {
                         if (log_.load() && !EqualRect(&m, &lastCaret))
                             wind::Log(wind::LogLevel::Info, "track", "uia suspect %ld,%ld %ldx%ld: msaa caret %ld,%ld instead",
@@ -769,9 +777,9 @@ struct FocusRun {
                     // In a Gecko browser (Firefox, Zen, LibreWolf...: one window class), a caret
                     // outside its own element is a bad report, not a place to look (a zoomed iframe,
                     // issue #278; its UIA caret was wrong too, so there is no source to fall back
-                    // to): the view stays where it is. Other apps are unchanged, so no case that
-                    // worked before can lose tracking to this rule.
-                    if (IsGeckoWindow(fg) &&
+                    // to): the view stays where it is. Since #561 the same holds for every UIA caret
+                    // MSAA could not replace above (Chromium's fixed rect below Prism's dialog input).
+                    if ((IsGeckoWindow(fg) || src[0] == 'u') &&
                         !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
