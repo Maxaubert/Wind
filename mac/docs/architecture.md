@@ -1078,6 +1078,8 @@ caret following off. Each Tab must move the view onto the focused button; passes
 
 ## Settings window (2026-11-01)
 Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
+- **Opening Wind again** while it runs (Spotlight, Finder, `open -a Wind`) opens this window, or the
+  setup when `needsSetup` holds (`applicationShouldHandleReopen`, 0.5.8).
 - **Page:** `ui/` is Windows Wind's Svelte settings UI (copied at Wind commit `982e162`, see
   `ui/README.md`), adapted for the Mac. `scripts/build.sh` builds `ui/dist` and bundles it as
   `Wind.app/Contents/Resources/ui`.

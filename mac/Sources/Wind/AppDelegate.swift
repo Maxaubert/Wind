@@ -60,6 +60,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         !c.onboarded || !accessibility || (c.engine == "draw" && !screenRecording)
     }
 
+    /// Opening Wind again while it runs (Spotlight, Finder, the Dock, `open -a Wind`) shows Settings:
+    /// a menu-bar agent has no window for macOS to bring forward, so the reopen did nothing before.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let setup = AppDelegate.needsSetup(mag.config, accessibility: AXIsProcessTrusted(),
+                                           screenRecording: CGPreflightScreenCaptureAccess())
+        Log.info("reopened: showing \(setup ? "setup" : "Settings")")
+        showSettings(onboard: setup)
+        return false
+    }
+
     func applicationWillTerminate(_ n: Notification) {
         mag.stop()
         HIDGain.shared.restoreNow()
