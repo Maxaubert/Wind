@@ -201,6 +201,10 @@ final class WindCursor {
         p.ignoresMouseEvents = true
         p.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)   // above the crosshair
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // Wind is a regular, hideable app while Settings is open (Hide Others, the owner's Win+D script):
+        // hiding it must take only the Settings window. An overlay hidden with the app was ordered back
+        // in a tick later, which unhid the whole app and brought Settings back (owner 2026-11-11).
+        p.canHide = false
         let v = NSView()
         v.wantsLayer = true
         image.contentsGravity = .resize

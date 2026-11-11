@@ -82,6 +82,7 @@ final class Crosshair {
         p.ignoresMouseEvents = true
         p.level = .screenSaver
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.canHide = false   // see WindCursor
         let v = NSView()
         v.wantsLayer = true
         outline.strokeColor = NSColor.black.withAlphaComponent(0.6).cgColor
