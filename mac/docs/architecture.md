@@ -1080,6 +1080,10 @@ caret following off. Each Tab must move the view onto the focused button; passes
 Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
 - **Opening Wind again** while it runs (Spotlight, Finder, `open -a Wind`) opens this window, or the
   setup when `needsSetup` holds (`applicationShouldHandleReopen`, 0.5.8).
+- **A normal window while open** (0.5.9): Wind turns into a regular app (Dock icon, Cmd+Tab, moves aside for
+  Show Desktop) and back to a menu-bar agent when it closes. The page covers the transparent title bar, so
+  `DragWebView` drags the window from the top 28 px (only while the page sits at the top, reported by `titleBand`)
+  and the empty top of the sidebar; a double click there zooms.
 - **Page:** `ui/` is Windows Wind's Svelte settings UI (copied at Wind commit `982e162`, see
   `ui/README.md`), adapted for the Mac. `scripts/build.sh` builds `ui/dist` and bundles it as
   `Wind.app/Contents/Resources/ui`.

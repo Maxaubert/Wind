@@ -711,6 +711,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         w.animationBehavior = .none
         w.isReleasedWhenClosed = false
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        w.canHide = false   // see WindCursor
         let v = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
         v.wantsLayer = true
         v.layer?.backgroundColor = NSColor.black.cgColor

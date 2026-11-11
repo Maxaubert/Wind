@@ -392,6 +392,7 @@ final class ShotPanel {
         p.ignoresMouseEvents = true
         p.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.canHide = false   // see WindCursor
         let v = NSView()
         v.wantsLayer = true
         v.layer?.addSublayer(layers.root)

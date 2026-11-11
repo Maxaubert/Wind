@@ -59,4 +59,6 @@ export function onMacStatus(fn) { return onMessage(m => { if (m && m.type === 'm
 // openAccessibility | openScreenRecording | fixZoomShortcuts | setLogin (value "1"/"0") | showLog | rerunSetup
 export function macAction(action, value = '') { post({ type: 'macAction', action, value: String(value) }); }
 // While a keybind box records, Wind's own hotkeys are paused so the press reaches the page.
+/** The top of the page column holds only the banner (scrolled to the top): the host drags the window there. */
+export function titleBand(on) { post({ type: 'titleBand', on: on ? '1' : '0' }); }
 export function captureBinds(on) { post({ type: 'captureBinds', on: on ? '1' : '0' }); }
