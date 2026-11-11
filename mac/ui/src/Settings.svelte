@@ -11,7 +11,7 @@
   import '$shared/design/themes.css';
   import { groups, missingPermissions } from './settings-schema.js';
   import { getSession, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
-           getMacStatus, onMacStatus, macAction } from './bridge.js';
+           getMacStatus, onMacStatus, macAction, titleBand } from './bridge.js';
   import { fill } from './session.js';
   import { themes, normalizePalette } from '$shared/design/themes.js';
   import { capturing } from './lib/capture.js';
@@ -155,6 +155,15 @@
   const advOn = $derived(Number(values.showAdvanced) === 1);
   const shown = (r) => visible(r) && (!r.adv || advOn);
   const extra = $derived({ version: VERSION, mac, onAction, onMacAction });
+
+  // Tell the host when the top of the page column holds only the banner, so it can drag the window there
+  // (DragWebView). Scrolled or searching, controls sit under that band and keep their clicks.
+  let bandFree = null;
+  function reportBand() {
+    const free = !searching && (!main || main.scrollTop < 1);
+    if (free !== bandFree) { bandFree = free; titleBand(free); }
+  }
+  $effect(() => { searching; activeId; queueMicrotask(reportBand); });
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -163,7 +172,7 @@
   <div class="body">
     <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
              onSelect={(id) => { clearSearch(); select(id); }} />
-    <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={searching ? 'Search results' : group.label}>
+    <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} onscroll={reportBand} tabindex="-1" aria-label={searching ? 'Search results' : group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
       {#if searching}

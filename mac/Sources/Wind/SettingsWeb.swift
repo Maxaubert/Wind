@@ -46,7 +46,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         let ucc = WKUserContentController()
         ucc.add(WeakHandler(self), name: "wind")
         cfg.userContentController = ucc
-        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 1040, height: 720), configuration: cfg)
+        let web = DragWebView(frame: NSRect(x: 0, y: 0, width: 1040, height: 720), configuration: cfg)
         web.navigationDelegate = self
         web.setValue(false, forKey: "drawsBackground")           // the window's dark fill shows until the page paints
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 720),
@@ -78,6 +78,9 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
             return
         }
         #endif
+        // A regular app while the window is open: a Dock icon and Cmd+Tab entry, and the window moves
+        // aside for Show Desktop like any other (an accessory app's window stayed put, owner 2026-11-11).
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
     }
@@ -161,6 +164,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
             if s("action") == "fixZoomShortcuts" { fixZoom?() } else { macAction?(s("action"), s("value")) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.pushMacStatus() }
         case "captureBinds": onCapture?(s("on") == "1")
+        case "titleBand": (web as? DragWebView)?.contentBandFree = s("on") == "1"
         case "dirty", "saveSession", "discardSession": break   // no sessions on the Mac
         default: Log.verbose("settings: unknown message \(type)")
         }
@@ -257,6 +261,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         onboarding = false
         window?.contentView = nil
         web = nil; window = nil
+        NSApp.setActivationPolicy(.accessory)   // back to a menu-bar agent: no Dock icon
     }
 
     /// An agent app has no menu bar, so the web view would get no Cut/Copy/Paste/Select All/Close keys.
@@ -356,3 +361,30 @@ extension SettingsWindowController {
     func testClose() { window?.performClose(nil) }
 }
 #endif
+
+/// The page covers the whole window (transparent title bar), so the web view takes every click and the
+/// window could not be dragged. The title bar band (and the empty top of the sidebar, beside the traffic
+/// lights) drags the window, and a double click there zooms it, as in a native title bar. The page keeps
+/// those bands free of controls (Sidebar.svelte's top padding; the page banner, reported by `titleBand`).
+final class DragWebView: WKWebView {
+    static let titleBand: CGFloat = 28, sideBand: CGFloat = 40, sideWidth: CGFloat = 240, narrow: CGFloat = 700, lights: CGFloat = 84
+
+    /// The page column's top band holds only the page banner (scrolled to the top). Scrolled, controls pass
+    /// under it and keep their clicks; the page reports it (`titleBand`).
+    var contentBandFree = true
+
+    static func dragsWindow(at p: NSPoint, width: CGFloat, contentFree: Bool) -> Bool {
+        if width <= narrow { return p.y < titleBand && p.x < lights }   // narrow: the strip's left gap only
+        if p.x < sideWidth { return p.y < sideBand }
+        return contentFree && p.y < titleBand
+    }
+
+    override func mouseDown(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        let y = isFlipped ? p.y : bounds.height - p.y
+        guard let w = window, DragWebView.dragsWindow(at: NSPoint(x: p.x, y: y), width: bounds.width, contentFree: contentBandFree) else {
+            super.mouseDown(with: e); return
+        }
+        if e.clickCount == 2 { w.performZoom(nil) } else { w.performDrag(with: e) }
+    }
+}
