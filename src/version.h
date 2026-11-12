@@ -5,9 +5,9 @@
 #pragma once
 
 #define WIND_VER_MAJOR 0
-#define WIND_VER_MINOR 29
-#define WIND_VER_PATCH 4
+#define WIND_VER_MINOR 30
+#define WIND_VER_PATCH 0
 
 // String form for logs/snapshot/UI. Keep in sync with the numeric parts above (tests/test_version.cpp
 // fails when it is not). A literal, not stringized: wind.rc and wind_tray.rc consume it as one string.
-#define WIND_VERSION_STR "0.29.4"
+#define WIND_VERSION_STR "0.30.0"

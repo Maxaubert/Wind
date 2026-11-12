@@ -2,6 +2,7 @@
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include <windows.h>
 #include <dwmapi.h>
+#include "blink_capture.h"   // Glint capture blink (#565)
 #include <tlhelp32.h>
 #include <magnification.h>
 #include <cmath>
@@ -523,7 +524,7 @@ static bool IsTransformExcluded(HWND fg, const Config& cfg) {
 // user can sensibly pick out of a file browser, and a second user-managed list is not worth the
 // settings surface. Only consulted for windows that already failed the free style test below.
 static const char* kOverlayExes =
-    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe";
+    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe,glint.exe";
 
 // Is the foreground an overlay rather than a real app? While one is up the Auto engine choice is
 // FROZEN: such a tool holds foreground for a couple of seconds and hands it straight back, so
@@ -3096,6 +3097,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
         return 0;
     }
+    // Capture blink (#565). Every capture API sees the zoomed picture while the transform is
+    // applied, so Glint (snipping tool) asks Wind for the real desktop: wParam 2, lParam = Glint's
+    // pid, which names the section it created. Wind prepares the duplication first (slow once, then
+    // warm), writes identity, flushes one composition, grabs that frame, writes the zoom straight
+    // back (the visible blink is about one frame) and copies the pixels into the section.
+    // Reply 1 = the frame is in the section; 0 = not zoomed or it failed (Glint captures as usual).
+    // Runs on the tick thread (this window's thread), as the thread-affine Magnification API needs.
+    static const UINT kCaptureBlinkMsg = RegisterWindowMessageW(L"Wind.CaptureBlink.v1");
+    if (kCaptureBlinkMsg && msg == kCaptureBlinkMsg) {
+        static wind::BlinkCapture s_blink;
+        auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->model) : nullptr;
+        if (wp != 2 || !tm || !tm->blinkable()) return 0;
+        if (!s_blink.prepare(g_tick->mon)) return 0;
+        tm->captureBlink(true);
+        DwmFlush();                      // the identity frame is composited and on screen
+        const bool grabbed = s_blink.grab();
+        tm->captureBlink(false);         // zoom back before the slow part (reading the copy)
+        const bool ok = grabbed && s_blink.publish(g_tick->mon, static_cast<DWORD>(lp));
+        wind::Log(wind::LogLevel::Info, "blink", "capture blink for pid %lu: %s",
+                  static_cast<unsigned long>(lp), ok ? "ok" : "failed");
+        return ok ? 1 : 0;
+    }
     if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
         if (g_tick) g_tick->quickZoomHotkey.store(true);   // RunTick consumes it (rising-edge via MOD_NOREPEAT)
         return 0;
@@ -3394,6 +3417,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind", WS_OVERLAPPED,
                                 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
+    // Glint's capture blink (#565) comes from an ordinary process; let it through UIPI.
+    ChangeWindowMessageFilterEx(hwnd, RegisterWindowMessageW(L"Wind.CaptureBlink.v1"), MSGFLT_ALLOW, nullptr);
 
     // Mouse AND keyboard (issue #167). The keyboard registration exists for exactly one reason: an
     // LL hook can be silently evicted mid-hold, and the key UP then reaches nobody, stranding a

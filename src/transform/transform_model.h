@@ -27,6 +27,12 @@ public:
     // This session draws DWM's pointer (false: the legacy sprite session). Before the session's
     // setActive(true) it answers for the session about to start.
     bool nativeSession() const { return active_ ? nativeSession_ : nativePref_; }
+    // Capture blink (issue #565): a screen-capture tool (Glint) needs one unmagnified desktop
+    // frame, because every capture API returns the zoomed picture while the transform is applied.
+    // on=true writes identity, on=false writes the last applied transform back. blinkable() says
+    // whether there is a zoom to blink out of.
+    bool blinkable() const { return active_ && lastLevel_ > 1.0; }
+    bool captureBlink(bool on);
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
     // ComputeMagTransform, the crosshair's placement offsets and the MagSetInputTransform rects, and

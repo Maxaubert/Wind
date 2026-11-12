@@ -121,7 +121,7 @@ a game at 8x swaps engines with level and lens kept. Three dampers:
   and `borderless` stay per tick.
 - **350 ms settle** (`t.wantModel`/`t.wantSinceMs`): the candidate must hold for 350 ms. Each flip
   rebuilds DWM's magnification context, a visible stall.
-- **Overlay freeze** (`IsOverlayFg`): while Snipping Tool, ScreenSketch or TextInputHost
+- **Overlay freeze** (`IsOverlayFg`): while Snipping Tool, ScreenSketch, TextInputHost, Glint
   (`kOverlayExes`) or the game-inspect focus stealer holds foreground, the pick is skipped, so
   handing foreground back is not a second handover. Inspect sessions are never switched.
 

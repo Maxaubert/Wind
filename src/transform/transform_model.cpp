@@ -262,6 +262,14 @@ void TransformModel::noteWrite(double ms, bool ok) {
 // 0.02ms avg / 0.5ms max, so it never stalls the tick. The hitch is DWM's ASYNCHRONOUS
 // re-scale work, addressed by txMaxStepPct. Writes stay on the tick thread; only the timing
 // instrumentation remains.
+bool TransformModel::captureBlink(bool on) {
+    if (!active_ || lastLevel_ <= 1.0) return false;
+    // Same channel as the session's own writes, so the restore lands exactly where the view was.
+    if (on) writeTransform(1.0f, 0, 0, 0, 0, fastPan_);
+    else    writeTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, fastPan_);
+    return true;
+}
+
 void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast) {
     LARGE_INTEGER fr, a, b;
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);

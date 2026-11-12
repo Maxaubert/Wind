@@ -343,6 +343,34 @@ layered, click-through, tool, non-activating or no-redirection-bitmap windows. W
 Snipping Tool overlay froze the view for 1.5 s on every snip. `WS_EX_TOPMOST` is not in the veto
 set, because games set it. `launchQuiesce=0` disables the hold; it is a test knob only.
 
+## Capture blink
+
+While the transform is applied, every screen-capture API returns the magnified picture (GDI
+`BitBlt` and DXGI Desktop Duplication, measured 2026-11-12 with Glint's `zoomprobe`). A snipping
+tool that freezes the screen therefore froze the zoomed view, and zooming out inside its overlay
+showed nothing more (issue #565).
+
+Glint creates a section `Local\Glint.CaptureFrame.<pid>` and sends the registered message
+`Wind.CaptureBlink.v1` (wParam 2, lParam = its pid) to the `WindMagnifierWnd` window, which
+`ChangeWindowMessageFilterEx` lets through UIPI. On the tick thread, WndProc:
+
+1. `BlinkCapture::prepare` (`src/transform/blink_capture.*`): a D3D11 device on the target
+   monitor's output, created on first use (~150 ms) and kept warm. Done before the blink, so it never
+   lengthens it.
+2. `TransformModel::captureBlink(true)` writes identity on the session's channel; one `DwmFlush`.
+3. `grab`: a fresh `DuplicateOutput1` (FP16 first), whose first frame is the 1x desktop, and a GPU
+   copy into a staging texture.
+4. `captureBlink(false)` writes the last applied transform back. The visible blink is steps 2 to 4,
+   about one frame (an earlier version kept 1x while Glint copied the screen with GDI, ~60 ms, which
+   the owner found too visible).
+5. `publish` maps the copy and writes a 32-byte `BlinkFrameHeader` (magic `GLBF`, version 1, size,
+   stride, format 1 = BGRA8 or 2 = RGBA16F scRGB, monitor origin) plus the rows into the section.
+
+Reply 1 means the frame is in the section; 0 means not zoomed or a step failed, and Glint captures
+as usual. The restore is an explicit write because an unpaused tick only writes on change. Only the
+transform engine needs this: the render overlay is capture-excluded. `glint.exe` is also in
+`kOverlayExes`, so its overlay freezes the engine pick like the Snipping Tool's ([03](03-engines.md)).
+
 ## Hook writes (removed)
 
 A removed experiment moved runtime ownership to the mouse-hook thread and
