@@ -378,6 +378,7 @@ struct TickState {
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
     unsigned long long lastCoverProbeMs = 0;   // throttles the idle-tick cover watch to ~4Hz
+    unsigned long long captureBlinkUntilMs = 0; // capture blink (#565) in progress: writes paused until then
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -523,7 +524,7 @@ static bool IsTransformExcluded(HWND fg, const Config& cfg) {
 // user can sensibly pick out of a file browser, and a second user-managed list is not worth the
 // settings surface. Only consulted for windows that already failed the free style test below.
 static const char* kOverlayExes =
-    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe";
+    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe,glint.exe";
 
 // Is the foreground an overlay rather than a real app? While one is up the Auto engine choice is
 // FROZEN: such a tool holds foreground for a couple of seconds and hands it straight back, so
@@ -2502,7 +2503,13 @@ static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, boo
     // Deadline-based, so a short press can never strand leftover hold into the next session
     // (the old tick countdown only decremented while zoomed, which did exactly that).
     const bool quiesceHold = QuiesceHoldActive(t);
-    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+    // Capture blink (#565): a tool that never sends the end message must not strand the view at 1x.
+    if (t.captureBlinkUntilMs && GetTickCount64() >= t.captureBlinkUntilMs) {
+        t.captureBlinkUntilMs = 0;
+        if (auto* tm = dynamic_cast<TransformModel*>(t.model)) tm->captureBlink(false);
+        wind::Log(wind::LogLevel::Info, "blink", "capture blink timed out; transform restored");
+    }
+    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold || t.captureBlinkUntilMs != 0;
     {
         auto& zs = g_input.state();
         ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
@@ -3096,6 +3103,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
         return 0;
     }
+    // Capture blink (#565). Glint (snipping tool) sends wParam 1 before it copies the screen and
+    // wParam 0 after. Every capture API sees the zoomed picture while the transform is applied, so
+    // start writes identity, waits until that frame is composited and pauses the tick's writes; end
+    // puts the last transform back. Reply 1 = the desktop is unzoomed now. Runs on the tick thread
+    // (this window's thread), as the thread-affine Magnification API requires.
+    static const UINT kCaptureBlinkMsg = RegisterWindowMessageW(L"Wind.CaptureBlink.v1");
+    if (kCaptureBlinkMsg && msg == kCaptureBlinkMsg) {
+        auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->model) : nullptr;
+        if (!tm) return 0;
+        if (wp == 1) {
+            if (!tm->captureBlink(true)) return 0;
+            g_tick->captureBlinkUntilMs = GetTickCount64() + 400;
+            DwmFlush();   // the identity write lands on the next composition; two flushes make
+            DwmFlush();   // sure that frame is on screen before the tool copies it
+            return 1;
+        }
+        if (g_tick->captureBlinkUntilMs) {
+            g_tick->captureBlinkUntilMs = 0;
+            tm->captureBlink(false);
+        }
+        return 1;
+    }
     if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
         if (g_tick) g_tick->quickZoomHotkey.store(true);   // RunTick consumes it (rising-edge via MOD_NOREPEAT)
         return 0;
@@ -3394,6 +3423,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind", WS_OVERLAPPED,
                                 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
+    // Glint's capture blink (#565) comes from an ordinary process; let it through UIPI.
+    ChangeWindowMessageFilterEx(hwnd, RegisterWindowMessageW(L"Wind.CaptureBlink.v1"), MSGFLT_ALLOW, nullptr);
 
     // Mouse AND keyboard (issue #167). The keyboard registration exists for exactly one reason: an
     // LL hook can be silently evicted mid-hold, and the key UP then reaches nobody, stranding a

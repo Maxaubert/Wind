@@ -343,6 +343,26 @@ layered, click-through, tool, non-activating or no-redirection-bitmap windows. W
 Snipping Tool overlay froze the view for 1.5 s on every snip. `WS_EX_TOPMOST` is not in the veto
 set, because games set it. `launchQuiesce=0` disables the hold; it is a test knob only.
 
+## Capture blink
+
+While the transform is applied, every screen-capture API returns the magnified picture (GDI
+`BitBlt` and DXGI Desktop Duplication, measured 2026-11-12 with Glint's `zoomprobe`). A snipping
+tool that freezes the screen therefore froze the zoomed view, and zooming out inside its overlay
+showed nothing more (issue #565).
+
+Glint asks for a blink with the registered message `Wind.CaptureBlink.v1`, sent to the
+`WindMagnifierWnd` window (allowed through UIPI with `ChangeWindowMessageFilterEx`):
+
+| wParam | Wind does | Reply |
+|---|---|---|
+| 1 | `TransformModel::captureBlink(true)` writes identity on the session's channel, two `DwmFlush` calls wait until that frame is composited, and `captureBlinkUntilMs` pauses the tick's writes (`PresentExtras::pauseWrites`) | 1 when the desktop is now unzoomed, 0 when the transform engine is not zoomed |
+| 0 | `captureBlink(false)` writes the last applied transform back and clears the pause | 1 |
+
+The restore is an explicit write because an unpaused tick only writes on change. If the tool never
+sends wParam 0, the tick restores the view after 400 ms. Only the transform engine needs this: the
+render overlay is capture-excluded. `glint.exe` is also in `kOverlayExes`, so its overlay freezes
+the engine pick like the Snipping Tool's ([03](03-engines.md)).
+
 ## Hook writes (removed)
 
 A removed experiment moved runtime ownership to the mouse-hook thread and
