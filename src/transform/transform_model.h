@@ -29,8 +29,9 @@ public:
     bool nativeSession() const { return active_ ? nativeSession_ : nativePref_; }
     // Capture blink (issue #565): a screen-capture tool (Glint) needs one unmagnified desktop
     // frame, because every capture API returns the zoomed picture while the transform is applied.
-    // on=true writes identity (only while zoomed; returns false otherwise), on=false writes the
-    // last applied transform back. The caller pauses the tick's own writes in between.
+    // on=true writes identity, on=false writes the last applied transform back. blinkable() says
+    // whether there is a zoom to blink out of.
+    bool blinkable() const { return active_ && lastLevel_ > 1.0; }
     bool captureBlink(bool on);
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in

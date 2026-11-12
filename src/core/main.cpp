@@ -2,6 +2,7 @@
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include <windows.h>
 #include <dwmapi.h>
+#include "blink_capture.h"   // Glint capture blink (#565)
 #include <tlhelp32.h>
 #include <magnification.h>
 #include <cmath>
@@ -378,7 +379,6 @@ struct TickState {
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
     unsigned long long lastCoverProbeMs = 0;   // throttles the idle-tick cover watch to ~4Hz
-    unsigned long long captureBlinkUntilMs = 0; // capture blink (#565) in progress: writes paused until then
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -2503,13 +2503,7 @@ static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, boo
     // Deadline-based, so a short press can never strand leftover hold into the next session
     // (the old tick countdown only decremented while zoomed, which did exactly that).
     const bool quiesceHold = QuiesceHoldActive(t);
-    // Capture blink (#565): a tool that never sends the end message must not strand the view at 1x.
-    if (t.captureBlinkUntilMs && GetTickCount64() >= t.captureBlinkUntilMs) {
-        t.captureBlinkUntilMs = 0;
-        if (auto* tm = dynamic_cast<TransformModel*>(t.model)) tm->captureBlink(false);
-        wind::Log(wind::LogLevel::Info, "blink", "capture blink timed out; transform restored");
-    }
-    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold || t.captureBlinkUntilMs != 0;
+    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
     {
         auto& zs = g_input.state();
         ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
@@ -3103,27 +3097,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
         return 0;
     }
-    // Capture blink (#565). Glint (snipping tool) sends wParam 1 before it copies the screen and
-    // wParam 0 after. Every capture API sees the zoomed picture while the transform is applied, so
-    // start writes identity, waits until that frame is composited and pauses the tick's writes; end
-    // puts the last transform back. Reply 1 = the desktop is unzoomed now. Runs on the tick thread
-    // (this window's thread), as the thread-affine Magnification API requires.
+    // Capture blink (#565). Every capture API sees the zoomed picture while the transform is
+    // applied, so Glint (snipping tool) asks Wind for the real desktop: wParam 2, lParam = Glint's
+    // pid, which names the section it created. Wind prepares the duplication first (slow once, then
+    // warm), writes identity, flushes one composition, grabs that frame, writes the zoom straight
+    // back (the visible blink is about one frame) and copies the pixels into the section.
+    // Reply 1 = the frame is in the section; 0 = not zoomed or it failed (Glint captures as usual).
+    // Runs on the tick thread (this window's thread), as the thread-affine Magnification API needs.
     static const UINT kCaptureBlinkMsg = RegisterWindowMessageW(L"Wind.CaptureBlink.v1");
     if (kCaptureBlinkMsg && msg == kCaptureBlinkMsg) {
+        static wind::BlinkCapture s_blink;
         auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->model) : nullptr;
-        if (!tm) return 0;
-        if (wp == 1) {
-            if (!tm->captureBlink(true)) return 0;
-            g_tick->captureBlinkUntilMs = GetTickCount64() + 400;
-            DwmFlush();   // the identity write lands on the next composition; two flushes make
-            DwmFlush();   // sure that frame is on screen before the tool copies it
-            return 1;
-        }
-        if (g_tick->captureBlinkUntilMs) {
-            g_tick->captureBlinkUntilMs = 0;
-            tm->captureBlink(false);
-        }
-        return 1;
+        if (wp != 2 || !tm || !tm->blinkable()) return 0;
+        if (!s_blink.prepare(g_tick->mon)) return 0;
+        tm->captureBlink(true);
+        DwmFlush();                      // the identity frame is composited and on screen
+        const bool grabbed = s_blink.grab();
+        tm->captureBlink(false);         // zoom back before the slow part (reading the copy)
+        const bool ok = grabbed && s_blink.publish(g_tick->mon, static_cast<DWORD>(lp));
+        wind::Log(wind::LogLevel::Info, "blink", "capture blink for pid %lu: %s",
+                  static_cast<unsigned long>(lp), ok ? "ok" : "failed");
+        return ok ? 1 : 0;
     }
     if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
         if (g_tick) g_tick->quickZoomHotkey.store(true);   // RunTick consumes it (rising-edge via MOD_NOREPEAT)

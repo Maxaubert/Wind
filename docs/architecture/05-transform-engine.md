@@ -350,18 +350,26 @@ While the transform is applied, every screen-capture API returns the magnified p
 tool that freezes the screen therefore froze the zoomed view, and zooming out inside its overlay
 showed nothing more (issue #565).
 
-Glint asks for a blink with the registered message `Wind.CaptureBlink.v1`, sent to the
-`WindMagnifierWnd` window (allowed through UIPI with `ChangeWindowMessageFilterEx`):
+Glint creates a section `Local\Glint.CaptureFrame.<pid>` and sends the registered message
+`Wind.CaptureBlink.v1` (wParam 2, lParam = its pid) to the `WindMagnifierWnd` window, which
+`ChangeWindowMessageFilterEx` lets through UIPI. On the tick thread, WndProc:
 
-| wParam | Wind does | Reply |
-|---|---|---|
-| 1 | `TransformModel::captureBlink(true)` writes identity on the session's channel, two `DwmFlush` calls wait until that frame is composited, and `captureBlinkUntilMs` pauses the tick's writes (`PresentExtras::pauseWrites`) | 1 when the desktop is now unzoomed, 0 when the transform engine is not zoomed |
-| 0 | `captureBlink(false)` writes the last applied transform back and clears the pause | 1 |
+1. `BlinkCapture::prepare` (`src/transform/blink_capture.*`): a D3D11 device on the target
+   monitor's output, created on first use (~150 ms) and kept warm. Done before the blink, so it never
+   lengthens it.
+2. `TransformModel::captureBlink(true)` writes identity on the session's channel; one `DwmFlush`.
+3. `grab`: a fresh `DuplicateOutput1` (FP16 first), whose first frame is the 1x desktop, and a GPU
+   copy into a staging texture.
+4. `captureBlink(false)` writes the last applied transform back. The visible blink is steps 2 to 4,
+   about one frame (an earlier version kept 1x while Glint copied the screen with GDI, ~60 ms, which
+   the owner found too visible).
+5. `publish` maps the copy and writes a 32-byte `BlinkFrameHeader` (magic `GLBF`, version 1, size,
+   stride, format 1 = BGRA8 or 2 = RGBA16F scRGB, monitor origin) plus the rows into the section.
 
-The restore is an explicit write because an unpaused tick only writes on change. If the tool never
-sends wParam 0, the tick restores the view after 400 ms. Only the transform engine needs this: the
-render overlay is capture-excluded. `glint.exe` is also in `kOverlayExes`, so its overlay freezes
-the engine pick like the Snipping Tool's ([03](03-engines.md)).
+Reply 1 means the frame is in the section; 0 means not zoomed or a step failed, and Glint captures
+as usual. The restore is an explicit write because an unpaused tick only writes on change. Only the
+transform engine needs this: the render overlay is capture-excluded. `glint.exe` is also in
+`kOverlayExes`, so its overlay freezes the engine pick like the Snipping Tool's ([03](03-engines.md)).
 
 ## Hook writes (removed)
 
