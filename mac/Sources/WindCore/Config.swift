@@ -70,6 +70,8 @@ public struct Config: Codable, Equatable {
     public var fullPointerSpeed = true
 
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
+    /// The menu bar icon. Hidden, opening Wind again (Spotlight, Finder) shows Settings, where it comes back.
+    public var showMenuBarIcon = true
 
     // Settings window (ui/). Read by the page only, except onboarded (AppDelegate.needsSetup).
     public var uiPalette = "grey"                 // the built-in theme: grey, ember, ocean or hicon
