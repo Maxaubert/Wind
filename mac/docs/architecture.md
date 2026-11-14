@@ -1080,6 +1080,8 @@ caret following off. Each Tab must move the view onto the focused button; passes
 Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
 - **Opening Wind again** while it runs (Spotlight, Finder, `open -a Wind`) opens this window, or the
   setup when `needsSetup` holds (`applicationShouldHandleReopen`, 0.5.8).
+- **Menu bar icon** (0.6.0): `showMenuBarIcon` (menu item "Show in menu bar", and a Settings row) hides the status
+  item; Wind keeps running and opening it again shows Settings. It always shows while Accessibility is missing.
 - **A normal window while open** (0.5.9): Wind turns into a regular app (Dock icon, Cmd+Tab, moves aside for
   Show Desktop) and back to a menu-bar agent when it closes. The page covers the transparent title bar, so
   `DragWebView` drags the window from the top 28 px (only while the page sits at the top, reported by `titleBand`)

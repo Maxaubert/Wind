@@ -168,6 +168,8 @@ export const groups = [
           desc: 'They fight Wind for the zoom when they are on', on: 'Off', off: 'On', btn: 'Turn off', action: 'fixZoomShortcuts' },
         { key: '__loginItem', type: 'macstatus', status: 'loginItem', toggle: true, label: 'Open at login', keywords: ['startup', 'start up', 'launch', 'boot', 'login items', 'autostart', 'automatically', 'sign in', 'background'],
           desc: 'Starts Wind when you log in', action: 'setLogin' },
+        { key: 'showMenuBarIcon', type: 'toggle', label: 'Show in menu bar', keywords: ['menu bar', 'menubar', 'status bar', 'status item', 'icon', 'tray', 'hide', 'show', 'top bar', 'magnifying glass'],
+          desc: 'When hidden, open Wind again from Spotlight or Finder to get here', def: 1 },
         { key: 'logLevel', type: 'select', label: 'Log detail', keywords: ['log', 'logging', 'verbose', 'debug', 'diagnostics', 'trace', 'quiet', 'file', 'troubleshoot'],
           desc: 'How much Wind writes to its log', options: ['0', '1', '2', '3'], optionLabels: { '0': 'Quiet', '1': 'Sessions', '2': 'Verbose', '3': 'Every zoom step' }, def: '1' },
         { key: '__showLog', type: 'button', label: 'Show log', keywords: ['log', 'logs', 'console', 'debug', 'troubleshoot', 'problem', 'file', 'history'],

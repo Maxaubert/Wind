@@ -31,6 +31,7 @@
     "quit": { "type": "list", "def": "cmd+escape" },
     "renderScaling": { "type": "int", "def": "0", "min": 0, "max": 0 },
     "showAdvanced": { "type": "bool", "def": "0" },
+    "showMenuBarIcon": { "type": "bool", "def": "1" },
     "slowPanGlide": { "type": "bool", "def": "0" },
     "slowPrecision": { "type": "bool", "def": "0" },
     "smoothImages": { "type": "bool", "def": "0" },

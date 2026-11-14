@@ -97,5 +97,5 @@ test('General holds the theme, the screenshot and advanced switches; the macOS c
   await go(page, 'prefs');
   const keys = await page.locator('main .row').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-key')));
   expect(keys).toEqual(['uiPalette', 'ownScreenshot', 'showAdvanced', 'warmthPct', 'dimPct', '__accessibility', '__screenRecording',
-    '__zoomShortcuts', '__loginItem', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
+    '__zoomShortcuts', '__loginItem', 'showMenuBarIcon', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
 });

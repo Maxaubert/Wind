@@ -104,12 +104,12 @@ test('the engine select: Render, Backdrop or Transform (default), in the Engine 
   expect(schemaDefaults().engine).toBe('zoom');
 });
 
-test('the macOS card: status rows, the login switch, log detail and four buttons', () => {
+test('the macOS card: status rows, the login and menu bar switches, log detail and four buttons', () => {
   const prefs = groups.find((g) => g.id === 'prefs');
   const mac = prefs.cards.find((c) => c.caption === 'macOS');
   expect(mac.rows.map((r) => [r.key, r.type])).toEqual([
     ['__accessibility', 'macstatus'], ['__screenRecording', 'macstatus'], ['__zoomShortcuts', 'macstatus'],
-    ['__loginItem', 'macstatus'], ['logLevel', 'select'],
+    ['__loginItem', 'macstatus'], ['showMenuBarIcon', 'toggle'], ['logLevel', 'select'],
     ['__showLog', 'button'], ['__openIni', 'button'], ['__diagnostics', 'button'], ['__rerunSetup', 'button'],
   ]);
   const act = Object.fromEntries(mac.rows.map((r) => [r.key, r.action]));

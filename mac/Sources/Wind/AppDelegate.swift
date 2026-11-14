@@ -101,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         started = true
         statusItem.button?.title = ""
+        applyMenuBarIcon()
         checkSystemZoom()
         Log.info("started; binds: " + Action.allCases.map { a in
             "\(a)=\((mag.config.binds().binds[a] ?? []).map { $0.description }.joined(separator: "|"))" }.joined(separator: " "))
@@ -173,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for k in dropped { Log.error("config.json: \"\(k)\" has the wrong type, using the default") }
             configInvalid = false
             mag.apply(c)
+            applyMenuBarIcon()
             settingsWindow.update(c)
             Log.info("config loaded")
         } catch {
@@ -240,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Mouse within edges", #selector(toggleEdge), on: c.mouseAlign == 1))
         menu.addItem(.separator())
         menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
+        menu.addItem(item("Show in menu bar", #selector(hideMenuBarIcon), on: true))
         menu.addItem(item("Settings…", #selector(openSettings)))
         let more = NSMenu()
         more.addItem(item("Edit settings file…", #selector(openConfig)))
@@ -289,6 +292,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsWindow.show(config: mag.config, save: { [weak self] c in
             self?.saveConfig { $0 = c }
         }, fixZoom: { [weak self] in self?.turnOffSystemZoom() }, onboard: onboard)
+    }
+
+    /// The icon shows while Wind lacks Accessibility whatever the setting: it is where Wind says so.
+    private func applyMenuBarIcon() {
+        statusItem?.isVisible = mag.config.showMenuBarIcon || !started
+    }
+
+    @objc private func hideMenuBarIcon() {
+        let a = NSAlert()
+        a.messageText = "Hide Wind from the menu bar?"
+        a.informativeText = "Wind keeps running. To show the icon again, open Wind again (from Spotlight or Finder) and turn on Show in menu bar in Settings."
+        a.addButton(withTitle: "Hide"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        saveConfig { $0.showMenuBarIcon = false }
     }
 
     @objc private func toggleLogin() {
