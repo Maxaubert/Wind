@@ -420,15 +420,19 @@ turns held pan keys into a view delta in screen space, so the feel does not chan
 - While panning, KeyPan owns the view ahead of caret events. The delta is clamped to the monitor
   and the MPO wall. The pointer does not move; the next mouse move places it in the view.
 
-## Shell input panels
+## Shell input panels and the keyboard layout menu
 
 The emoji picker, clipboard history and touch keyboard are composed above every window band, so
-only the real pointer shows over them. A Native session needs nothing: DWM draws its pointer above
-the panels and keeps it centred, so the hand moves the pointer directly.
+only the real pointer shows over them. The taskbar keyboard layout menu (#569) behaves the same: it
+sits in band 3 (`ZBID_IMMERSIVE_IHM`, the input panels' band). A Native session needs nothing: DWM
+draws its pointer above the panels and keeps it centred, so the hand moves the pointer directly.
 
 A Wind session (#283, ported back in #492) switches to the real pointer while a panel is open.
-`FocusTracker::shellPanelOpen` follows `TextInputHost`'s `IME` window (UNCLOAKED = open, CLOAKED =
-closed, a 250 ms re-check while open, a scan at start-up). `MapPointer` then freezes the pointer with
+`FocusTracker::shellPanelOpen` follows two windows (`src/track/shell_panel.h`, tested):
+`TextInputHost`'s `IME` window (open while uncloaked) and explorer's
+`Shell_InputSwitchTopLevelWindow`, "Input Flyout" (open while visible and uncloaked; it shows and
+hides). Cloak and show/hide hooks feed it, a close rescans for any other open panel, a 250 ms
+re-check runs while one is open, and a scan runs at start-up. `MapPointer` then freezes the pointer with
 a 1 px clip and moves it from raw mickeys at the learned desktop gain (Inspect's replay); the model
 hides the sprite, restores the cursor set, turns the cursor lens style on (the public prime only if
 no lens could be built) and moves the pin right after the view write (`ex.realPointer`), so DWM never

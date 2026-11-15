@@ -18,7 +18,8 @@ public:
     // bridge DLL is never loaded.
     void setActive(bool on, bool wantCaret, bool wantFocus, bool wantJava, bool log);
     TrackSnapshot snapshot() const { std::lock_guard<std::mutex> g(mu_); return snap_; }
-    // A shell input panel (emoji picker Win+., clipboard Win+V, touch keyboard) is open (#283, #492).
+    // A shell panel is open (#283, #492, #569): an input panel (emoji picker Win+., clipboard Win+V,
+    // touch keyboard) or the taskbar keyboard layout menu (explorer's input switcher). See shell_panel.h.
     // Watched always, independent of setActive: a Wind (sprite) session shows the real pointer then.
     bool shellPanelOpen() const { return panelOpen_.load(); }
 private:
