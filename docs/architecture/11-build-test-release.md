@@ -115,6 +115,14 @@ upstream notices), generated files (`flyout_palettes.h`, `themes.css`, `themes.j
 file goes in the script's exclusion lists. The binaries carry the same notice as `LegalCopyright`
 (`src/wind.rc`, `src/tray_app/wind_tray.rc`, `installer/wind.nsi`).
 
+## Testing on other displays
+
+The proving ground can run on virtual screens (Virtual Display Driver), so it works with the TV off and
+across resolutions, refresh rates, scales and a second monitor. `run.ps1 -Display` picks the screen and
+`matrix.ps1` runs a list of setups. The screen is made primary because the transform engine only
+magnifies the primary (`src/engine/engine_pick.h`). Virtual runs are health-only unless the setup has its own
+baseline; the TV stays the reference for smoothness and latency. See `tools/testenv/README.md`.
+
 ## Local UIAccess deploy
 
 UIAccess is needed for the input-transform publish (transform on the desktop), binds over
