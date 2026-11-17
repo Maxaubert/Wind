@@ -232,6 +232,9 @@ followed by its own switch.
   something such as the Dock shows it again (see "The real cursor over the Dock").
 - The crosshair moves by raw mouse counts (`RawMouse`), like Wind's Inspect on Windows. Re-placing
   the hidden pointer every tick makes pointer readback timing unreliable for measuring the hand.
+- Render and Backdrop hold the pointer with a warp, and a warp always lands on a whole point (800.66 -> 800,
+  measured 2026-11-17). Inspect therefore anchors the pointer on the nearest whole point at the start; held at a
+  fraction, each tick's warp lost it and read as hand motion, so the crosshair ran off on its own (0.6.1).
 - While Inspect hides the pointer, game-lock detection is paused, so Wind's own hiding is never
   taken for a game.
 - The crosshair is drawn at the centre the zoom really shows (its whole-point centre), not at the

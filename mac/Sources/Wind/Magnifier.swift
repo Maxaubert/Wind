@@ -525,6 +525,14 @@ final class Magnifier {
         let p = Magnifier.pointer() ?? .zero
         inspectAnchor = p
         inspectRef = Pt(p.x, p.y)
+        if DrawZoom.enabled {
+            // Hold the pointer on a whole point. A warp to a fraction (the hand leaves the pointer
+            // between points) holds only until the next mouse report, which drops the fraction: read
+            // as hand motion every tick, the crosshair crept by it on its own while a mouse that
+            // reports constantly (a high-rate gaming mouse) sat still (owner 2026-11-17, ~0.66 pt a tick).
+            inspectAnchor = CGPoint(x: p.x.rounded(), y: p.y.rounded())
+            inspectRef = placePointer(at: Pt(inspectAnchor.x, inspectAnchor.y), from: Pt(p.x, p.y), level: zoom.level)
+        }
         // The crosshair starts exactly where the pointer is, and the view does not move: it
         // follows the look point the same way it followed the pointer.
         inspectLook = Pt(p.x, p.y)
