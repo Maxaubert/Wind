@@ -106,6 +106,15 @@ inspect_key(); c = ctl("state")
 check("draw engine: leaving Inspect puts the pointer on the crosshair", abs(c["pointer"][0] - b["look"][0]) < 2, f"pointer {c['pointer']} look {b['look']}")
 ctl("level 1"); time.sleep(0.4)
 
+# Inspect started with the pointer between points: a warp there lands on the whole point, and the
+# lost fraction read as hand motion every tick, so the crosshair ran off on its own (owner 2026-11-17).
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2)
+mv(1, 1, 1); time.sleep(0.2); ctl("level 4"); time.sleep(0.6)
+inspect_key(); mv(1, 0, 1); time.sleep(0.05); a = ctl("state"); time.sleep(1.5); b = ctl("state")
+check("draw engine: Inspect crosshair stays put after a small move from between points",
+      abs(b["look"][0] - a["look"][0]) < 0.5 and abs(b["look"][1] - a["look"][1]) < 0.5, f"{a['look']} -> {b['look']}")
+inspect_key(); ctl("level 1"); time.sleep(0.4)
+
 # Leaving Inspect while the hand still moves: the pointer starts on the crosshair and keeps moving
 # with the hand at once (a warp held the hand back ~0.1 s, then the pointer caught up and dragged the
 # view, owner 2026-11-01).
