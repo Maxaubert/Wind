@@ -92,12 +92,48 @@ Rules and limits:
 - External spec JSON (ZoomText etc.): name, exe, procNames, zoomInVks/zoomOutVks (the chord),
   startWaitMs. The external program is left running afterwards (it was likely there first).
 
+## Displays: TV, virtual screens and the matrix
+
+The suite needs a live display: with the TV off or asleep, DWM drops to about 13 Hz and every
+timing is noise. `run.ps1 -Display` decides what to do about it:
+
+| `-Display` | What happens |
+|---|---|
+| `auto` (default) | TV on: run on it as always. TV off or asleep: a virtual screen becomes primary for the run, if the driver is installed; otherwise the old abort (exit 4) |
+| `virtual` | Always a virtual primary. Set it with `-DisplayMode WxH@Hz,scale` (default `3840x2160@120,100`) and `-VirtualCount 2` for a second screen |
+| `tv` | Never switch |
+
+    pwsh -File tools\testenv\matrix.ps1                     # rapid across 6 setups, about 8 min
+    pwsh -File tools\testenv\matrix.ps1 -Only 1080p,dual
+    pwsh -File tools\testenv\display.ps1 -List
+    pwsh -File tools\testenv\display.ps1 -Restore           # after a crashed run
+
+The virtual screen must be primary because the transform engine magnifies the primary monitor only.
+The layout is saved to `results/display-layout.json` before any change and restored after each run.
+If the TV is still off at that point, the virtual screen stays and the snapshot is kept: run `-Restore`
+when the TV is back. Virtual monitors are detached from the desktop between runs.
+
+Setup, once per PC, as admin: `winget install VirtualDrivers.Virtual-Display-Driver`, then `devcon install`
+of the package's `SignedDrivers\x86\VDD\MttVDD.inf` with hardware id `Root\MttVDD`. Create
+`C:\VirtualDisplayDriver\vdd_settings.xml` first, with `<friendlyname>` set to the GPU Wind renders on,
+and list the modes the matrix uses. Monitors appear with `MTT1337` in their device path.
+
+What a virtual run proves: Wind starts, picks the right engine, zooms, stays within the cap and leaves
+no stranded state on that resolution, refresh rate, scale and monitor count. It does not prove
+smoothness or latency, so **virtual screens are health-only**: the absolute timing limits are calibrated
+on the 144 Hz TV and do not apply. Nor is HDR covered. While the TV is on and attached as a secondary, DWM
+still composes at its rate, so `hz` in the results is the screen's mode, not the pace measured.
+
 ## Baselines and CI
 
 `baselines.json` stores per-scenario PASS numbers from the dev machine (`-UpdateBaseline`). `-CI`
 compares with tolerance (1.6x + slack) and exits nonzero on regression. Absolute floors
 (dtP99 > 25 ms, jitP95 > 25 px, backSteps in a non-rezoom scenario) catch catastrophes even
 without a baseline.
+
+The top-level numbers are the TV's. Each virtual screen keeps its own under
+`profiles.<WxH@Hz,scale>`, so a virtual run is never judged against TV numbers; one without a baseline is
+health-only until `-UpdateBaseline`. Record them with the TV off, so the screen paces itself.
 
 GitHub-hosted runners cannot run this (no real GPU/display for Desktop Duplication or the
 Magnification API), so the push-to-main story is local: `hooks/pre-push.sample` (reminder
@@ -108,6 +144,8 @@ gate) and `register_nightly.ps1` (scheduled full run on the dev machine).
 | File | What it is |
 |---|---|
 | `run.ps1` | Orchestrator: suites (rapid, quick, full, soak, stress), scenarios, health checks, verdicts, JSON |
+| `display.ps1` | Virtual screens: attach, make primary, set mode and scale, snapshot and restore the layout |
+| `matrix.ps1` | Runs one suite across a list of virtual display setups, with one summary table |
 | `bench.ps1` | Cross-magnifier benchmark: scoreboard and `results/catalog.csv` history |
 | `lib.ps1` | Shared interop (injection, tones, Wind lifecycle, backdrops) and telemetry analysis |
 | `backdrop.ps1` | One backdrop window per child process |

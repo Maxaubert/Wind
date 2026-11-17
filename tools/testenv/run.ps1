@@ -9,6 +9,8 @@
 #   powershell -File tools\testenv\run.ps1 -Suite soak -Minutes 30
 #   powershell -File tools\testenv\run.ps1 -Suite full -CI       # exit 1 on regression vs baselines
 #   powershell -File tools\testenv\run.ps1 -Suite full -UpdateBaseline
+#   powershell -File tools\testenv\run.ps1 -Display virtual -DisplayMode 2560x1440@144,125
+#     -Display auto (default) uses the TV, or a virtual primary when the TV is off; see display.ps1
 #
 # Iteration gate: iterate (or quick by change risk) -> full -> PR. Run stress before releases
 # and after engine-level work. -Suite iterate = the load-bearing four in ~45s.
@@ -31,11 +33,50 @@ param(
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
   [switch]$UpdateBaseline,
+  [ValidateSet('auto','tv','virtual','current')] [string]$Display = 'auto',  # 'current' is internal
+  [ValidatePattern('^\d+x\d+@\d+,\d+$')] [string]$DisplayMode = '3840x2160@120,100',  # WxH@Hz,scale%
+  [ValidateRange(1,2)] [int]$VirtualCount = 1,
+  [string]$DisplayProfile = '',       # internal: set on the inner run that measures a virtual screen
   [string]$WindExe = 'C:\Program Files\Wind\Wind.exe'
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 $script:WindExe = $WindExe
+
+# VIRTUAL SCREEN (2026-11-08). The suite below has many exit paths and everything in it reads the
+# primary monitor, so the layout change wraps a whole child run of this script: this process owns
+# the switch and the restore, the child measures whatever is primary. Ctrl+C reaches the finally.
+. (Join-Path $PSScriptRoot 'display.ps1')
+$script:VirtualProfile = $DisplayProfile
+if ($Display -in @('auto','virtual')) {
+  $goVirtual = $Display -eq 'virtual'
+  if ($Display -eq 'auto' -and (Get-CompositeHz) -lt 50) {
+    if (Test-VirtualDisplayInstalled) { $goVirtual = $true; Write-Host 'The TV is off or asleep: using a virtual screen.' -ForegroundColor Yellow }
+  }
+  if ($goVirtual) {
+    $null = $DisplayMode -match '^(\d+)x(\d+)@(\d+),(\d+)$'
+    $code = 2
+    try {
+      $d = Use-VirtualPrimary -Width $Matches[1] -Height $Matches[2] -Hz $Matches[3] -Scale $Matches[4] -Count $VirtualCount
+      $key = Get-DisplayProfileKey $d
+      if ($VirtualCount -gt 1) { $key += "+$VirtualCount" }
+      Write-Host "Virtual primary ready: $key"
+      $inner = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Suite',$Suite,'-Minutes',$Minutes,'-WindExe',$WindExe,'-Display','current','-DisplayProfile',$key)
+      if ($NoFailFast) { $inner += '-NoFailFast' }
+      if ($CI) { $inner += '-CI' }
+      if ($UpdateBaseline) { $inner += '-UpdateBaseline' }
+      & (Get-Process -Id $PID).Path @inner
+      $code = $LASTEXITCODE
+    } catch {
+      Write-Host "VIRTUAL DISPLAY FAILURE: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+      $restored = Restore-DisplayLayout
+      Write-Host "Display layout: $restored"
+      if ($restored -eq 'pending') { Write-Host 'The TV is still off. When it is back: pwsh -File tools\testenv\display.ps1 -Restore' -ForegroundColor Yellow }
+    }
+    exit $code
+  }
+}
 
 $sw = [TE]::GetSystemMetrics(0); $sh = [TE]::GetSystemMetrics(1)
 $resultsDir = Join-Path $PSScriptRoot 'results'
@@ -160,6 +201,12 @@ $script:abortedOn = $null
 function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
   $why = @()
   if (-not $a -or $a.ticks -lt 10)           { return @('NO-DATA') }
+  # Every limit below is calibrated on the 144 Hz TV (a 60 Hz frame alone is over the 12 ms hitch
+  # line), so a virtual screen is health-only: alive, no device-lost, cap held, plus its own baseline.
+  if ($script:VirtualProfile) {
+    if ($a.maxLevel -gt $cap + 0.05) { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
+    return $why
+  }
   if ($a.dtP99 -and $a.dtP99 -gt 25.0)       { $why += "dtP99=$($a.dtP99)ms" }
   # HITCHING, calibrated against what this rig actually produces rather than a round number.
   # A healthy transform scenario runs dtP99 8.5-9.3ms with 0-4 hitches; the 25ms ceiling above
@@ -425,6 +472,9 @@ $ramLeak = [math]::Round($ramSamples['end'] - $ramSamples['start'], 1)
 # ---- verdicts -------------------------------------------------------------------------------
 # Absolute floors catch catastrophes even with no baseline; baselines tighten per-scenario.
 $baselines = if (Test-Path $baselinePath) { Get-Content $baselinePath -Raw | ConvertFrom-Json } else { $null }
+# The top-level scenarios are the TV's; each virtual screen has its own under profiles.<WxH@Hz,scale>.
+$baseScen = if (-not $baselines) { $null } elseif ($script:VirtualProfile) { $baselines.profiles.($script:VirtualProfile).scenarios } else { $baselines.scenarios }
+if ($script:VirtualProfile -and -not $baseScen) { Write-Host "No baseline for $script:VirtualProfile yet: health-only." -ForegroundColor Yellow }
 $rows = @(); $fails = 0
 foreach ($ph in $phases) {
   $a = $analysis[$ph.name]
@@ -435,8 +485,8 @@ foreach ($ph in $phases) {
   $isStress = $ph.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
   $nn = @(Test-NonNegotiable $a $maxLevel $isStress)
   if ($nn.Count -gt 0 -and $nn[0] -ne 'NO-DATA') { $verdict = 'FAIL'; $why += $nn }
-  if ($baselines -and $baselines.scenarios.($ph.name)) {
-    $b = $baselines.scenarios.($ph.name)
+  if ($baseScen -and $baseScen.($ph.name)) {
+    $b = $baseScen.($ph.name)
     if ($a.dtP99 -and $b.dtP99 -and $a.dtP99 -gt $b.dtP99 * 1.6 + 2) { $verdict = 'FAIL'; $why += "dtP99 $($a.dtP99) vs base $($b.dtP99)" }
     if ($a.jitP95 -and $b.jitP95 -and $a.jitP95 -gt $b.jitP95 * 1.6 + 3) { $verdict = 'FAIL'; $why += "jitP95 $($a.jitP95) vs base $($b.jitP95)" }
     if ($a.hitches -ne $null -and $b.hitches -ne $null -and $a.hitches -gt ($b.hitches + 5) * 2) { $verdict = 'FAIL'; $why += "hitches $($a.hitches) vs base $($b.hitches)" }
@@ -489,6 +539,7 @@ if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded
 # ---- outputs --------------------------------------------------------------------------------
 $result = [ordered]@{
   suite = $Suite; stamp = $stamp; hz = $hz
+  display = $(if ($script:VirtualProfile) { $script:VirtualProfile } else { 'tv' })
   ramStartMB = $ramSamples['start']; ramEndMB = $ramSamples['end']; ramDeltaMB = $ramLeak
   health = $healthBad
   healthInfo = $healthInfo
@@ -507,7 +558,15 @@ if ($UpdateBaseline) {
       $bl.scenarios[$r.scenario] = [ordered]@{ dtP95=$r.dtP95; dtP99=$r.dtP99; hitches=$r.hitches; devMed=$r.devMed; devP95=$r.devP95; jitP95=$r.jitP95; engine=$r.engine }
     }
   }
-  $bl | ConvertTo-Json -Depth 5 | Set-Content $baselinePath
+  # One run only ever replaces its own display's numbers.
+  $profiles = [ordered]@{}
+  if ($baselines -and $baselines.profiles) { foreach ($p in $baselines.profiles.PSObject.Properties) { $profiles[$p.Name] = $p.Value } }
+  if ($script:VirtualProfile) {
+    $profiles[$script:VirtualProfile] = $bl
+    $bl = [ordered]@{ updated = $baselines.updated; suite = $baselines.suite; scenarios = $baselines.scenarios }
+  }
+  if ($profiles.Count) { $bl.profiles = $profiles }
+  $bl | ConvertTo-Json -Depth 7 | Set-Content $baselinePath
   Write-Host "Baselines updated: $baselinePath"
 }
 
