@@ -46,7 +46,8 @@ try {
     $rows += [pscustomobject]@{ setup = $s.name; display = $r.display; verdict = $(if ($ok) { 'PASS' } else { 'FAIL' }); engine = $engines; fails = $r.fails }
   }
 } finally {
-  try { Set-VirtualCount 1 } catch { Write-Host "Could not reset the virtual monitor count: $($_.Exception.Message)" -ForegroundColor Yellow }
+  # Each run.ps1 restores its own setup; this also covers a matrix stopped between two runs.
+  Invoke-VirtualIdle
 }
 $rows | Format-Table -AutoSize | Out-String | Write-Host
 if ($bad) { Write-Host "$bad setup(s) FAILED" -ForegroundColor Red; if ($CI) { exit 1 } } else { Write-Host 'All setups PASSED' -ForegroundColor Green }

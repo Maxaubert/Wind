@@ -5,6 +5,9 @@
 #   pwsh -File tools\testenv\display.ps1 -List       # what is attached right now
 #   pwsh -File tools\testenv\display.ps1 -Restore    # put the saved layout back after a crashed run
 #   pwsh -File tools\testenv\display.ps1 -Detach     # take virtual monitors off the desktop
+#   pwsh -File tools\testenv\display.ps1 -Idle       # put the virtual screen in its idle state (see below)
+#   pwsh -File tools\testenv\display.ps1 -Idle -DryRun   # only print what -Idle would change
+#   pwsh -File tools\testenv\display.ps1 -SelfTest   # checks of the idle-state logic; changes nothing
 #
 # Dot-source it to use the functions. Needs the Virtual Display Driver (winget
 # VirtualDrivers.Virtual-Display-Driver plus a one-time devcon install); no admin at run time.
@@ -12,7 +15,7 @@
 # Virtual monitors are found by the MTT1337 device path, never by \\.\DISPLAYn, which shifts when the
 # driver reloads. The transform engine magnifies the PRIMARY monitor only (src/engine/engine_pick.h), so
 # a test screen has to be primary or the run exercises the wrong engine.
-param([switch]$List, [switch]$Restore, [switch]$Detach)
+param([switch]$List, [switch]$Restore, [switch]$Detach, [switch]$Idle, [switch]$DryRun, [switch]$SelfTest)
 
 if (-not ('WindCcd' -as [type])) {
 Add-Type -TypeDefinition @'
@@ -187,7 +190,10 @@ function Remove-VirtualFromDesktop {
 
 # Returns 'restored' or 'pending'. Pending means the real screen is not there (TV powered off): the
 # snapshot stays on disk and the virtual screen stays, so the PC is never left with no desktop at all.
+# The virtual screen goes back to its idle state first, and again on the pending path, because the
+# snapshot itself can hold a test mode (a run that started with the TV off saves a virtual-only layout).
 function Restore-DisplayLayout {
+  Invoke-VirtualIdle
   if (-not (Test-Path $script:DisplaySnapshotPath)) { Remove-VirtualFromDesktop | Out-Null; return 'restored' }
   $snap = Get-Content $script:DisplaySnapshotPath -Raw | ConvertFrom-Json
   [CcdPath[]]$paths = @($snap.paths | ForEach-Object { [WindCcd]::PathFrom($_) })
@@ -195,11 +201,11 @@ function Restore-DisplayLayout {
   $r = [WindCcd]::Apply($paths, $modes)
   if ($r -ne 0) {
     # Stale adapter ids after a reboot, or a target that went away. Fall back to taking the virtual off.
-    if ((Remove-VirtualFromDesktop) -like 'kept*') { return 'pending' }
+    if ((Remove-VirtualFromDesktop) -like 'kept*') { Invoke-VirtualIdle; return 'pending' }
   }
   Start-Sleep -Milliseconds 800
   $now = @(Get-DisplayList)
-  if (@($now | Where-Object { -not $_.Virtual }).Count -eq 0) { return 'pending' }
+  if (@($now | Where-Object { -not $_.Virtual }).Count -eq 0) { Invoke-VirtualIdle; return 'pending' }
   if (@($now | Where-Object Virtual).Count -gt 0) { Remove-VirtualFromDesktop | Out-Null }
   Remove-Item $script:DisplaySnapshotPath -ErrorAction SilentlyContinue
   'restored'
@@ -224,13 +230,120 @@ function Wait-VirtualOutputs([int]$Count, [int]$Seconds = 15) {
 
 # Sets the monitor count only when it differs; a reload disturbs the desktop for several seconds.
 function Set-VirtualCount([int]$Count) {
-  $have = Wait-VirtualOutputs 1 2
-  $p = $null; $m = $null; [WindCcd]::Query([WindCcd]::QDC_ALL, [ref]$p, [ref]$m)
-  $have = @($p | Where-Object { $_.target.targetAvailable -ne 0 -and [WindCcd]::Target($_).path -match $script:VddMatch } | ForEach-Object { $_.target.id } | Sort-Object -Unique).Count
-  if ($have -eq $Count) { return }
+  $null = Wait-VirtualOutputs 1 2
+  if ((Get-VirtualOutputCount) -eq $Count) { return }
   Send-VddCommand "SETDISPLAYCOUNT $Count"
   if ((Wait-VirtualOutputs $Count) -lt $Count) { throw "the driver did not produce $Count virtual monitor(s)" }
   Start-Sleep -Seconds 2
+}
+
+function Get-VirtualOutputCount {
+  $p = $null; $m = $null; [WindCcd]::Query([WindCcd]::QDC_ALL, [ref]$p, [ref]$m)
+  @($p | Where-Object { $_.target.targetAvailable -ne 0 -and [WindCcd]::Target($_).path -match $script:VddMatch } | ForEach-Object { $_.target.id } | Sort-Object -Unique).Count
+}
+
+# IDLE STATE (2026-11-17, #571). The virtual screen is always plugged in, so when the TV is switched off
+# Windows falls back to it. At its old idle mode (1366x768, 100 %) every window was squeezed and stayed
+# small when the TV came back. Idle it matches the TV instead: same pixels, same scale, so the logical
+# desktop (1707x960) and every window keep their size. Tests may change it while they run; every exit
+# path (Restore-DisplayLayout, matrix.ps1) puts it back. The mode is also the driver's preferred one
+# (first <resolution> in vdd_settings.xml), for a fallback the tests never touched.
+$script:VirtualIdle = @{ Width = 3840; Height = 2160; Hz = 144; FallbackHz = 60; Scale = 225; Count = 1 }
+
+# Pure, so -SelfTest can check it: the steps that bring the virtual screen to the idle state.
+# $Current is the first attached virtual screen (Width, Height, Hz, Scale) or $null when none is on the
+# desktop; $Offered is the driver's mode list for it ('WxH@Hz'); $Outputs the driver's monitor count.
+# A mode change always re-sets the scale: Windows stores scale relative to the recommended rung, and the
+# recommended rung moves with the resolution.
+function Get-VirtualIdlePlan($Current, [string[]]$Offered, [int]$Outputs, [hashtable]$Target = $script:VirtualIdle) {
+  $steps = @()
+  if ($Outputs -ne $Target.Count) { $steps += [pscustomobject]@{ Step = 'count'; Value = $Target.Count } }
+  if (-not $Current) { return $steps }
+  $hz = $null
+  foreach ($f in @($Target.Hz, $Target.FallbackHz)) { if ("$($Target.Width)x$($Target.Height)@$f" -in $Offered) { $hz = $f; break } }
+  if ($null -eq $hz) {
+    return $steps + [pscustomobject]@{ Step = 'error'; Value = "the driver does not offer $($Target.Width)x$($Target.Height) at $($Target.Hz) or $($Target.FallbackHz) Hz (see vdd_settings.xml)" }
+  }
+  $modeOk = $Current.Width -eq $Target.Width -and $Current.Height -eq $Target.Height -and [math]::Round($Current.Hz) -eq $hz
+  if (-not $modeOk) { $steps += [pscustomobject]@{ Step = 'mode'; Value = "$($Target.Width)x$($Target.Height)@$hz" } }
+  if (-not $modeOk -or $Current.Scale -ne $Target.Scale) { $steps += [pscustomobject]@{ Step = 'scale'; Value = $Target.Scale } }
+  $steps
+}
+
+function Get-FirstVirtualPath { @((Get-ActiveLayout).Paths | Where-Object { [WindCcd]::Target($_).path -match $script:VddMatch }) | Select-Object -First 1 }
+
+# Applies the idle state. Mode and scale can only be set while the virtual screen is on the desktop; when
+# it is not, the count is all there is to fix, and the preferred mode covers the next fallback.
+# Returns the steps taken (or that would be taken with -DryRun).
+function Set-VirtualIdleMode([switch]$DryRun) {
+  if (-not (Test-VirtualDisplayInstalled)) { return @() }
+  $outputs = Get-VirtualOutputCount
+  $done = @()
+  # The count goes first and alone: a count change reloads the driver, which can change what is attached.
+  if (-not $DryRun -and $outputs -ne $script:VirtualIdle.Count) {
+    Set-VirtualCount $script:VirtualIdle.Count
+    $done += [pscustomobject]@{ Step = 'count'; Value = $script:VirtualIdle.Count }
+    $outputs = Get-VirtualOutputCount
+  }
+  $path = Get-FirstVirtualPath
+  $cur = $null; $offered = @(); $gdi = $null
+  if ($path) {
+    $gdi = [WindCcd]::Gdi($path)
+    $cur = @(Get-DisplayList | Where-Object { $_.Virtual -and $_.Gdi -eq $gdi }) | Select-Object -First 1
+    $offered = [WindCcd]::Modes($gdi)
+  }
+  $plan = @(Get-VirtualIdlePlan $cur $offered $outputs)
+  if ($DryRun) { return $plan }
+  foreach ($s in $plan) {
+    switch ($s.Step) {
+      'error' { throw $s.Value }
+      'count' { throw "the driver still has $outputs virtual monitor(s), not $($s.Value)" }
+      'mode'  {
+        $null = $s.Value -match '^(\d+)x(\d+)@(\d+)$'
+        $r = [WindCcd]::SetMode($gdi, [int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+        if ($r -ne 0) { throw "ChangeDisplaySettingsEx failed on ${gdi}: $r" }
+        Start-Sleep -Milliseconds 800
+      }
+      'scale' {
+        $r = [WindCcd]::SetScale((Get-FirstVirtualPath), [int]$s.Value)
+        if ($r -ne 0) { throw "setting scale $($s.Value)% failed: $r" }
+      }
+    }
+    $done += $s
+  }
+  $done
+}
+
+# For exit paths: report, never throw, so a failed idle step cannot block the layout restore.
+function Invoke-VirtualIdle {
+  try {
+    $s = @(Set-VirtualIdleMode)
+    if ($s.Count) { Write-Host ('Virtual screen idle: ' + (($s | ForEach-Object { "$($_.Step) $($_.Value)" }) -join ', ')) }
+  } catch { Write-Host "Could not put the virtual screen in its idle state: $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
+function Test-VirtualIdlePlan {
+  $t = @{ Width = 3840; Height = 2160; Hz = 144; FallbackHz = 60; Scale = 225; Count = 1 }
+  $all = @('1366x768@60','3840x2160@60','3840x2160@120','3840x2160@144')
+  $cases = @(
+    @{ n = 'fallback state of 2026-11-17'; c = @{ Width = 1366; Height = 768; Hz = 60; Scale = 100 }; o = $all; k = 1; want = 'mode=3840x2160@144 scale=225' },
+    @{ n = 'already idle'; c = @{ Width = 3840; Height = 2160; Hz = 143.99; Scale = 225 }; o = $all; k = 1; want = '' },
+    @{ n = 'test scale left behind'; c = @{ Width = 3840; Height = 2160; Hz = 144; Scale = 100 }; o = $all; k = 1; want = 'scale=225' },
+    @{ n = 'test refresh left behind'; c = @{ Width = 3840; Height = 2160; Hz = 120; Scale = 225 }; o = $all; k = 1; want = 'mode=3840x2160@144 scale=225' },
+    @{ n = 'no 144 Hz: fall back to 60'; c = @{ Width = 1920; Height = 1080; Hz = 60; Scale = 100 }; o = @('3840x2160@60'); k = 1; want = 'mode=3840x2160@60 scale=225' },
+    @{ n = 'dual left behind, detached'; c = $null; o = @(); k = 2; want = 'count=1' },
+    @{ n = 'detached, count right'; c = $null; o = @(); k = 1; want = '' },
+    @{ n = 'no 4K mode at all'; c = @{ Width = 1920; Height = 1080; Hz = 60; Scale = 100 }; o = @('1920x1080@60'); k = 1; want = 'error' }
+  )
+  $bad = 0
+  foreach ($x in $cases) {
+    $cur = if ($x.c) { [pscustomobject]$x.c } else { $null }
+    $got = (@(Get-VirtualIdlePlan $cur $x.o $x.k $t) | ForEach-Object { if ($_.Step -eq 'error') { 'error' } else { "$($_.Step)=$($_.Value)" } }) -join ' '
+    $ok = $got -eq $x.want
+    if (-not $ok) { $bad++ }
+    Write-Host ('{0} {1}: {2}' -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $x.n, $(if ($ok) { $got } else { "got '$got', want '$($x.want)'" }))
+  }
+  $bad
 }
 
 function Add-VirtualToDesktop([int]$Count) {
@@ -307,5 +420,13 @@ function Get-DisplayProfileKey($Display) { '{0}x{1}@{2},{3}' -f $Display.Width, 
 if ($MyInvocation.InvocationName -ne '.') {
   if ($Restore) { $s = Restore-DisplayLayout; Write-Host "Display layout: $s"; Get-DisplayList | Format-Table -AutoSize; if ($s -eq 'pending') { exit 5 } }
   elseif ($Detach) { Write-Host (Remove-VirtualFromDesktop); Get-DisplayList | Format-Table -AutoSize }
+  elseif ($SelfTest) { $bad = Test-VirtualIdlePlan; if ($bad) { Write-Host "$bad check(s) FAILED" -ForegroundColor Red; exit 1 }; Write-Host 'Idle-state checks passed.' -ForegroundColor Green }
+  elseif ($Idle) {
+    $s = @(Set-VirtualIdleMode -DryRun:$DryRun)
+    $verb = if ($DryRun) { 'Would change' } else { 'Changed' }
+    if ($s.Count) { $s | ForEach-Object { Write-Host "$verb $($_.Step): $($_.Value)" } } else { Write-Host 'The virtual screen is already in its idle state (or not on the desktop).' }
+    if (-not (Get-FirstVirtualPath)) { Write-Host 'Not on the desktop: mode and scale apply the next time Windows falls back to it.' }
+    Get-DisplayList | Format-Table -AutoSize
+  }
   else { Get-DisplayList | Format-Table -AutoSize }
 }

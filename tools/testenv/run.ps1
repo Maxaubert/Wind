@@ -70,9 +70,11 @@ if ($Display -in @('auto','virtual')) {
     } catch {
       Write-Host "VIRTUAL DISPLAY FAILURE: $($_.Exception.Message)" -ForegroundColor Red
     } finally {
-      $restored = Restore-DisplayLayout
+      # Restore-DisplayLayout also puts the virtual screen back to its idle state (TV size and scale, #571).
+      try { $restored = Restore-DisplayLayout }
+      catch { $restored = "FAILED ($($_.Exception.Message))"; Invoke-VirtualIdle }
       Write-Host "Display layout: $restored"
-      if ($restored -eq 'pending') { Write-Host 'The TV is still off. When it is back: pwsh -File tools\testenv\display.ps1 -Restore' -ForegroundColor Yellow }
+      if ($restored -ne 'restored') { Write-Host 'The TV is still off or the restore failed. The virtual screen is left at the TV''s size and scale. When the TV is back: pwsh -File tools\testenv\display.ps1 -Restore' -ForegroundColor Yellow }
     }
     exit $code
   }

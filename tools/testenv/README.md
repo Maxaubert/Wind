@@ -113,10 +113,33 @@ The layout is saved to `results/display-layout.json` before any change and resto
 If the TV is still off at that point, the virtual screen stays and the snapshot is kept: run `-Restore`
 when the TV is back. Virtual monitors are detached from the desktop between runs.
 
+**Idle state (#571).** The virtual screen stays plugged in, so Windows falls back to it whenever the TV
+is switched off. Idle, it matches the TV: 3840x2160, 144 Hz (60 Hz if the driver does not offer 144),
+225 % scale and one monitor. Windows then keeps the same logical desktop (1707x960), so windows keep
+their size. Tests may change it while they run. `Restore-DisplayLayout` (the end of every `run.ps1`
+virtual run, also on failure and on the pending path), `matrix.ps1` and `display.ps1 -Restore` put it back.
+The values live in `$script:VirtualIdle` in `display.ps1`.
+
+    pwsh -File tools\testenv\display.ps1 -Idle -DryRun      # what would change; changes nothing
+    pwsh -File tools\testenv\display.ps1 -Idle              # apply it now
+    pwsh -File tools\testenv\display.ps1 -SelfTest          # checks of the idle-state logic
+
+Mode and scale can only be set while the virtual screen is on the desktop. Windows stores the scale
+relative to the screen's recommended scale at that resolution (`DpiValue` under
+`HKCU\Control Panel\Desktop\PerMonitorSettings\MTT1337...`), so the function sets it through the same
+call as Settings and never writes that value by hand. Windows also remembers the mode it last used for
+the "virtual screen only" layout. Run `-Idle` once while the TV is off (or let a nightly run end on the
+pending path) to replace an old 1366x768 entry.
+
 Setup, once per PC, as admin: `winget install VirtualDrivers.Virtual-Display-Driver`, then `devcon install`
 of the package's `SignedDrivers\x86\VDD\MttVDD.inf` with hardware id `Root\MttVDD`. Create
 `C:\VirtualDisplayDriver\vdd_settings.xml` first, with `<friendlyname>` set to the GPU Wind renders on,
-and list the modes the matrix uses. Monitors appear with `MTT1337` in their device path.
+and list the modes the matrix uses. List **3840x2160 first** with `<refresh_rate>144</refresh_rate>`:
+the driver offers the first `<resolution>` as the preferred mode, which Windows uses when it falls back
+to a screen it has no saved mode for. Keep 144 among the `<g_refresh_rate>` values, which the driver
+adds to every resolution. The driver reads the file when it loads, so a change applies at the next
+reload (a count change through the pipe, a reboot, or disabling and enabling the device).
+Monitors appear with `MTT1337` in their device path.
 
 What a virtual run proves: Wind starts, picks the right engine, zooms, stays within the cap and leaves
 no stranded state on that resolution, refresh rate, scale and monitor count. It does not prove
