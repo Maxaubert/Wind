@@ -12,7 +12,7 @@
   //   extra     { runningModel, onRestart,
   //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
   import Toggle from '$shared/controls/Toggle.svelte';
-  import Slider from './Slider.svelte';
+  import Slider from '$shared/controls/Slider.svelte';
   import Select from './Select.svelte';
   import Bindings from './Bindings.svelte';
   import PanBinding from './PanBinding.svelte';
@@ -21,7 +21,7 @@
   import EngineRow from './EngineRow.svelte';
   import ThemePicker from '$shared/prefs/ThemePicker.svelte';
   import ProfilePicker from '../prefs/ProfilePicker.svelte';
-  import About from './About.svelte';
+  import About from '$shared/controls/About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false, tab = '' } = $props();
 
   // Ids so every control is named by its row: label (and the live value for value-bearing ones).
@@ -33,7 +33,7 @@
 </script>
 
 {#if row.type === 'about'}
-  <About version={extra.version} onRepo={extra.onRepo} />
+  <About version={extra.version} onRepo={extra.onRepo ?? (() => {})} note="A star helps others find Wind" />
 {:else}
   <div class="row" class:disabled class:wide={row.wide} data-key={row.key}>
     <div class="meta">

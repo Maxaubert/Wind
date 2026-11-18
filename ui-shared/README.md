@@ -4,6 +4,10 @@ Settings UI files that the Windows app (`ui/`, WebView2) and Wind for Mac (`mac/
 unchanged: design files, themes, generic controls and shell pieces. Each app imports them as
 `$shared/<path>` (an alias in its `vite.config.js`); files in here import each other relatively.
 
+- Small platform differences are props, set by each app: `Sidebar` (`searchHint`, `trafficLights` for
+  the Mac's traffic-light corner), `About` (`onRepo` for the Windows star button, `note`) and `Results`
+  (`Row`, the app's own `SettingRow`).
+
 - Only platform-neutral files belong here. Anything that reads the schema, the bridge or a platform
   setting stays in its app.
 - `tools/gen-themes.cjs` writes `src/design/themes.css` and `themes.js`. Edit the generator, not

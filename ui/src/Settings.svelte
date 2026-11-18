@@ -17,16 +17,16 @@
   import { fill, changedKeys } from './session.js';
   import { themes, normalizePalette } from '$shared/design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
-  import { capturing } from './lib/capture.js';
+  import { capturing } from '$shared/lib/capture.js';
   import TitleBar from './shell/TitleBar.svelte';
-  import Sidebar from './shell/Sidebar.svelte';
+  import Sidebar from '$shared/shell/Sidebar.svelte';
   import ScrollChip from '$shared/shell/ScrollChip.svelte';
   import Banner from '$shared/shell/Banner.svelte';
   import Card from '$shared/shell/Card.svelte';
   import SaveCapsule from './shell/SaveCapsule.svelte';
   import SettingRow from './controls/SettingRow.svelte';
-  import Prompt from './prompts/Prompt.svelte';
-  import Results from './search/Results.svelte';
+  import Prompt from '$shared/prompts/Prompt.svelte';
+  import Results from '$shared/search/Results.svelte';
   import NewProfileDialog from './prefs/NewProfileDialog.svelte';
   import TrayMenuPage from './tray/TrayMenuPage.svelte';
   import { search } from '$shared/search/search.js';
@@ -301,13 +301,13 @@
 
 <div class="wnd app" class:pending={!loaded} data-palette={palette}>
   <div class="body">
-    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch} searchHint="Ctrl F"
              onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={searching ? 'Search results' : group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
       {#if searching}
-        <Results {results} {query} {values} {extra} {live} onChange={change} onSet={change} {isDisabled} />
+        <Results Row={SettingRow} {results} {query} {values} {extra} {live} onChange={change} onSet={change} {isDisabled} />
       {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       {#each group.cards as card, i (group.id + i)}

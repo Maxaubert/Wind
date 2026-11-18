@@ -15,7 +15,7 @@ test('icon set covers the plan list and renders static svg', () => {
 
 test('tokens and design files contain no em-dash', () => {
   for (const f of ['../src/design/tokens.css', '../../ui-shared/src/design/icons.js', '../src/shell/TitleBar.svelte',
-    '../src/shell/Sidebar.svelte', '../../ui-shared/src/shell/Banner.svelte', '../../ui-shared/src/shell/Card.svelte', '../src/shell/SaveCapsule.svelte'])
+    '../../ui-shared/src/shell/Sidebar.svelte', '../../ui-shared/src/shell/Banner.svelte', '../../ui-shared/src/shell/Card.svelte', '../src/shell/SaveCapsule.svelte'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain('\u2014');
 });
 

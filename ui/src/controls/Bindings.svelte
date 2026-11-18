@@ -12,7 +12,7 @@
   import { checkKeyBind, checkClickBind, refusalText } from '../lib/keybindRules.js';
   import { vkName, BUTTON_NAMES, modList, popcount, WHEEL_UP, WHEEL_DOWN } from '../lib/bindNames.js';
   import { unitsOf, clearUnit, placeBinding, maxOf } from '../lib/bindings.js';
-  import { setCapturing } from '../lib/capture.js';
+  import { setCapturing } from '$shared/lib/capture.js';
   import { onDestroy } from 'svelte';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
 

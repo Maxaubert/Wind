@@ -19,9 +19,10 @@ test('icon set covers the pages and renders static svg', () => {
 });
 
 test('no source file has an em-dash', () => {
-  const src = fileURLToPath(new URL('../src', import.meta.url));
   const walk = (d) => readdirSync(d).flatMap((f) => statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : [join(d, f)]);
-  for (const f of walk(src).filter((f) => /\.(js|svelte|css)$/.test(f)))
+  // This app's own files and the ones it shares with the Windows app (ui-shared).
+  const roots = ['../src', '../../../ui-shared/src'].map((p) => fileURLToPath(new URL(p, import.meta.url)));
+  for (const f of roots.flatMap(walk).filter((f) => /\.(js|svelte|css)$/.test(f)))
     expect(readFileSync(f, 'utf8'), f).not.toContain('—');
 });
 

@@ -72,7 +72,7 @@ test('session helpers: an unknown model (the retired hybrid and magnify) reads a
 });
 
 test('session files contain no em-dash', () => {
-  for (const f of ['../src/session.js', '../src/Settings.svelte', '../src/prompts/Prompt.svelte', '../src/bridge.js'])
+  for (const f of ['../src/session.js', '../src/Settings.svelte', '../../ui-shared/src/prompts/Prompt.svelte', '../src/bridge.js'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
 });
 

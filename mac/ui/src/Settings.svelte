@@ -14,15 +14,15 @@
            getMacStatus, onMacStatus, macAction, titleBand } from './bridge.js';
   import { fill } from './session.js';
   import { themes, normalizePalette } from '$shared/design/themes.js';
-  import { capturing } from './lib/capture.js';
-  import Sidebar from './shell/Sidebar.svelte';
+  import { capturing } from '$shared/lib/capture.js';
+  import Sidebar from '$shared/shell/Sidebar.svelte';
   import ScrollChip from '$shared/shell/ScrollChip.svelte';
   import Banner from '$shared/shell/Banner.svelte';
   import PermissionBanner from './shell/PermissionBanner.svelte';
   import Card from '$shared/shell/Card.svelte';
   import SettingRow from './controls/SettingRow.svelte';
-  import Prompt from './prompts/Prompt.svelte';
-  import Results from './search/Results.svelte';
+  import Prompt from '$shared/prompts/Prompt.svelte';
+  import Results from '$shared/search/Results.svelte';
   import { search } from '$shared/search/search.js';
 
   // Replaced at build time with ../VERSION (vite.config.js); empty in tests.
@@ -170,14 +170,14 @@
 
 <div class="wnd app" class:pending={!loaded} data-palette={palette}>
   <div class="body">
-    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch} searchHint="⌘F" trafficLights
              onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} onscroll={reportBand} tabindex="-1" aria-label={searching ? 'Search results' : group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
       {#if searching}
         <PermissionBanner {missing} onFix={(a) => macAction(a)} />
-        <Results {results} {query} {values} {extra} {live} onChange={change} onSet={change} {isDisabled} />
+        <Results Row={SettingRow} {results} {query} {values} {extra} {live} onChange={change} onSet={change} {isDisabled} />
       {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       <PermissionBanner {missing} onFix={(a) => macAction(a)} />

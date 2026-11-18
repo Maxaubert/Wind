@@ -99,13 +99,13 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 |---|---|---|
 | `keybind` | `controls/Bindings.svelte` (onboarding uses `lib/KeybindCapture.svelte`) | State lives in sibling keys (`buttonKey`, `vkKey`, `modsKey`); zoom rows take two slots |
 | `toggle` | `controls/Toggle.svelte` | `1`/`0` |
-| `slider` | `controls/Slider.svelte` | `min`, `max`, `step`, `unit` (also `aria-valuetext`) |
+| `slider` | `ui-shared/src/controls/Slider.svelte` | `min`, `max`, `step`, `unit` (also `aria-valuetext`) |
 | `select` | `controls/Select.svelte` | `options` + `optionLabels` |
 | `applist` | `controls/AppList.svelte` | One comma-separated string of exe names |
 | `engine` | `controls/EngineRow.svelte` | `model`; applies live, an inline Restart Wind button only when Wind runs one engine |
 | `palette` | `prefs/ThemePicker.svelte` | Four mini window cards; writes `uiPalette` |
 | `profiles` | `prefs/ProfilePicker.svelte` | Dropdown plus New |
-| `button`, `about` | `SettingRow`, `controls/About.svelte` | Actions and the logo |
+| `button`, `about` | `SettingRow`, `ui-shared/src/controls/About.svelte` | Actions and the logo |
 
 - **Advanced rows** (`adv: true`) show inline while the global `showAdvanced` key is on
   (Preferences > Show advanced settings). Search always finds them.
@@ -119,10 +119,10 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 - Copy rules (in the schema header): plain language, no toggle label starting with "Enable", no
   description that restates its label.
 
-**Search** (`ui/src/search/`). `search.js` is a pure ranker: label exact, word prefix, substring
+**Search** (`ui-shared/src/search/`). `search.js` is a pure ranker: label exact, word prefix, substring
 or fuzzy (one typo for 4–7 letters, two for 8+), then the row's `keywords`, description, card and
-group. Every query word must match. The result is one ranked list; each hit renders with the real
-`SettingRow`, so it is edited in place. Every labelled row carries `keywords`, and a test enforces
+group. Every query word must match. The result is one ranked list (`Results.svelte`); each hit renders
+with the real `SettingRow` (passed in as its `Row` prop), so it is edited in place. Every labelled row carries `keywords`, and a test enforces
 it. The tray item lists are not schema rows and are not searchable.
 
 **Visual tokens** live in `ui/src/design/tokens.css`, taken from
@@ -147,7 +147,7 @@ The live ini is the session and the profile file is the saved state ([08](08-con
   checkbox) unless the global UI-only key `uiHighResNoticeOff=1` is set. Use Smooth writes the
   opt-out (when ticked) and then `txSamplingMode=1`; Cancel and Esc write nothing, and
   `Select.svelte` redraws the select from the prop after every change. Search results use the same `change()`.
-- **Prompts** (`ui/src/prompts/Prompt.svelte`, focus-trapped by `lib/dialog.js`): closing with
+- **Prompts** (`ui-shared/src/prompts/Prompt.svelte`, focus-trapped by `lib/dialog.js`): closing with
   unsaved changes offers Save, Discard or Keep for this session; switching profile offers Save,
   Discard or Cancel. Tray Quit decides from the files (`ConfirmQuit` in
   `src/tray_app/tray_menu.cpp`), even with Settings closed.
