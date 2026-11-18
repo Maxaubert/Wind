@@ -241,6 +241,14 @@ followed by its own switch.
   exact look point, and only leaves the centre where the view is held at a screen edge. Its window
   is moved and committed before the zoom write, so both land in the same frame (owner report
   2026-10-30: it wobbled around the centre while panning, as on Windows before its fix).
+- The crosshair is sized in desktop points, so it is magnified with the view like the pointer it stands
+  in for, on every engine, as on Windows (owner 2026-11-18: it stayed the same small size at every zoom).
+  Transform's window gets that from the compositor; Render and Backdrop scale the layer by the view's
+  scale (`DrawZoom.placeCross`). The test probe block stays 12 screen points.
+- Inspect stays on when the zoom goes out to 1x, as on Windows (owner 2026-11-18: zooming out gave the
+  normal cursor back). At 1x the crosshair window shows it, the hand moves it one to one, and the hidden
+  pointer is held on a whole point by warps (exact unzoomed). Zooming in again starts the view on the
+  crosshair; leaving at 1x warps the pointer onto it. Inspect still starts only while zoomed.
 - The hide-cursor bind (`hideCursor`, Wind's hideCursor hotkey) keeps the pointer hidden until
   pressed again; game-lock detection is paused meanwhile, as in Inspect.
 

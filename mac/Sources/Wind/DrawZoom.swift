@@ -666,9 +666,22 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         // more or less each frame (owner 2026-11-03, "the screenshot cursor is wobbly again").
         shotLayers.update(d.shot, map: { CGPoint(x: W / 2 + ($0.x - c.x) * s, y: H / 2 - ($0.y - c.y) * s) }, mag: s, px: 1)
         crossRoot.isHidden = d.crosshair == nil         // also on ticks with no view write (at an edge)
-        if let x = d.crosshair { crossRoot.position = CGPoint(x: W / 2 + (x.x - c.x) * s, y: H / 2 - (x.y - c.y) * s) }
+        if let x = d.crosshair { placeCross(x, center: c, scale: s, W: W, H: H) }
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * s, y: H - sy - (h - cursorHotSpot.y * s), width: w, height: h)
     }
+
+    /// The crosshair at a desktop point, magnified by the view's scale like the drawn cursor (owner
+    /// 2026-11-18: it stayed small while the picture under it was magnified). The test probe block
+    /// stays 12 screen points so the zoomed-screen capture finds it the same at every level.
+    private func placeCross(_ x: CGPoint, center c: CGPoint, scale s: Double, W: Double, H: Double) {
+        crossRoot.position = CGPoint(x: W / 2 + (x.x - c.x) * s, y: H / 2 - (x.y - c.y) * s)
+        if crossScale != s {
+            crossScale = s
+            crossRoot.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
+            if Crosshair.probe { crossProbe.frame = CGRect(x: -6 / s, y: -6 / s, width: 12 / s, height: 12 / s) }
+        }
+    }
+    private var crossScale = 1.0
 
     private func layout() {
         guard let screen = NSScreen.screens.first else { return }
@@ -680,7 +693,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if DrawZoom.backdrop {
             placeBackdrop(W, H)
             crossRoot.isHidden = crosshair == nil
-            if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
+            if let c = crosshair { placeCross(c, center: center, scale: scale, W: W, H: H) }
         } else if gpu {
             // Wind's own pass draws a screen-sized picture into the Metal layer (shown by show()). The view
             // moves with the next pass, the crosshair with it (drawOverlay at the tick).
@@ -693,7 +706,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             image.frame = CGRect(x: W / 2 - center.x * scale, y: H / 2 - (H - center.y) * scale, width: W * scale, height: H * scale)
             // The crosshair in the same commit as the view, so both reach the same frame.
             crossRoot.isHidden = crosshair == nil
-            if let c = crosshair { crossRoot.position = CGPoint(x: W / 2 + (c.x - center.x) * scale, y: H / 2 - (c.y - center.y) * scale) }
+            if let c = crosshair { placeCross(c, center: center, scale: scale, W: W, H: H) }
         }
         CATransaction.commit()
     }
@@ -726,13 +739,14 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         metal.maximumDrawableCount = 3
         metal.frame = v.bounds
         v.layer?.addSublayer(metal)
-        let path = CGMutablePath(), a = 26.0, g = 6.0       // as seen on screen, like Crosshair's
+        // Crosshair's desktop-point design, scaled by the level where it is placed (placeCross).
+        let path = CGMutablePath(), a = Crosshair.armPt, g = Crosshair.gapPt
         path.move(to: CGPoint(x: -a, y: 0)); path.addLine(to: CGPoint(x: -g, y: 0))
         path.move(to: CGPoint(x: g, y: 0)); path.addLine(to: CGPoint(x: a, y: 0))
         path.move(to: CGPoint(x: 0, y: -a)); path.addLine(to: CGPoint(x: 0, y: -g))
         path.move(to: CGPoint(x: 0, y: g)); path.addLine(to: CGPoint(x: 0, y: a))
-        crossOutline.strokeColor = NSColor.black.withAlphaComponent(0.6).cgColor; crossOutline.lineWidth = 4.4
-        crossLine.strokeColor = NSColor.white.cgColor; crossLine.lineWidth = 2
+        crossOutline.strokeColor = NSColor.black.withAlphaComponent(0.6).cgColor; crossOutline.lineWidth = Crosshair.linePt * 2.2
+        crossLine.strokeColor = NSColor.white.cgColor; crossLine.lineWidth = Crosshair.linePt
         for l in [crossOutline, crossLine] { l.path = path; l.fillColor = nil; l.lineCap = .butt; crossRoot.addSublayer(l) }
         if Crosshair.probe {                            // test builds: the capture finds it by a magenta block
             crossProbe.backgroundColor = CGColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
