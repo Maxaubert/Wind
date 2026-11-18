@@ -14,7 +14,7 @@ jobs:
   windows-build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build.bat locates MSVC via vswhere (-all -prerelease) and runs vcvars64;
       # the windows-latest runner ships Visual Studio with the C++ toolset + Windows SDK.
       - name: Build app (compile + link + manifest)
