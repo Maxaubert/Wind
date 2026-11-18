@@ -13,6 +13,82 @@ namespace wind {
 
 static const wchar_t* kClassName = L"WindCursorSprite";
 
+namespace {
+
+// The GDI scaffolding every sprite paint needs: the screen DC, a memory DC compatible with it, and
+// one or two S x S 32bpp top-down DIBs (renderMaskShape draws a black and a white one on the same
+// memory DC). Nothing is selected until select() is called; the first select remembers the memory
+// DC's original bitmap so release() can put it back before the DIBs are deleted. release() frees
+// everything (restore, DIBs newest first, memory DC, screen DC) and is safe to call twice, so a
+// caller that must let go of the DCs before it calls on (refreshShape, before renderMaskShape) can
+// release early and leave the destructor with nothing to do.
+class DibSurface {
+public:
+    explicit DibSurface(int size) : size_(size) {
+        screenDc_ = GetDC(nullptr);
+        memDc_ = CreateCompatibleDC(screenDc_);
+    }
+    ~DibSurface() { release(); }
+    DibSurface(const DibSurface&) = delete;
+    DibSurface& operator=(const DibSurface&) = delete;
+
+    // Creates the next DIB and returns it (nullptr on failure); *bits receives its pixels. A DIB
+    // that was created is held until release() even if *bits came back null, so each caller keeps
+    // its own failure test.
+    HBITMAP addDib(void** bits) {
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = size_;
+        bmi.bmiHeader.biHeight = -size_; // top-down DIB
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        HBITMAP dib = CreateDIBSection(screenDc_, &bmi, DIB_RGB_COLORS, bits, nullptr, 0);
+        if (dib != nullptr) dibs_[count_++] = dib;
+        return dib;
+    }
+
+    void select(HBITMAP dib) {
+        HGDIOBJ prev = SelectObject(memDc_, dib);
+        if (!selected_) { oldBmp_ = prev; selected_ = true; }
+    }
+
+    HDC dc() const { return memDc_; }
+
+    void release() {
+        if (released_) return;
+        released_ = true;
+        if (selected_) SelectObject(memDc_, oldBmp_);
+        for (int i = count_ - 1; i >= 0; i--) DeleteObject(dibs_[i]);
+        DeleteDC(memDc_);
+        ReleaseDC(nullptr, screenDc_);
+    }
+
+private:
+    int size_;
+    HDC screenDc_ = nullptr;
+    HDC memDc_ = nullptr;
+    HBITMAP dibs_[2] = {};
+    int count_ = 0;
+    HGDIOBJ oldBmp_ = nullptr;
+    bool selected_ = false;
+    bool released_ = false;
+};
+
+// Pushes the S x S premultiplied pixels selected into memDc to the layered window.
+void PresentLayered(HWND hwnd, HDC memDc, int S) {
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.BlendFlags = 0;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    SIZE size{ S, S };
+    POINT srcPt{ 0, 0 };
+    UpdateLayeredWindow(hwnd, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+}
+
+} // namespace
+
 // A topmost click-through layered window that carries the Inspect crosshair, and in the legacy
 // sprite session (txNativeCursor=0, issue #463) a copy of the system cursor. It is positioned in
 // desktop coordinates on the look point, in the same tick that sets the fullscreen transform; the
@@ -161,26 +237,18 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     int hotY = fit.hotY * scale_;
 
     const int S = fit.canvas * scale_;
-    HDC screenDc = GetDC(nullptr);
-    HDC memDc = CreateCompatibleDC(screenDc);
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = S;
-    bmi.bmiHeader.biHeight = -S; // top-down DIB
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    // Released explicitly on every path below: the mask path must let go of the screen DC and DIB
+    // BEFORE it calls renderMaskShape(), which makes its own.
+    DibSurface surf(S);
 
     void* bits = nullptr;
-    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HBITMAP dib = surf.addDib(&bits);
     if (dib == nullptr || bits == nullptr) {
-        if (dib != nullptr) DeleteObject(dib);
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
+        surf.release();
         DestroyIcon(hIconCopy);
         return ShapeStatus::Hidden;
     }
-    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+    surf.select(dib);
 
     // Zero the bits buffer before drawing so unpainted pixels are
     // transparent rather than whatever garbage the allocation happened to
@@ -190,7 +258,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     // cursor, regardless of whether GetIconInfo reported an hbmColor.
     // Drawn at native * scale_ so the sprite matches the zoom level.
     memset(bits, 0, (size_t)S * S * 4);
-    DrawIconEx(memDc, 0, 0, hIconCopy, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+    DrawIconEx(surf.dc(), 0, 0, hIconCopy, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
     // Some cursors (the modern I-beam among them) report a color bitmap
     // via GetIconInfo, but that color bitmap's alpha channel is empty, so
@@ -205,10 +273,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     }
 
     if (!anyAlpha) {
-        SelectObject(memDc, oldBmp);
-        DeleteObject(dib);
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
+        surf.release();
 
         DestroyIcon(iconCopy_); // destroy the previous copy we were holding
         iconCopy_ = hIconCopy;
@@ -227,19 +292,8 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         return ShapeStatus::Rendered;
     }
 
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.BlendFlags = 0;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ S, S };
-    POINT srcPt{ 0, 0 };
-    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
-
-    SelectObject(memDc, oldBmp);
-    DeleteObject(dib);
-    DeleteDC(memDc);
-    ReleaseDC(nullptr, screenDc);
+    PresentLayered(hwnd_, surf.dc(), S);
+    surf.release();
 
     DestroyIcon(iconCopy_); // destroy the previous copy we were holding
     iconCopy_ = hIconCopy;
@@ -273,35 +327,22 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 // left to oscillate.
 void CursorSprite::renderMaskShape() {
     const int S = shapeSize_ * scale_;   // the shape's canvas (refreshShape sized it)
-    HDC screenDc = GetDC(nullptr);
-    HDC memDc = CreateCompatibleDC(screenDc);
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = S;
-    bmi.bmiHeader.biHeight = -S; // top-down DIB
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    DibSurface surf(S);
 
     void* blackBits = nullptr;
     void* whiteBits = nullptr;
-    HBITMAP blackDib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &blackBits, nullptr, 0);
+    HBITMAP blackDib = surf.addDib(&blackBits);
     HBITMAP whiteDib = nullptr;
-    if (blackDib != nullptr) whiteDib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &whiteBits, nullptr, 0);
-    if (blackDib == nullptr || whiteDib == nullptr) {
-        if (blackDib != nullptr) DeleteObject(blackDib);
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
-        return;
-    }
+    if (blackDib != nullptr) whiteDib = surf.addDib(&whiteBits);
+    if (blackDib == nullptr || whiteDib == nullptr) return;
 
-    HGDIOBJ oldBmp = SelectObject(memDc, blackDib);
+    surf.select(blackDib);
     std::fill_n((uint32_t*)blackBits, (size_t)S * S, 0xFF000000u);
-    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+    DrawIconEx(surf.dc(), 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
-    SelectObject(memDc, whiteDib);
+    surf.select(whiteDib);
     std::fill_n((uint32_t*)whiteBits, (size_t)S * S, 0xFFFFFFFFu);
-    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+    DrawIconEx(surf.dc(), 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
     const uint32_t kOpaqueWhite = 0xFFFFFFFFu;   // premultiplied opaque white (the ink)
     const uint32_t kOpaqueBlack = 0xFF000000u;   // premultiplied opaque black (the outline)
@@ -345,20 +386,7 @@ void CursorSprite::renderMaskShape() {
         }
     }
 
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.BlendFlags = 0;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ S, S };
-    POINT srcPt{ 0, 0 };
-    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
-
-    SelectObject(memDc, oldBmp);
-    DeleteObject(whiteDib);
-    DeleteObject(blackDib);
-    DeleteDC(memDc);
-    ReleaseDC(nullptr, screenDc);
+    PresentLayered(hwnd_, surf.dc(), S);   // the white DIB is selected: it holds the result
 }
 
 
@@ -425,39 +453,14 @@ void CursorSprite::keepOnTop() {
 // (within half a pixel) on the look point.
 void CursorSprite::renderCrosshair() {
     const int S = bufSize();   // crosshair fills the whole (scaled) canvas: it grows with zoom too
-    HDC screenDc = GetDC(nullptr);
-    HDC memDc = CreateCompatibleDC(screenDc);
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = S;
-    bmi.bmiHeader.biHeight = -S; // top-down DIB
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    DibSurface surf(S);
     void* bits = nullptr;
-    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (dib == nullptr || bits == nullptr) {
-        if (dib != nullptr) DeleteObject(dib);
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
-        return;
-    }
-    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+    HBITMAP dib = surf.addDib(&bits);
+    if (dib == nullptr || bits == nullptr) return;
+    surf.select(dib);
     std::vector<uint32_t> px = BuildCrosshairBGRA(S, /*premultiply=*/true);
     memcpy(bits, px.data(), (size_t)S * S * 4);
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ S, S };
-    POINT srcPt{ 0, 0 };
-    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
-
-    SelectObject(memDc, oldBmp);
-    DeleteObject(dib);
-    DeleteDC(memDc);
-    ReleaseDC(nullptr, screenDc);
+    PresentLayered(hwnd_, surf.dc(), S);
 }
 
 void CursorSprite::showCrosshair() {
