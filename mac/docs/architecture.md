@@ -625,6 +625,24 @@ plain `f8`/`f9`. A Karabiner rule limited to vendor 5426 / product 170 maps F9 -
 `inspect`), F8 -> F19 (Wind `hideCursor`) and wheel tilt -> Cmd+C / Cmd+V in every app (in Terminal,
 Ctrl+C would interrupt). The rule lives in `~/.config/karabiner/karabiner.json`, not in this repo.
 
+## The tick's phases (`Magnifier.step`, 2026-11-18)
+
+`step(_:)` is a short driver over private phase methods in `Magnifier.swift`, called in this order.
+A `TickCtx` struct carries the tick's locals from phase to phase; Wind's own state stays in members.
+- `beginTick`: dt, the zoom direction, the render engine's cold-start gate (nil ends the tick before
+  `zoom.tick`), then `zoom.tick`.
+- `writeLevelFirst`: a new level is written at the current view, before the pointer is read.
+- `readPointer`: the one pointer read of the tick, and the pending lock deltas.
+- `endSessionAt1x`: at 1x and not zooming, it ends the session and lets the link sleep (true ends the tick;
+  the 1x screenshot selection ends it without pausing the link).
+- `startSessionIfNeeded`, then `readRawAndHoldBack`: raw counts and the held-back far read.
+- `detectLock`, `resolveOwner`: the game-lock detector, then who owns the view.
+- `computeTarget`: the view this tick wants (Inspect, a lock, or the owner's case; the `.mouse` case is one block).
+- `commitView`: clamp, crosshair and Wind's cursor, then `write(lv)`. `finishTick`: the plain read after
+  the writes, the carry model for the next tick, and the idle sleep.
+After `readRawAndHoldBack` a `defer` in the driver makes this tick's raw counts the previous ones
+(`prevRawMotion`, `prevRawStep`) on every exit. Keep it in the driver, never in a phase.
+
 ## One read per tick (2026-10-30, after the explorer)
 
 `scripts/explore.py` drives the virtual mouse through corners, edges, edge <-> centre and zooming
