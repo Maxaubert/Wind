@@ -105,7 +105,6 @@ final class Magnifier {
     private var returnOffset: Pt?               // while returning: view minus the pointer's view, gliding to zero
     private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
-    private var paused = false                  // the user switched Wind off from the menu
     private var simHeld = Set<Action>()         // holds from the command channel (tests)
     var testMods: Mods?                         // modifiers forced by the command channel (tests)
 
@@ -119,7 +118,6 @@ final class Magnifier {
     var isLocked: Bool { lock.locked }
     var viewOwner: ViewOwner { owner.owner }
     var currentCenter: Pt { center }
-    var isPaused: Bool { paused }
     var inspectLookPoint: Pt { inspectLook }
 
     // MARK: setup
@@ -255,21 +253,6 @@ final class Magnifier {
         ColorFilter.restore()
     }
 
-    func setPaused(_ p: Bool) {
-        paused = p
-        if p {
-            _ = router.releaseAll()
-            zoom.reset()
-            endInspect()
-            shot.cancel("paused"); shotPanel.show(nil, level: 1)
-            PointerTakeover.shared.watch(false)
-            windCursor.show(at: nil, on: false)
-            SkyLight.reset(); lastWritten = nil; liveLevel = 1; zoomedSession = false; caret.zoomed = false
-            clearSessionFlags()
-            reportLevel()
-        }
-    }
-
     private func updateScreen() {
         let b = CGDisplayBounds(CGMainDisplayID())
         screen = Sz(b.width, b.height)
@@ -312,7 +295,6 @@ final class Magnifier {
             if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }
             return pass
         }
-        if paused { return pass }
         // The Settings window is recording a keybind: Wind's binds must not fire or swallow the press.
         if bindsSuspended && [.keyDown, .keyUp, .flagsChanged, .otherMouseDown, .otherMouseUp, .scrollWheel].contains(type) { return pass }
         let now = CACurrentMediaTime()
@@ -458,7 +440,7 @@ final class Magnifier {
                 if code == 49 { shot.moving = false }
                 return .some(nil)
             }
-            guard down, !shot.active, !rep, config.ownScreenshot, !paused, !lock.locked,   // at any level (owner 2026-11-02)
+            guard down, !shot.active, !rep, config.ownScreenshot, !lock.locked,   // at any level (owner 2026-11-02)
                   !PointerTakeover.shared.active, !bindsSuspended,
                   !router.binds.values.joined().contains(where: { $0.trigger == .key(code) && modsMatch(mods, $0.mods) }),
                   let hk = shot.hotkey(code: code, mods: mods) else { return nil }
@@ -637,7 +619,6 @@ final class Magnifier {
         let now = l.timestamp
         let dt = lastTick == 0 ? l.duration : min(0.1, now - lastTick)
         lastTick = now
-        if paused { l.isPaused = true; return }
 
         zoom.direction = resolveDirection(inHeld: held(.zoomIn), outHeld: held(.zoomOut))
         // Render engine, cold start (first zoom, or after a minute at 1x stopped the capture): hold the

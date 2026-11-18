@@ -334,10 +334,7 @@ final class CaretTracker {
         return (v as! AXUIElement)
     }
 
-    /// Bounds of the insertion point (or selection) in global top-left points.
     /// The insertion point (or selection) and whether it is a plain insertion point.
-    private func caretRect(of el: AXUIElement) -> Rc? { caretInfo(of: el)?.rect }
-
     private func caretInfo(of el: AXUIElement) -> (rect: Rc, insertion: Bool)? {
         var rangeVal: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeVal) == .success,

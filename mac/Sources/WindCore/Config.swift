@@ -188,8 +188,6 @@ public enum RenderScaling: Int, CaseIterable, Sendable {
         case .xbr: return "xBR"
         }
     }
-    /// The order the settings page and the menu offer them in.
-    public static let menuOrder: [RenderScaling] = [.nearest, .xbr]
 }
 
 public enum Action: String, CaseIterable {
