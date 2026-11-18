@@ -80,8 +80,9 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
   (the ranged rows, the `renderScaling` migration, the `model` fallback) and `SanitizeBinds`.
 - `kValueRows` (`src/config/config.cpp`) holds one row per plain key: the key, its kind (Int,
   Double, Bool01 or String), the `Config` member and an optional range. A new key is a table row
-  plus a `kFields` entry in `tests/test_config_defaults.cpp`. `tests/fixtures/config_parse_probe.txt`
-  pins what every key parses to.
+  plus a `kFields` entry in `tests/test_config_defaults.cpp` and a `kAll` entry in
+  `tests/test_config_parse_probe.cpp`. `tests/fixtures/config_parse_probe.txt` pins what every
+  probed key parses to (regenerate it with `WIND_UPDATE_FIXTURES=1` only for a new key).
 
 ## Hot-reload and the UI-only fingerprint
 
