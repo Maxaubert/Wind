@@ -10,7 +10,6 @@ import ApplicationServices
 
 enum SettingsToggle {
     static let zoomPane = "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?Zoom"
-    static let displayPane = "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?Display"
 
     enum Result: Equatable { case changed, alreadySet, notFound(String) }
 

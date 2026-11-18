@@ -393,7 +393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let s: [String: Any] = [
             "started": started, "axTrusted": AXIsProcessTrusted(), "tap": mag.tapActive,
             "level": mag.level, "center": [mag.currentCenter.x, mag.currentCenter.y],
-            "owner": "\(mag.viewOwner)", "locked": mag.isLocked, "inspect": mag.inspect, "paused": mag.isPaused,
+            "owner": "\(mag.viewOwner)", "locked": mag.isLocked, "inspect": mag.inspect,
             "pointer": [p.x, p.y],
             "focusedWindow": focusedWindowTitle(),
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],

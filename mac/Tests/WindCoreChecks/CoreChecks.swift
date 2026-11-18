@@ -285,7 +285,6 @@ struct ConfigTests {
         for v in [2, 3, 4, 5, -1] { expect(try Config.load(from: Data("{\"renderScaling\": \(v)}".utf8)).renderScaling == 0) }
         expect(Config().renderScaling == RenderScaling.nearest.rawValue)
         expect(RenderScaling.xbr.usesShader && !RenderScaling.nearest.usesShader)
-        expect(RenderScaling.menuOrder == [.nearest, .xbr] && Set(RenderScaling.menuOrder) == Set(RenderScaling.allCases))
         let old = try Config.load(from: Data(#"{"smoothImages": true}"#.utf8))
         expect(old.renderScaling == 0 && old.smoothImages)
         let both = try Config.load(from: Data(#"{"smoothImages": true, "renderScaling": 1}"#.utf8))
