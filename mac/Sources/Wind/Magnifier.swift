@@ -525,13 +525,44 @@ final class Magnifier {
     private func endInspect() {
         guard inspect else { return }
         inspect = false
-        crosshair.show(at: nil, level: 1)
+        crosshair.show(at: nil, level: 1); crosshairAt = nil
         DrawZoom.shared.crosshair = nil
         if !pointerHiddenForCaret && !userHidCursor { SkyLight.setCursorHidden(false) }
         lock.reset()                                // Wind's own hiding must not read as a game
         // The pointer comes to the crosshair (next tick), so the view stays where it is.
-        if zoomedSession { pendingPlace = inspectLook }
+        // At 1x nothing is zoomed and a warp is exact: it goes there at once.
+        if zoomedSession { pendingPlace = inspectLook } else { warpUnzoomed(to: inspectLook) }
         Log.info("inspect off at \(Int(inspectLook.x)),\(Int(inspectLook.y))")
+    }
+
+    /// Inspect at 1x (it stays on when the zoom goes out): the crosshair moves with the hand, one to
+    /// one, the real pointer held still and hidden on a whole point by warps (exact unzoomed), and
+    /// the crosshair window shows it at its desktop size. Zooming in again picks up from here.
+    private func inspectAtOneX(_ ptr: CGPoint) {
+        guard let ref = inspectRef else {
+            inspectAnchor = CGPoint(x: ptr.x.rounded(), y: ptr.y.rounded())
+            inspectRef = warpUnzoomed(to: Pt(inspectAnchor.x, inspectAnchor.y))
+            crosshair.show(at: CGPoint(x: inspectLook.x, y: inspectLook.y), level: 1)
+            crosshairAt = crosshair.drawnAt
+            return
+        }
+        if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
+            inspectLook = Pt(min(max(inspectLook.x + ptr.x - ref.x, 0), screen.w - 1),
+                             min(max(inspectLook.y + ptr.y - ref.y, 0), screen.h - 1))
+            inspectRef = warpUnzoomed(to: Pt(inspectAnchor.x, inspectAnchor.y))
+        }
+        if SkyLight.cursorVisible { SkyLight.setCursorHidden(true, force: true) }   // the Dock can show it again
+        crosshair.show(at: CGPoint(x: inspectLook.x, y: inspectLook.y), level: 1)
+        crosshairAt = crosshair.drawnAt
+    }
+
+    /// A pointer warp at 1x, where nothing reinterprets it; never while zoomed (see placePointer).
+    @discardableResult
+    private func warpUnzoomed(to t: Pt) -> Pt {
+        let w = CGPoint(x: min(max(t.x, 0), screen.w - 1), y: min(max(t.y, 0), screen.h - 1))
+        Self.noSuppression?.localEventsSuppressionInterval = 0      // else the hand is held back 250 ms
+        CGWarpMouseCursorPosition(w); CGAssociateMouseAndMouseCursorPosition(1)
+        return Pt(w.x, w.y)
     }
 
     /// 4 times a second: a window of another process above Wind's cursor panel (a system prompt) makes
@@ -690,7 +721,9 @@ final class Magnifier {
                 zoomedSession = false
                 caret.zoomed = false
                 lastWritten = nil
-                endInspect()
+                // Inspect stays on at 1x, as on Windows (owner 2026-11-18: zooming out gave the
+                // normal cursor back): the crosshair goes on roaming the unzoomed screen.
+                DrawZoom.shared.crosshair = nil
                 windCursor.show(at: nil, on: false); windCursorAt = nil
                 PointerTakeover.shared.watch(false)
                 clearSessionFlags()
@@ -710,6 +743,7 @@ final class Magnifier {
                 shotPanel.show(nil, level: 1)
                 windCursor.show(at: nil, on: false)
             }
+            if inspect { inspectAtOneX(ptr); return }
             l.isPaused = true
             return
         }
@@ -718,7 +752,8 @@ final class Magnifier {
             zoomedSession = true
             caret.zoomed = true
             updateScreen()
-            center = clampCenter(Pt(ptr.x, ptr.y), level: lv, screen: screen)
+            // Zooming in from Inspect at 1x: the view starts on the crosshair, not the frozen pointer.
+            center = clampCenter(inspect ? inspectLook : Pt(ptr.x, ptr.y), level: lv, screen: screen)
             virtualPtr = Pt(ptr.x, ptr.y)
             springVel = (0, 0)
             clearSessionFlags()

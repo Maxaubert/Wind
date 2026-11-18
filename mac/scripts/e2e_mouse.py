@@ -253,6 +253,34 @@ for _ in range(15):
 inspect_key()
 check("inspect: crosshair stays on the view centre while panning", off and max(abs(a) + abs(b) for a, b in off) < 1.01, f"crosshair minus shown centre {off[:5]}")
 
+# Inspect stays on when the zoom goes out to 1x, as on Windows (owner 2026-11-18: zooming out gave the
+# normal cursor back): the crosshair roams the unzoomed screen with the pointer frozen and hidden,
+# zooming in again starts the view on it, and leaving puts the pointer on it.
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+inspect_key(); mv(10, 0); time.sleep(0.2)
+ctl("level 1"); time.sleep(0.6)
+a = ctl("state")
+check("inspect at 1x: still on after zooming out", a["inspect"] and not a["cursorVisible"] and bool(a["cross"]),
+      f"inspect {a['inspect']} visible {a['cursorVisible']} cross {a['cross']}")
+mv(10, 5); time.sleep(0.3)
+b = ctl("state")
+check("inspect at 1x: the hand moves the crosshair", b["look"][0] - a["look"][0] > 20 and b["look"][1] - a["look"][1] > 5,
+      f"look {a['look']} -> {b['look']}")
+check("inspect at 1x: pointer frozen", max(abs(b["pointer"][0] - a["pointer"][0]), abs(b["pointer"][1] - a["pointer"][1])) < 1.01,
+      f"{a['pointer']} -> {b['pointer']}")
+check("inspect at 1x: the crosshair is drawn on the look point", b["cross"] and max(abs(b["cross"][0] - b["look"][0]), abs(b["cross"][1] - b["look"][1])) < 1,
+      f"cross {b['cross']} look {b['look']}")
+ctl("level 4"); time.sleep(0.5)
+c = ctl("state")
+check("inspect at 1x: zooming in starts the view on the crosshair", c["inspect"] and max(abs(c["center"][0] - c["look"][0]), abs(c["center"][1] - c["look"][1])) < 2,
+      f"view {c['center']} look {c['look']}")
+ctl("level 1"); time.sleep(0.6); b = ctl("state")
+inspect_key(); time.sleep(0.2)
+d = ctl("state")
+check("inspect at 1x: leaving puts the pointer on the crosshair and shows it",
+      not d["inspect"] and d["cursorVisible"] and max(abs(d["pointer"][0] - b["look"][0]), abs(d["pointer"][1] - b["look"][1])) < 1.01 and not d["cross"],
+      f"pointer {d['pointer']} look {b['look']} visible {d['cursorVisible']} cross {d['cross']}")
+
 # Pushing into a screen edge while macOS reports the cursor hidden (as it does after typing) is
 # not a game holding the pointer (owner recording 2026-10-30: false locks at x = 0).
 ctl("level 1"); time.sleep(0.3); ctl("warp 200 600"); time.sleep(0.2); ctl("level 12"); time.sleep(0.5)

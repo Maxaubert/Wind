@@ -5,13 +5,15 @@ import AppKit
 // Inspect mode's crosshair at the view centre. Like Wind's own cursor it is a layer in a
 // click-through window that covers the screen and never moves (a moved window reached the screen
 // 1-2 frames after the zoom write: the crosshair jumped whole points times the level while
-// panning, measured on the zoomed screen 2026-10-31). The compositor zoom magnifies it, so it is
-// drawn 1/level in size to look the same at every zoom. It moves before each view write
-// (`move(to:level:)`), committed first, so both reach the same frame.
+// panning, measured on the zoomed screen 2026-10-31). Its size is in desktop points, so the
+// compositor zoom magnifies it like the pointer it stands in for, as on Windows (owner 2026-11-18:
+// it stayed small while everything else was magnified). At 1x (Inspect stays on when the zoom goes
+// out) it is that same size. It moves before each view write (`move(to:level:)`), committed first,
+// so both reach the same frame.
 
 final class Crosshair {
     private var panel: NSPanel?
-    private let armPt = 26.0, gapPt = 6.0, linePt = 2.0      // as seen on screen
+    static let armPt = 6.5, gapPt = 1.5, linePt = 0.5        // desktop points (magnified by the zoom); a quarter of the first size (owner 2026-11-18: "too big")
     private let root = CALayer()
     private let outline = CAShapeLayer(), line = CAShapeLayer()
     private var pathLevel = 0.0
@@ -58,7 +60,7 @@ final class Crosshair {
     }
 
     private func setPaths(_ lv: Double) {
-        let a = armPt / lv, g = gapPt / lv, w = linePt / lv
+        let a = Crosshair.armPt, g = Crosshair.gapPt, w = Crosshair.linePt
         let path = CGMutablePath()
         path.move(to: CGPoint(x: -a, y: 0)); path.addLine(to: CGPoint(x: -g, y: 0))
         path.move(to: CGPoint(x: g, y: 0)); path.addLine(to: CGPoint(x: a, y: 0))
