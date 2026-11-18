@@ -5,6 +5,7 @@
 #include "logging.h"
 #include "track_filter.h"
 #include "caret_rect.h"   // trim tall UIA caret rects (#337)
+#include "caret_skip.h"   // which moved carets are skipped
 #include "java_bridge.h"
 #include "java_bridge_util.h"
 #include "shell_panel.h"      // which shell windows sit above every band (#569)
@@ -757,24 +758,30 @@ struct FocusRun {
                     // issue #278; its UIA caret was wrong too, so there is no source to fall back
                     // to): the view stays where it is. Since #561 the same holds for every UIA caret
                     // MSAA could not replace above (Chromium's fixed rect below Prism's dialog input).
-                    if ((IsGeckoWindow(fg) || src[0] == 'u') &&
-                        !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
+                    // src is read after the MSAA swap above; the terminal check runs only when needed.
+                    const bool geckoOrUia = IsGeckoWindow(fg) || src[0] == 'u';
+                    switch (wind::ClassifyCaret({ rc.left, rc.top, rc.right, rc.bottom }, elemBox, geckoOrUia,
+                                                [&] { return !(el && edc.xterm) && IsTerminalWindow(fg); },
+                                                caretGhost)) {
+                    case wind::CaretSkip::OutsideElement:
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
-                    } else if (!(el && edc.xterm) && IsTerminalWindow(fg) &&
-                               wind::IsParkedTerminalCaret((int)rc.left, (int)rc.top, (int)rc.right, (int)rc.bottom,
-                                                           (int)b.left, (int)b.right)) {
+                        break;
+                    case wind::CaretSkip::ParkedTerminal:
                         // A TUI's parked cursor (Claude Code): the view stays where the user types.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (parked terminal cursor) via %s: %ld,%ld",
                                                    src, rc.left, rc.top);
-                    } else if (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost)) {
+                        break;
+                    case wind::CaretSkip::LineEndGhost:
                         // A line-end ghost (#387): the view stays on the text until the next real caret.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",
                                                    src, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
                         wind::NoteGhostHeld((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
-                    } else {
+                        break;
+                    case wind::CaretSkip::None:
                         wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                         publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                        break;
                     }
                 }
             }
