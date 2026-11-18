@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Dependency update PRs (audit #576). Actions are pinned by commit SHA with a version comment,
+# which Dependabot keeps in step. Weekly and grouped, so updates arrive as a few PRs, not many.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      ui-npm:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /mac/ui
+    schedule:
+      interval: weekly
+    groups:
+      mac-ui-npm:
+        patterns: ["*"]

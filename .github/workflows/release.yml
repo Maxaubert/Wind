@@ -55,7 +55,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Version read, unit tests, keybind JS test, Playwright UI suite and tools/release.ps1, shared
       # with alpha.yml. Any failing gate fails the job before anything is published.

@@ -40,7 +40,7 @@ jobs:
   alpha:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Same build and gates as the stable release (version read, unit tests, keybind JS test,
       # Playwright UI suite, tools/release.ps1): an alpha that fails them is not worth installing.
