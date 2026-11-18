@@ -189,7 +189,7 @@ constexpr ValueRow StrRow(const char* k, std::string Config::* p) { return { k, 
 // Ranges mirror the config UI sliders / the struct-comment docs. The ini is a hand-editable surface,
 // and an out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable
 // zoom, or a negative ramp) would otherwise silently break behavior with no feedback.
-const ValueRow kValueRows[] = {
+constexpr ValueRow kValueRows[] = {
     IntRow("zoomInButton", &Config::zoomInButton),
     IntRow("zoomOutButton", &Config::zoomOutButton),
     IntRow("zoomInButton2", &Config::zoomInButton2),
