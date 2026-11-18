@@ -34,7 +34,7 @@ runs:
 
     - name: Install NSIS
       shell: pwsh
-      run: choco install nsis --no-progress -y
+      run: choco install nsis --version 3.13.0 --no-progress -y   # pinned (audit #577); bump on purpose
 
     - name: Unit tests
       shell: cmd
