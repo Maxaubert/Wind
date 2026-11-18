@@ -13,7 +13,7 @@ import AppKit
 
 final class Crosshair {
     private var panel: NSPanel?
-    static let armPt = 26.0, gapPt = 6.0, linePt = 2.0       // desktop points (magnified by the zoom)
+    static let armPt = 6.5, gapPt = 1.5, linePt = 0.5        // desktop points (magnified by the zoom); a quarter of the first size (owner 2026-11-18: "too big")
     private let root = CALayer()
     private let outline = CAShapeLayer(), line = CAShapeLayer()
     private var pathLevel = 0.0
