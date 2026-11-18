@@ -14,14 +14,17 @@ export function post(msg) {
 // engine the live Wind process runs, '' when the host cannot tell). The first call after
 // load is answered from window.__windInit (injected by the host before the page runs); it is
 // consumed once, so later calls (and a reload) always ask the host for fresh state.
+// toSession normalises one host reply (or __windInit) into that shape; each missing field gets its own
+// fresh default object.
+function toSession(m) {
+  return { values: m.values || {}, saved: m.saved || m.values || {},
+           runningModel: m.runningModel || '', profiles: m.profiles || { names: [], active: '' } };
+}
 export function getSession() {
   const init = window.__windInit;
   if (init) {
     delete window.__windInit;
-    return Promise.resolve({
-      values: init.values || {}, saved: init.saved || init.values || {}, runningModel: init.runningModel || '',
-      profiles: init.profiles || { names: [], active: '' },
-    });
+    return Promise.resolve(toSession(init));
   }
   return new Promise(resolve => {
     // configUnreadable: the host could not read the ini right now (another process is replacing it).
@@ -30,8 +33,7 @@ export function getSession() {
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
-        resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
-                  profiles: m.profiles || { names: [], active: '' } });
+        resolve(toSession(m));
       } else if (m && m.type === 'configUnreadable') {
         if (++tries < 8) setTimeout(() => post({ type: 'getConfig' }), 250);
         else { off(); resolve({ values: {}, saved: {}, profiles: { names: [], active: '' } }); }
@@ -60,8 +62,7 @@ export function discardSession() {
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
-        resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
-                  profiles: m.profiles || { names: [], active: '' }, discarded: m.discarded !== false });
+        resolve({ ...toSession(m), discarded: m.discarded !== false });
       } else if (m && m.type === 'configUnreadable') {
         off();
         // The ini could not be re-read: fetch the state with getSession's retries.
