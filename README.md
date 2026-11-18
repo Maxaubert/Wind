@@ -3,19 +3,22 @@
 
   # Wind
 
-  Fullscreen magnifier for Windows. Also on the Mac: [Wind for Mac](mac/README.md).
+  Fullscreen magnifier for Windows and macOS.
 
-  [![Latest release](https://img.shields.io/github/v/release/Maxaubert/Wind?style=flat-square&color=5b5bd6&label=release)](https://github.com/Maxaubert/Wind/releases/latest)
-  [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-5b5bd6?style=flat-square)](https://github.com/Maxaubert/Wind/releases/latest)
+  [![Windows release](https://img.shields.io/github/v/release/Maxaubert/Wind?style=flat-square&color=5b5bd6&label=windows)](https://github.com/Maxaubert/Wind/releases/latest)
+  [![Mac release](https://img.shields.io/github/v/release/Maxaubert/Wind?filter=mac-v*&style=flat-square&color=5b5bd6&label=mac)](https://github.com/Maxaubert/Wind/releases?q=mac-v&expanded=true)
+  [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-5b5bd6?style=flat-square)](#install-on-windows)
+  [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-5b5bd6?style=flat-square&logo=apple&logoColor=white)](#install-on-a-mac)
   [![Licence: proprietary](https://img.shields.io/badge/licence-proprietary-5b5bd6?style=flat-square)](LICENSE)
 
-  [Download](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe) · [Releases](https://github.com/Maxaubert/Wind/releases) · [Developer docs](docs/architecture/README.md)
+  [Download for Windows](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe) · [Download for Mac](https://github.com/Maxaubert/Wind/releases?q=mac-v&expanded=true) · [Releases](https://github.com/Maxaubert/Wind/releases) · [Developer docs](docs/architecture/README.md)
 </div>
 
 https://github.com/user-attachments/assets/59939cd8-8bf3-4fbf-b978-8e89a4ebde1f
 
 Wind replaces the built-in Magnifier with smooth, continuous zoom. It keeps tracking the mouse when
 a game hides, clips or center-locks the cursor, and clicks pass through to the app under it.
+It runs on Windows and on macOS; the Mac version has its own guide in [Wind for Mac](mac/README.md).
 
 ## Features
 
@@ -30,7 +33,7 @@ a game hides, clips or center-locks the cursor, and clicks pass through to the a
 - Named profiles for different setups.
 - Warmth and brightness filter for the whole screen.
 
-## Install
+## Install on Windows
 
 [Download the installer](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe)
 and run it. It always points at the latest release.
@@ -49,10 +52,17 @@ anyway**. Some browsers and work computers block the download. Setup signs Wind 
 because Windows gives Wind the UIAccess permission it needs only when it is signed. If that step
 fails, setup says so, and Wind will not start until you run the installer again.
 
-**On a Mac?** Wind for Mac lives in [`mac/`](mac/README.md) and ships as its own zip on the
-[releases page](https://github.com/Maxaubert/Wind/releases) (tags `mac-v*`).
+## Install on a Mac
+
+Wind for Mac needs macOS 14 or later. Get the `Wind-mac-<version>.zip` from the newest
+[Mac release](https://github.com/Maxaubert/Wind/releases?q=mac-v&expanded=true) (tags `mac-v*`),
+or build it from source with `scripts/build.sh install` in `mac/`. On first launch, macOS asks for
+the **Accessibility** permission. Setup, keys and settings for the Mac are in
+[Wind for Mac](mac/README.md).
 
 ## Usage
+
+The sections below describe Wind for Windows.
 
 The first launch walks you through choosing zoom keys: mouse side buttons, keyboard keys, or both.
 
