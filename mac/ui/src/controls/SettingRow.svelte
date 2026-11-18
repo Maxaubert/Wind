@@ -11,14 +11,14 @@
   //   tab       optional quiet tab name shown beside the label (search results)
   //   extra     { version, mac (the latest macStatus), onAction(name), onMacAction(action, value) }
   import Toggle from '$shared/controls/Toggle.svelte';
-  import Slider from './Slider.svelte';
+  import Slider from '$shared/controls/Slider.svelte';
   import Select from './Select.svelte';
   import Bindings from './Bindings.svelte';
   import PanBinding from './PanBinding.svelte';
   import '$shared/controls/bindings.css';
   import MacStatus from './MacStatus.svelte';
   import ThemePicker from '$shared/prefs/ThemePicker.svelte';
-  import About from './About.svelte';
+  import About from '$shared/controls/About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false, tab = '' } = $props();
 
   // Ids so every control is named by its row: label (and the live value for value-bearing ones).
@@ -30,7 +30,7 @@
 </script>
 
 {#if row.type === 'about'}
-  <About version={extra.version} />
+  <About version={extra.version} note="Wind for Mac" />
 {:else}
   <div class="row" class:disabled class:wide={row.wide} data-key={row.key}>
     <div class="meta">

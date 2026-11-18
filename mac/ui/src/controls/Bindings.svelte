@@ -16,7 +16,7 @@
   import { unitsOf, removePatch, placePatch, maxOf, eventMods, keyEventBind, mouseEventBind,
            formatBind, bindLabel, bindSpoken, bindVerdict } from '../lib/bindings.js';
   import { modsGlyphs, modsSpoken } from '../lib/bindNames.js';
-  import { setCapturing, capturing } from '../lib/capture.js';
+  import { setCapturing, capturing } from '$shared/lib/capture.js';
   import { captureBinds } from '../bridge.js';
   import { onDestroy } from 'svelte';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();

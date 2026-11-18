@@ -5,7 +5,7 @@
   // dev at /preview.html (not part of the production build).
   import './tokens.css';
   import TitleBar from '../shell/TitleBar.svelte';
-  import Sidebar from '../shell/Sidebar.svelte';
+  import Sidebar from '$shared/shell/Sidebar.svelte';
   import Banner from '$shared/shell/Banner.svelte';
   import Card from '$shared/shell/Card.svelte';
   import SaveCapsule from '../shell/SaveCapsule.svelte';
@@ -31,7 +31,7 @@
 <div class="wnd app">
   <TitleBar onMinimize={() => log('minimize')} onMaximize={() => log('maximize')} onClose={() => log('close')} />
   <div class="body">
-    <Sidebar {groups} {bottom} {active} version="0.15.4"
+    <Sidebar {groups} {bottom} {active} version="0.15.4" searchHint="Ctrl F"
              onSelect={(id) => { active = id; log('select', id); }} onSearch={(v) => log('search', v)} />
     <main class="main">
       <Banner title="Zoom" description="How far and how fast to zoom." icon="zoom" />

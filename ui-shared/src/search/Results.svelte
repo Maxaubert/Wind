@@ -4,8 +4,8 @@
   // Search results: ONE ranked list, best match first. Each result is the setting's real row (the same
   // SettingRow, with the same value and handlers as on its page), so it is edited right here and
   // clicking it goes nowhere. The tab name sits quietly beside the label.
-  import SettingRow from '../controls/SettingRow.svelte';
-  let { results = [], query = '', values = {}, extra = {}, live = () => {}, onChange = () => {}, onSet = () => {},
+  // Row: the app's SettingRow component (it reads the app's own schema and bridge, so it stays per-app).
+  let { Row, results = [], query = '', values = {}, extra = {}, live = () => {}, onChange = () => {}, onSet = () => {},
         isDisabled = () => false } = $props();
 </script>
 
@@ -16,8 +16,8 @@
     <div class="list">
       {#each results as r (r.key)}
         <div class="hit" data-hit={r.key}>
-          <SettingRow row={r.row} value={values[r.key]} {values} {extra} {live} tab={r.groupLabel}
-                      disabled={isDisabled(r.row)} onChange={(v) => onChange(r.key, v)} onSet={onSet} />
+          <Row row={r.row} value={values[r.key]} {values} {extra} {live} tab={r.groupLabel}
+               disabled={isDisabled(r.row)} onChange={(v) => onChange(r.key, v)} onSet={onSet} />
         </div>
       {/each}
     </div>

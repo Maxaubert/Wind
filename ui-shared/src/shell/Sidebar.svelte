@@ -1,9 +1,12 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
      Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
-  import { iconSvg } from '$shared/design/icons.js';
+  import { iconSvg } from '../design/icons.js';
   // groups: the pages above the divider, bottom: the pages below it ([{ id, label, icon }]). `version` shows beside the row with id 'about'.
-  let { groups = [], bottom = [], active = '', version = '', query = '', onSelect = () => {}, onSearch = () => {} } = $props();
+  // searchHint: the shortcut drawn in the search box ('Ctrl F' on Windows, the Cmd glyph on the Mac).
+  // trafficLights: the Mac window has no title bar row; keep the top-left corner free for the native traffic lights.
+  let { groups = [], bottom = [], active = '', version = '', query = '', searchHint = 'Ctrl F', trafficLights = false,
+        onSelect = () => {}, onSearch = () => {} } = $props();
 </script>
 
 {#snippet row(g)}
@@ -14,12 +17,12 @@
   </button>
 {/snippet}
 
-<aside class="side">
+<aside class="side" class:tl={trafficLights}>
   <label class="search">
     {@html iconSvg('search', 16)}
     <input type="search" placeholder="Search settings" aria-label="Search settings" value={query}
            oninput={(e) => onSearch(e.currentTarget.value)} />
-    <kbd>Ctrl F</kbd>
+    <kbd>{searchHint}</kbd>
   </label>
   <nav aria-label="Settings sections">
     {#each groups as g (g.id)}{@render row(g)}{/each}
@@ -32,6 +35,7 @@
 <style>
   .side { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column;
           min-height: 0; padding: 12px 10px 14px; overflow-y: auto; }
+  .side.tl { padding-top: 44px; }   /* the top 44px hold the native traffic lights */
   .search { height: 32px; border: 1px solid var(--line2); display: flex; align-items: center; gap: 8px;
             padding: 0 6px 0 10px; color: var(--fg3); margin-bottom: 12px; border-radius: var(--srad); }
   .search:focus-within { border-color: var(--fg); }
@@ -53,6 +57,7 @@
   @media (max-width: 700px) {
     .side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-right: 0;
             border-bottom: 1px solid var(--line); overflow-y: visible; }
+    .side.tl { padding: 8px 12px 8px 84px; }   /* the search sits beside the traffic lights (84px left padding) */
     .search { flex: 1 1 100%; margin-bottom: 2px; }
     nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
     .it { width: auto; height: 32px; padding: 0 10px 0 6px; gap: 6px; }

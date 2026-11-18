@@ -9,7 +9,7 @@
   import { checkKeyBind, refusalText } from '../lib/keybindRules.js';
   import { modList, popcount } from '../lib/bindNames.js';
   import { PAN_ARROWS, panState, panPatch } from '../lib/bindings.js';
-  import { setCapturing } from '../lib/capture.js';
+  import { setCapturing } from '$shared/lib/capture.js';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
 
   const now = $derived(panState(values));

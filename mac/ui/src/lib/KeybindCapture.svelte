@@ -12,7 +12,7 @@
   import { refusalText, parseBind } from './keybindRules.js';
   import { eventMods, keyEventBind, mouseEventBind, formatBind, bindLabel, bindSpoken, bindVerdict, splitBinds } from './bindings.js';
   import { bindParts, modsGlyphs, modsSpoken } from './bindNames.js';
-  import { setCapturing, capturing } from './capture.js';
+  import { setCapturing, capturing } from '$shared/lib/capture.js';
   import { captureBinds } from '../bridge.js';
   import { onDestroy } from 'svelte';
   // `onClear` (optional) replaces the right-click clear patch.
