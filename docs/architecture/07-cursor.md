@@ -333,6 +333,8 @@ default off). `FocusTracker` (`src/track/focus_track.*`) runs on its own thread 
 `FocusLookup`, WinEvent hooks), `messageLoop` (wakes, 30 ms coalescing, the 16 ms backstop poll) and
 `tearDown`. A wake calls `resolve`, which reads Java carets in `readJavaCaret`, follows focus, and
 leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, UIA, MSAA fixes).
+`followCaret` builds the focus key (`buildFocusKey`), swaps a suspect UIA caret for MSAA's
+(`preferMsaaIfSuspect`) and trims it (`trimCaret`).
 
 - **Tracking never moves the pointer.** While caret or focus owns the view, the view is detached
   (`t.viewDetached`, weld off): `DetachedMap` (`src/track/detached_view.h`) maps the glided centre while
@@ -354,6 +356,9 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   previous session's caret.
 - Caret rects are corrected in `src/track/caret_rect.h` (tall Chromium rects trimmed to the line, a
   whole-line rect recognised).
+- **Which moved carets are skipped** is decided by `ClassifyCaret` (`src/track/caret_skip.h`, pure,
+  tested): a Gecko or UIA caret outside its element, then a terminal's parked cursor, then a
+  line-end ghost. The baseline caret after a focus change is never skipped.
 - **VS Code (EditContext).** Its editor element (`native-edit-context`, also Monaco elsewhere)
   reports the UIA caret at the start of the line wherever the caret is on it. For that class only,
   Chromium's MSAA system caret (`OBJID_CARET`) on the same line wins (`msaa-editcontext`). Not for

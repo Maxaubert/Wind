@@ -91,7 +91,7 @@ build's include path.
 | Colour | `color/` | `color_filter.*`, `color_matrix.h`, `cursor_tint.*`, `cursor_tint_pixels.h` |
 | Input | `input/` | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `keyboard_pan.h`, `typing_key.h`, `event_order.h`, `swallow_ledger.h` |
 | Cursor and lock | `cursor/` | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h`, `game_cursor.h`, `pan_glide.h` |
-| Tracking | `track/` | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `track_filter.h`, `java_bridge*`, `focus_identity.h` |
+| Tracking | `track/` | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `caret_skip.h`, `track_filter.h`, `java_bridge*`, `focus_identity.h` |
 | Zoom | `zoom/` | `zoom_controller.*` |
 | Config and profiles | `config/` | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h`, `profile_switch.h` |
 | Tray (core side) | `tray/` | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h` |
