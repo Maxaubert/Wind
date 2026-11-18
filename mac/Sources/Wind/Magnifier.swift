@@ -644,9 +644,54 @@ final class Magnifier {
         step(l)
     }
 
+    /// The values one tick hands from phase to phase (`step`). Wind-own state lives in the members;
+    /// these are the tick's locals, set by the phase named in each comment and read by later ones.
+    private struct TickCtx {
+        var dt = 0.0                                // beginTick
+        var lv = 1.0                                // the level after zoom.tick
+        var levelWritten = false                    // writeLevelFirst
+        var ptr = CGPoint.zero                      // readPointer; readRawAndHoldBack may hold it back
+        var ldx = 0.0, ldy = 0.0                    // readPointer: pending lock deltas
+        var moving = false                          // endSessionAt1x
+        var rawOn = false                           // readRawAndHoldBack
+        var r: (dx: Double, dy: Double) = (0, 0)
+        var motion = 0.0
+        var takeover = false                        // detectLock
+        var shotOn = false
+        var locked = false                          // resolveOwner
+        var prevOwner: ViewOwner = .mouse
+        var oi = ViewOwnerInputs()
+        var nowT = 0.0
+        var panX = 0.0, panY = 0.0
+        var target = Pt(0, 0)                       // computeTarget
+    }
+
+    /// One display-link tick, as phases in this order. The order of every read and write is load-bearing:
+    /// the level is written first, the pointer is read once, the crosshair and Wind's cursor move before
+    /// the view write, and the plain read for the lock detector comes after it.
     private func step(_ l: CADisplayLink) {
         let started = Stall.begin()
         defer { if !l.isPaused { Stall.end(started) } else { Stall.linkWoke() } }
+        guard let dt = beginTick(l) else { return }
+        var tc = TickCtx()
+        tc.dt = dt
+        tc.lv = zoom.level
+        tc.levelWritten = writeLevelFirst(tc.lv)
+        readPointer(&tc)
+        if endSessionAt1x(l, &tc) { return }
+        startSessionIfNeeded(tc.ptr, tc.lv)
+        readRawAndHoldBack(&tc)
+        // Every exit from here on: this tick's raw counts become the previous ones.
+        defer { prevRawMotion = tc.motion; prevRawStep = rawStep }   // counts can land a frame after the pointer moves
+        detectLock(&tc)
+        resolveOwner(&tc)
+        computeTarget(&tc)
+        commitView(tc)
+        finishTick(l, tc)
+    }
+
+    /// The tick's dt and the zoom step. nil: the render engine's cold-start gate holds this tick at 1x.
+    private func beginTick(_ l: CADisplayLink) -> Double? {
         let now = l.timestamp
         let dt = lastTick == 0 ? l.duration : min(0.1, now - lastTick)
         lastTick = now
@@ -659,12 +704,14 @@ final class Magnifier {
         if DrawZoom.enabled && !zoomedSession && zoom.level <= 1.0001 && zoom.wantsZoomIn && !DrawZoom.shared.hasFrame {
             DrawZoom.shared.prewarm()
             if config.lockTracking { _ = raw.start() }  // its first open stalls a tick: here, not mid-zoom
-            if DrawZoom.enabled { return }              // a failed start falls through to macOS's zoom
+            if DrawZoom.enabled { return nil }          // a failed start falls through to macOS's zoom
         }
         zoom.tick(dt)
         SkyLight.traceWrites = config.logLevel >= 3
-        let lv = zoom.level
+        return dt
+    }
 
+    private func writeLevelFirst(_ lv: Double) -> Bool {
         // A new level is written first, before the pointer is read and before any placement.
         // Written after a placement, a level write sometimes undid it (the pointer snapped back the
         // whole placed shift), and WindowServer applies queued hand motion during it; written here,
@@ -694,7 +741,11 @@ final class Magnifier {
             lastWritten = (c, lv)
             levelWritten = true
         }
+        return levelWritten
+    }
 
+    private func readPointer(_ tc: inout TickCtx) {
+        let levelWritten = tc.levelWritten
         // The pointer is read ONCE per tick, here; every later step works from this read and from
         // the whole points Wind's own carries move it, never from a read after a write. Right after
         // a level write the first read can be tens of points off for about 0.5 ms, then holds
@@ -711,9 +762,15 @@ final class Magnifier {
         let ldx = pendingLockDx, ldy = pendingLockDy
         pendingLockDx = 0; pendingLockDy = 0
         wroteThisTick = false
+        tc.ptr = ptr; tc.ldx = ldx; tc.ldy = ldy
+    }
 
+    /// At 1x and not zooming: ends a zoom session and lets the link sleep. true: the tick is over.
+    private func endSessionAt1x(_ l: CADisplayLink, _ tc: inout TickCtx) -> Bool {
+        let lv = tc.lv, ptr = tc.ptr
         // Holding zoom-out at 1x is not a zoom.
         let moving = zoom.isMoving && !(zoom.direction == .zoomOut && lv <= 1.0001 && !zoom.hasTarget)
+        tc.moving = moving
         if lv <= 1.0001 && !moving {
             if zoomedSession {
                 SkyLight.reset()
@@ -737,17 +794,20 @@ final class Magnifier {
                 shot.track(ptr)
                 windCursor.show(at: nil, on: true); windCursorAt = nil
                 shotPanel.show(shot, level: 1)
-                return
+                return true
             }
             if shotPanel.visible {
                 shotPanel.show(nil, level: 1)
                 windCursor.show(at: nil, on: false)
             }
-            if inspect { inspectAtOneX(ptr); return }
+            if inspect { inspectAtOneX(ptr); return true }
             l.isPaused = true
-            return
+            return true
         }
+        return false
+    }
 
+    private func startSessionIfNeeded(_ ptr: CGPoint, _ lv: Double) {
         if !zoomedSession {
             zoomedSession = true
             caret.zoomed = true
@@ -764,7 +824,11 @@ final class Magnifier {
             Log.info("zoom session start at \(Int(ptr.x)),\(Int(ptr.y))")
             onSessionStart?()
         }
+    }
 
+    private func readRawAndHoldBack(_ tc: inout TickCtx) {
+        let lv = tc.lv, dt = tc.dt, ldx = tc.ldx, ldy = tc.ldy
+        var ptr = tc.ptr
         tickStartCenter = center
         placedLastTick = placedThisTick; placedThisTick = Pt(0, 0); carryView = nil
         glideFrame = false
@@ -789,11 +853,15 @@ final class Magnifier {
                 ptr = CGPoint(x: prev.x, y: prev.y)
             } else { pendingJump = nil }
         }
-        defer { prevRawMotion = motion; prevRawStep = rawStep }   // counts can land a frame after the pointer moves
         rawStep = rawOn && CACurrentMediaTime() - lastRawAt < 1 ? Pt(r.dx, r.dy) : nil
         let decay = exp(-dt / 0.02)                    // pending pushes fade over ~20 ms, any frame rate
         pushX *= decay; pushY *= decay; if abs(pushX) < 0.05 { pushX = 0 }; if abs(pushY) < 0.05 { pushY = 0 }
         redoAge += 1; if redoAge > 3 { redoX = 0; redoY = 0 }
+        tc.ptr = ptr; tc.rawOn = rawOn; tc.r = r; tc.motion = motion
+    }
+
+    private func detectLock(_ tc: inout TickCtx) {
+        let ptr = tc.ptr, lv = tc.lv, motion = tc.motion, rawOn = tc.rawOn
         // The pointer's own movement since the end of the last tick (after Wind's writes), so a
         // pointer that follows the hand never counts as held.
         // While a game holds the pointer's screen position, each view shift drags its desktop
@@ -840,7 +908,11 @@ final class Magnifier {
         if config.logLevel >= 2, let w = lastWritten, owner.owner == .mouse, !inspect {
             Log.verbose(String(format: "wobble %.2f %.2f lv %.2f", (ptr.x - w.c.x) * w.level, (ptr.y - w.c.y) * w.level, w.level))
         }
+        tc.takeover = takeover; tc.shotOn = shotOn
+    }
 
+    private func resolveOwner(_ tc: inout TickCtx) {
+        let dt = tc.dt, takeover = tc.takeover, shotOn = tc.shotOn
         // Who owns the view this tick.
         let locked = config.lockTracking && lock.locked
         if wasLocked && !locked { returning = true; returnOffset = nil }
@@ -879,7 +951,14 @@ final class Magnifier {
         }
         // Text views (TextEdit) show the cursor again as they handle keys: hide it again.
         if (pointerHiddenForCaret || userHidCursor) && !inspect && !takeover && SkyLight.cursorVisible { SkyLight.setCursorHidden(true, force: true) }
+        tc.locked = locked; tc.oi = oi; tc.nowT = nowT; tc.panX = panX; tc.panY = panY; tc.prevOwner = prevOwner
+    }
 
+    /// The view this tick wants, by owner (Inspect, a game lock, then the mouse, caret, focus or keys).
+    private func computeTarget(_ tc: inout TickCtx) {
+        let ptr = tc.ptr, lv = tc.lv, dt = tc.dt, r = tc.r, rawOn = tc.rawOn, motion = tc.motion
+        let takeover = tc.takeover, locked = tc.locked, prevOwner = tc.prevOwner, nowT = tc.nowT
+        let panX = tc.panX, panY = tc.panY
         var target = center
         if inspect {
             // The real pointer stays frozen and hidden (a tooltip stays open); the hand moves the
@@ -1096,6 +1175,11 @@ final class Magnifier {
                 target = Pt(center.x + panX * v, center.y + panY * v)
             }
         }
+        tc.target = target
+    }
+
+    private func commitView(_ tc: TickCtx) {
+        let target = tc.target, lv = tc.lv, ptr = tc.ptr, locked = tc.locked, shotOn = tc.shotOn, takeover = tc.takeover
         center = clampCenter(target, level: lv, screen: screen)
         if config.logLevel >= 2 { Log.verbose(String(format: "view %.4f %.4f ptr %.4f %.4f lv %.5f", center.x, center.y, ptr.x, ptr.y, lv)) }
         // The crosshair window moves first and its move is committed before the zoom write, so both
@@ -1133,6 +1217,10 @@ final class Magnifier {
             Log.verbose(String(format: "wcur %.4f %.4f ptr %.4f %.4f", d.x, d.y, pNow.x, pNow.y))
         }
         write(lv)
+    }
+
+    private func finishTick(_ l: CADisplayLink, _ tc: TickCtx) {
+        let lv = tc.lv, locked = tc.locked, shotOn = tc.shotOn, moving = tc.moving, oi = tc.oi
         // A plain read after the writes, for the game-lock detector only (a held pointer is dragged
         // by Wind's writes). It is never used to measure the hand.
         let endPtr = Magnifier.pointer().map { Pt($0.x, $0.y) }

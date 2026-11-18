@@ -69,6 +69,8 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - Test builds log to `~/Library/Logs/Wind/test/`; the installed app to `~/Library/Logs/Wind/` (tests no longer rotate the owner's log away).
 - Measure the hand from ONE pointer read per tick against Wind's own computed carry; never from a
   read taken right after a zoom write (it can be off by a whole point, or tens of points near edges).
+- `Magnifier.step` is a driver over phase methods with a `TickCtx` (map in `docs/architecture.md`, "The tick's
+  phases"). Keep the phase order, and the driver's `defer` that sets `prevRawMotion`/`prevRawStep`.
 - `scripts/explore.py` stress-tests edges, corners and zooming with the virtual mouse; run it after
   touching placement (report in `build/explore-report.txt`).
 - While a game holds the pointer, pan only from raw HID counts (`RawMouse`): tap deltas then
