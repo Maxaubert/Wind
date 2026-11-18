@@ -3,7 +3,8 @@
 Wind never has keyboard focus, yet it must see every bind press and every mouse movement
 system-wide without breaking input for other programs. This chapter covers the input channels, the
 hook thread, the swallowing rules, the bind safety rules and the recovery from silently evicted
-hooks. The code is `src/input/input_router.*`, the `WM_INPUT` handling in `src/core/main.cpp`,
+hooks. The code is `src/input/input_router.*`, the `WM_INPUT` handling in `src/core/main.cpp`
+(`HandleRawKeyboard`, `HandleRawMouse`),
 `src/input/keybind_rules.h`, `src/input/swallow_ledger.h` and `src/cursor/gain_learner.h`.
 
 ## Channels
@@ -96,7 +97,8 @@ swallowed (`keySwallowed`), as the `ViewOwner::Keys` detached view (`src/input/k
 
 ## Raw Input as the safety net
 
-Both hooks have a Raw Input backstop for lost UP events, in the `WM_INPUT` handler:
+Both hooks have a Raw Input backstop for lost UP events, in the `WM_INPUT` handler
+(`HandleRawKeyboard` and `HandleRawMouse` in `src/core/main.cpp`):
 
 - **Keyboard:** `RI_KEY_BREAK` calls `rawKeyUp`. Raw Input still delivers the UP an evicted hook
   missed, which would otherwise leave a zoom bind held forever.
