@@ -800,7 +800,7 @@ final class Magnifier {
                 shotPanel.show(nil, level: 1)
                 windCursor.show(at: nil, on: false)
             }
-            if inspect { inspectAtOneX(ptr); return }
+            if inspect { inspectAtOneX(ptr); return true }
             l.isPaused = true
             return true
         }
