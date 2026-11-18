@@ -327,13 +327,24 @@ static void OnSetConfig(ICoreWebView2* wv, const std::string& j, const std::stri
             // Keybind captures: also written straight into the active profile so they survive
             // a later Discard or restart while other changes stay unsaved. Only this one key
             // moves; the rest of the profile file stays as saved.
+            // A failed read (a lock past the read budget) or write must reach the page like a
+            // live-ini failure does (audit #575): otherwise the bind silently reverts on Discard or
+            // the next start. No active profile, or no profile file yet, is not a failure.
             const std::string active = ActiveProfileName(live);
             std::string prof;
             if (!active.empty() && SafeName(active) &&
-                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-                wind::ReadTextFileOk(ProfilePath(active), prof) &&
-                !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
-                wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
+                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES) {
+                const char* failed = nullptr;
+                if (!wind::ReadTextFileOk(ProfilePath(active), prof)) failed = "read";
+                else if (!wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
+                    failed = "write";
+                if (failed) {
+                    wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile %s of %s failed",
+                              failed, key.c_str());
+                    wv->PostWebMessageAsJson(
+                        Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
+                }
+            }
         }
     }
 }
