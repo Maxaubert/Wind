@@ -363,55 +363,60 @@ void TransformModel::edgeClipManage(bool wantActive) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (!active && !inputXformDenied_) inputTransformAvailable_ = uiAccessProbe_;   // re-arm a transient failure
-    if (active) {
-        LARGE_INTEGER zf, z1, z2;   // zoom timeline split (#310): a few QPC reads, always on
-        QueryPerformanceFrequency(&zf);
-        lastEnter_.wasWarm = magUp_;
-        // Native cursor (issue #369): DWM draws the real pointer, so there is nothing to stand
-        // up and nothing to blank - no cursor swaps at zoom-in at all.
-        nativeSession_ = nativePref_;
-        if (!nativeSession_) {
-            // LEGACY SPRITE SESSION (txNativeCursor=0, issue #463: the pre-#369 cursor, for A/B).
-            // Bridge the swap gap (issue #221: zoom-in BLINKED the cursor): the blank hides the real
-            // pointer at once, but the sprite's first present is a context build plus a reveal away.
-            // Stand the sprite up at the pointer BEFORE blanking (at ~1x the transform is identity,
-            // so it lands exactly on the pointer) and the handoff overlaps instead of gapping.
-            // Skipped when the app hides its pointer (mouselook): nothing visible is being swapped.
-            // Two DwmFlush passes: the first can latch a composite that began before the ShowWindow
-            // reached DWM, the second is sure to include the sprite (one still blinked on a still
-            // pointer). The blank runs before any cursor lens style is on, where swaps are free.
-            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-            updateSpriteLayer();
-            if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0 &&
-                sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
-                sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
-                lastSpriteX_ = ci.ptScreenPos.x; lastSpriteY_ = ci.ptScreenPos.y;
-                sprite_->show();
-                sprite_->keepOnTop();
-                DwmFlush();
-                DwmFlush();
-            }
-            blanker_->blank();
-            wind::Log(wind::LogLevel::Info, "transform", "legacy sprite session (txNativeCursor=0)");
+    if (active) enterSession();
+    else leaveSession();
+}
+
+void TransformModel::enterSession() {
+    LARGE_INTEGER zf, z1, z2;   // zoom timeline split (#310): a few QPC reads, always on
+    QueryPerformanceFrequency(&zf);
+    lastEnter_.wasWarm = magUp_;
+    // Native cursor (issue #369): DWM draws the real pointer, so there is nothing to stand
+    // up and nothing to blank - no cursor swaps at zoom-in at all.
+    nativeSession_ = nativePref_;
+    if (!nativeSession_) {
+        // LEGACY SPRITE SESSION (txNativeCursor=0, issue #463: the pre-#369 cursor, for A/B).
+        // Bridge the swap gap (issue #221: zoom-in BLINKED the cursor): the blank hides the real
+        // pointer at once, but the sprite's first present is a context build plus a reveal away.
+        // Stand the sprite up at the pointer BEFORE blanking (at ~1x the transform is identity,
+        // so it lands exactly on the pointer) and the handoff overlaps instead of gapping.
+        // Skipped when the app hides its pointer (mouselook): nothing visible is being swapped.
+        // Two DwmFlush passes: the first can latch a composite that began before the ShowWindow
+        // reached DWM, the second is sure to include the sprite (one still blinked on a still
+        // pointer). The blank runs before any cursor lens style is on, where swaps are free.
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        updateSpriteLayer();
+        if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0 &&
+            sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
+            sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
+            lastSpriteX_ = ci.ptScreenPos.x; lastSpriteY_ = ci.ptScreenPos.y;
+            sprite_->show();
+            sprite_->keepOnTop();
+            DwmFlush();
+            DwmFlush();
         }
-        QueryPerformanceCounter(&z1);
-        // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
-        // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
-        // once per zoom-in regardless - that is DWM building its machinery.)
-        ensureMag();
-        // Native cursor: switch the pointer to DWM's composition (0.2 ms once the lens exists; a
-        // first zoom before the idle warm-up pays the lens build here, once). win32k sends the
-        // new cursor mode to DWM only on the next pointer update (move or shape), so without a
-        // cursor event the small hardware pointer stays on screen for the whole zoom-in while the
-        // hand is still (measured: no composed pointer in any ramp frame). Nudge a pixel and back.
-        if (nativeSession_ && host_.createCursorLens()) {
-            host_.setCursorLens(true);
-            NudgePointer();
-        }
-        QueryPerformanceCounter(&z2);
-        lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
-        return;
+        blanker_->blank();
+        wind::Log(wind::LogLevel::Info, "transform", "legacy sprite session (txNativeCursor=0)");
     }
+    QueryPerformanceCounter(&z1);
+    // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
+    // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
+    // once per zoom-in regardless - that is DWM building its machinery.)
+    ensureMag();
+    // Native cursor: switch the pointer to DWM's composition (0.2 ms once the lens exists; a
+    // first zoom before the idle warm-up pays the lens build here, once). win32k sends the
+    // new cursor mode to DWM only on the next pointer update (move or shape), so without a
+    // cursor event the small hardware pointer stays on screen for the whole zoom-in while the
+    // hand is still (measured: no composed pointer in any ramp frame). Nudge a pixel and back.
+    if (nativeSession_ && host_.createCursorLens()) {
+        host_.setCursorLens(true);
+        NudgePointer();
+    }
+    QueryPerformanceCounter(&z2);
+    lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
+}
+
+void TransformModel::leaveSession() {
     if (!magUp_) return;
     // Teardown breakdown (#361): every step of the zoom-out timed and logged as one line, so a
     // long zoom-out names its step instead of being one opaque total.
@@ -423,11 +428,6 @@ void TransformModel::setActive(bool active) {
         stepMs[i] = double(n.QuadPart - tPrev.QuadPart) * 1000.0 / double(tf.QuadPart);
         tPrev = n;
     };
-    // MPO buster: hide strictly AFTER the identity park below would be wrong - the park writes
-    // identity while the game may still be mid-demotion-return; hiding HERE (before the park)
-    // is also wrong for the same reason in reverse. Order chosen: park first (identity is a
-    // safe value at any plane state), then hide the ghost - the game re-promotes to its plane
-    // against a parked-identity transform, never against a live translation.
     // Give the real pointer back the moment the zoom ends (Inspect or the hide-cursor hotkey hid
     // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
     if (cursorHidden_) {
@@ -497,7 +497,7 @@ void TransformModel::setActive(bool active) {
     ixExpectedOn_ = false;
     pin_.hide();
     step(7);
-    mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
+    mpoGhost_.hide();   // hide after the identity park: the game re-promotes against a parked identity, never a live translation
     step(8);
     const double total = double(tPrev.QuadPart - t0.QuadPart) * 1000.0 / double(tf.QuadPart);
     wind::Log(wind::LogLevel::Info, "txsession",
@@ -1015,7 +1015,7 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         sprite_->hide();
         lastSpriteX_ = INT_MIN;
         bool repaint = false;
-        // Give the pointer back whichever way it was hidden: setActive() blanks the cursor set at
+        // Give the pointer back whichever way it was hidden: enterSession() blanks the cursor set at
         // zoom-in without cursorHidden_, so a panel open at zoom-in stayed invisible (field, #284).
         if (cursorHidden_) { ShowSystemCursor(TRUE); cursorHidden_ = false; }
         if (blanker_->blanked()) {

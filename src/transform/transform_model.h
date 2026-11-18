@@ -106,6 +106,8 @@ private:
     void updateSpriteLayer();                        // pick the crosshair window for this tick (#269)
     bool ready_ = false;
     bool active_ = false;
+    void enterSession();                             // setActive(true): zoom-in (sprite bridge, context, lens)
+    void leaveSession();                             // setActive(false): timed zoom-out teardown (#361)
     MonitorTarget mon_{};
     MagHost host_;
     CompositionPin pin_;
