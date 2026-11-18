@@ -3089,7 +3089,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // The legacy sprite draws standard shapes from the blanker's copies, which must follow too.
     if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) {
         g_tint.capture();
-        if (auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->mTransform) : nullptr)
+        // A transform-only fallback (render failed to init) leaves mTransform null and runs the
+        // transform engine as `model`, so fall back to it like the tick does (audit #575).
+        if (auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->mTransform ? g_tick->mTransform
+                                                                                 : g_tick->model)
+                              : nullptr)
             tm->cursorSchemeChanged();
     }
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
