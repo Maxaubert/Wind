@@ -5,6 +5,7 @@
 #include "logging.h"
 #include "track_filter.h"
 #include "caret_rect.h"   // trim tall UIA caret rects (#337)
+#include "caret_skip.h"   // which moved carets are skipped
 #include "java_bridge.h"
 #include "java_bridge_util.h"
 #include "shell_panel.h"      // which shell windows sit above every band (#569)
@@ -737,63 +738,15 @@ struct FocusRun {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
                 // line height is per focus; Java carets come from the bridge and are left alone.
-                wind::FocusKey key;
-                {
-                    GUITHREADINFO gi{}; gi.cbSize = sizeof(gi);
-                    GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi);
-                    key.fg = fg; key.focus = gi.hwndFocus;
-                    // An xterm.js input moves with its cursor: its bounds are the caret, not an identity.
-                    if (!(el && edc.xterm)) { key.l = b.left; key.t = b.top; key.r = b.right; key.b = b.bottom; }
-                    key.valid = fg != nullptr;
-                }
+                const wind::FocusKey key = buildFocusKey(fg, el, b);
                 if (caretGen != focusGen && wind::SameFocus(key, baseKey)) {
                     caretGen = focusGen;   // same control: keep following (no new baseline)
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "focus repeat (same control): caret still followed");
                 }
                 if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; caretGhost = wind::CaretGhostState{}; }
-                // Chromium's UIA selection puts the caret after a trailing space, or near the end of a
-                // line about to wrap, at the line's right end (#387 ghosts; Discord field 2026-11-06:
-                // for most letters in the last ~380 px of a line it reported only that ghost, so the
-                // view moved once per word). Its MSAA system caret had every letter right, with no
-                // ghost. So when UIA reports a ghost, ask MSAA and follow it instead; only when MSAA
-                // has nothing better is the ghost skipped below.
-                // A wrapped message moves the ghost up a line per line of text, and close to the box
-                // end it is too near to look like a jump, but its height is always off the line's.
-                // #561: a UIA caret outside its own focused element is suspect too (Prism's new-folder
-                // dialog, Electron, field 2026-11-10: a fixed 2070,1170 below the 1520,1022 852x86
-                // input on every keystroke). MSAA's caret replaces it only from inside the element.
                 const wind::TrackBox elemBox{ b.left, b.top, b.right, b.bottom };
-                const bool uiaOutside = !java && src[0] == 'u' &&
-                    !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, elemBox);
-                if (!java && src[0] == 'u' &&
-                    (uiaOutside ||
-                     wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost) ||
-                     wind::IsOffLineHeight((int)rc.top, (int)rc.bottom, caretLine.lineH))) {
-                    RECT m{};
-                    if (MsaaCaret(m) && !EqualRect(&m, &rc) &&
-                        CaretInsideElement({ m.left, m.top, m.right, m.bottom }, elemBox) &&
-                        !wind::IsLineEndGhost((int)m.left, (int)m.top, (int)m.bottom, caretGhost)) {
-                        if (log_.load() && !EqualRect(&m, &lastCaret))
-                            wind::Log(wind::LogLevel::Info, "track", "uia suspect %ld,%ld %ldx%ld: msaa caret %ld,%ld instead",
-                                      rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, m.left, m.top);
-                        if (rc.left - m.left > (m.bottom - m.top) * wind::kGhostJumpLines)
-                            wind::NoteKnownGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
-                        rc = m; src = "msaa";
-                    }
-                }
-                if (!java) {
-                    const LONG rawTop = rc.top;
-                    int top = (int)rc.top;
-                    wind::TrimTallCaret(top, (int)rc.bottom, caretLine);
-                    rc.top = top;
-                    if (rc.top != rawTop && log_.load())
-                        wind::Log(wind::LogLevel::Info, "track", "caret trimmed (tall %ld px rect) to %ld px line", rc.bottom - rawTop, rc.bottom - rc.top);
-                    // A new line reported part-way through the page's scroll stays on the current line.
-                    int bot = (int)rc.bottom; top = (int)rc.top;
-                    if (wind::HoldMidScrollCaret((int)rc.left, top, bot, caretLine.lineH, caretHold) && log_.load())
-                        wind::Log(wind::LogLevel::Info, "track", "caret held on its line (mid-scroll report %ld-%ld)", rc.top, rc.bottom);
-                    rc.top = top; rc.bottom = bot;
-                }
+                preferMsaaIfSuspect(rc, src, java, elemBox);
+                if (!java) trimCaret(rc);
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc; baseKey = key;        // baseline, not followed
                     wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
@@ -805,28 +758,91 @@ struct FocusRun {
                     // issue #278; its UIA caret was wrong too, so there is no source to fall back
                     // to): the view stays where it is. Since #561 the same holds for every UIA caret
                     // MSAA could not replace above (Chromium's fixed rect below Prism's dialog input).
-                    if ((IsGeckoWindow(fg) || src[0] == 'u') &&
-                        !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
+                    // src is read after the MSAA swap above; the terminal check runs only when needed.
+                    const bool geckoOrUia = IsGeckoWindow(fg) || src[0] == 'u';
+                    switch (wind::ClassifyCaret({ rc.left, rc.top, rc.right, rc.bottom }, elemBox, geckoOrUia,
+                                                [&] { return !(el && edc.xterm) && IsTerminalWindow(fg); },
+                                                caretGhost)) {
+                    case wind::CaretSkip::OutsideElement:
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
-                    } else if (!(el && edc.xterm) && IsTerminalWindow(fg) &&
-                               wind::IsParkedTerminalCaret((int)rc.left, (int)rc.top, (int)rc.right, (int)rc.bottom,
-                                                           (int)b.left, (int)b.right)) {
+                        break;
+                    case wind::CaretSkip::ParkedTerminal:
                         // A TUI's parked cursor (Claude Code): the view stays where the user types.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (parked terminal cursor) via %s: %ld,%ld",
                                                    src, rc.left, rc.top);
-                    } else if (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost)) {
+                        break;
+                    case wind::CaretSkip::LineEndGhost:
                         // A line-end ghost (#387): the view stays on the text until the next real caret.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",
                                                    src, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
                         wind::NoteGhostHeld((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
-                    } else {
+                        break;
+                    case wind::CaretSkip::None:
                         wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                         publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                        break;
                     }
                 }
             }
         }
+    }
+    // The identity of the focus a caret belongs to: the foreground window, its focused HWND and
+    // the focused element's bounds.
+    wind::FocusKey buildFocusKey(HWND fg, IUIAutomationElement* el, const RECT& b) const {
+        wind::FocusKey key;
+        GUITHREADINFO gi{}; gi.cbSize = sizeof(gi);
+        GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi);
+        key.fg = fg; key.focus = gi.hwndFocus;
+        // An xterm.js input moves with its cursor: its bounds are the caret, not an identity.
+        if (!(el && edc.xterm)) { key.l = b.left; key.t = b.top; key.r = b.right; key.b = b.bottom; }
+        key.valid = fg != nullptr;
+        return key;
+    }
+    // Chromium's UIA selection puts the caret after a trailing space, or near the end of a
+    // line about to wrap, at the line's right end (#387 ghosts; Discord field 2026-11-06:
+    // for most letters in the last ~380 px of a line it reported only that ghost, so the
+    // view moved once per word). Its MSAA system caret had every letter right, with no
+    // ghost. So when UIA reports a ghost, ask MSAA and follow it instead; only when MSAA
+    // has nothing better is the ghost skipped in followCaret.
+    // A wrapped message moves the ghost up a line per line of text, and close to the box
+    // end it is too near to look like a jump, but its height is always off the line's.
+    // #561: a UIA caret outside its own focused element is suspect too (Prism's new-folder
+    // dialog, Electron, field 2026-11-10: a fixed 2070,1170 below the 1520,1022 852x86
+    // input on every keystroke). MSAA's caret replaces it only from inside the element.
+    void preferMsaaIfSuspect(RECT& rc, const char*& src, bool java, const wind::TrackBox& elemBox) {
+        const bool uiaOutside = !java && src[0] == 'u' &&
+            !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, elemBox);
+        if (!java && src[0] == 'u' &&
+            (uiaOutside ||
+             wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost) ||
+             wind::IsOffLineHeight((int)rc.top, (int)rc.bottom, caretLine.lineH))) {
+            RECT m{};
+            if (MsaaCaret(m) && !EqualRect(&m, &rc) &&
+                CaretInsideElement({ m.left, m.top, m.right, m.bottom }, elemBox) &&
+                !wind::IsLineEndGhost((int)m.left, (int)m.top, (int)m.bottom, caretGhost)) {
+                if (log_.load() && !EqualRect(&m, &lastCaret))
+                    wind::Log(wind::LogLevel::Info, "track", "uia suspect %ld,%ld %ldx%ld: msaa caret %ld,%ld instead",
+                              rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, m.left, m.top);
+                if (rc.left - m.left > (m.bottom - m.top) * wind::kGhostJumpLines)
+                    wind::NoteKnownGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
+                rc = m; src = "msaa";
+            }
+        }
+    }
+    // #337 trim of a tall caret rect to one line, then the mid-scroll hold. Not for Java carets.
+    void trimCaret(RECT& rc) {
+        const LONG rawTop = rc.top;
+        int top = (int)rc.top;
+        wind::TrimTallCaret(top, (int)rc.bottom, caretLine);
+        rc.top = top;
+        if (rc.top != rawTop && log_.load())
+            wind::Log(wind::LogLevel::Info, "track", "caret trimmed (tall %ld px rect) to %ld px line", rc.bottom - rawTop, rc.bottom - rc.top);
+        // A new line reported part-way through the page's scroll stays on the current line.
+        int bot = (int)rc.bottom; top = (int)rc.top;
+        if (wind::HoldMidScrollCaret((int)rc.left, top, bot, caretLine.lineH, caretHold) && log_.load())
+            wind::Log(wind::LogLevel::Info, "track", "caret held on its line (mid-scroll report %ld-%ld)", rc.top, rc.bottom);
+        rc.top = top; rc.bottom = bot;
     }
 };
 
