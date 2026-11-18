@@ -3082,6 +3082,82 @@ static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods) {
     }
 }
 
+// WM_INPUT halves (#11). msgTime is the WM_INPUT's GetMessageTime(), read once by WndProc.
+static void HandleRawKeyboard(const RAWKEYBOARD& kb, uint32_t msgTime) {
+    // Keyboard UP only, and deliberately the exact mirror of the side-button rule
+    // below (issue #167). A key UP can only ever CLEAR held state, never set it, so
+    // honoring it unconditionally is a pure safety net: idempotent with the hook's own
+    // clear, and incapable of falsely holding a key. DOWN stays hook-authoritative -
+    // the hook owns the swallow decision and the rising edge, and setting DOWN here
+    // would double-count and could disagree with it for a tick.
+    //
+    // Without this, a hook evicted mid-hold (a heavy process's first load spike is
+    // long enough to blow LowLevelHooksTimeout) never sees the release: the zoom then
+    // runs forever and the stale "held" bit also hides the dead hook from the watchdog
+    // above, since a live hook swallows bound keys so the poller can never see one.
+    if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
+        g_input.rawKeyUp(static_cast<int>(kb.VKey), msgTime);
+    // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
+    // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
+    // the clock stays true there instead of the gate switching off (review #289).
+    if (kb.VKey > 0 && kb.VKey < 256 && kb.VKey != wind::kMaskVk)   // Wind's own mask key is not a user key
+        g_input.noteAnyKeyDown(GetTickCount64());   // downs and ups, like the hook
+    // Typing stamp (#328), like the hook: fresh non-modifier downs only.
+    static wind::TypingKeyFilter rawTyping;
+    if (rawTyping.note(static_cast<int>(kb.VKey), (kb.Flags & RI_KEY_BREAK) == 0))
+        g_input.noteTypingKeyDown(GetTickCount64());
+}
+
+static void HandleRawMouse(const RAWMOUSE& m, uint32_t msgTime) {
+    if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+        AccumulateRaw(g_input, m.lLastX, m.lLastY);
+    }
+    // Side-button held state. The button DOWN edge stays HOOK-authoritative when the
+    // LL hook is active (it owns the swallow/edge logic; writing DOWN here too would
+    // double-count and could momentarily disagree with the hook's view) - so DOWN is
+    // decoded here only as the WIND_NOHOOK fallback. The button UP is
+    // honored from Raw Input: an LL hook can be silently skipped by Windows on a
+    // LowLevelHooksTimeout stall, and a dropped XBUTTON UP would otherwise strand the
+    // button as held (intermittent stuck-zoom, recovers only on a re-click). Raw Input
+    // is delivered through a path NOT subject to that timeout, and a UP can only CLEAR
+    // held-state, never set it, so processing it unconditionally is a pure safety net
+    // (idempotent with the hook's own clear; never falsely holds). It does not touch the
+    // hook's g_swallowedDown record, so swallowing is unaffected.
+    USHORT bf = m.usButtonFlags;
+    // The UP's event time is the WM_INPUT's queue time (msgTime), not now: the hook's reordering
+    // guard compares event times (src/input/event_order.h), so a main-thread stall is harmless.
+    const uint32_t rawTime = msgTime;
+    // Click quiet period: stamp the edge here instead of relying on the tick to catch the
+    // button down in GetAsyncKeyState (a click shorter than a tick was missed).
+    if (bf & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_DOWN |
+              RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_UP))
+        g_input.noteButtonEdge(GetTickCount64());
+    if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1, rawTime);
+    if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2, rawTime);
+    // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
+    if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3, rawTime);
+    if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4, rawTime);
+    if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5, rawTime);
+    if (!g_input.hookActive()) {
+        if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
+        if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
+    }
+    // Diagnostics (issue #113): record whether Raw Input even reports this mouse's side
+    // buttons (some mice route them through a vendor HID collection and never raise
+    // RI_MOUSE_BUTTON_4/5). Bump counters + log ONLY on a side-button transition, never on
+    // a plain move, so this stays off the per-frame path.
+    {
+        auto& st = g_input.state();
+        if (bf & RI_MOUSE_BUTTON_4_DOWN) st.dbgRawDown[1].fetch_add(1, std::memory_order_relaxed);
+        if (bf & RI_MOUSE_BUTTON_4_UP)   st.dbgRawUp[1].fetch_add(1, std::memory_order_relaxed);
+        if (bf & RI_MOUSE_BUTTON_5_DOWN) st.dbgRawDown[2].fetch_add(1, std::memory_order_relaxed);
+        if (bf & RI_MOUSE_BUTTON_5_UP)   st.dbgRawUp[2].fetch_add(1, std::memory_order_relaxed);
+        if (bf & (RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
+                  RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP))
+            wind::Log(wind::LogLevel::Info, "input", "raw xbtn bf=0x%04x", (unsigned)bf);
+    }
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(PrimaryHdrOn());   // colour space (#288); falls through
     // A pointer-scheme reload (the user changed scheme or size, or an engine healed it) leaves the
@@ -3135,80 +3211,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         UINT got = GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER));
         if (got != (UINT)-1 && got > 0) {
             auto* ri = reinterpret_cast<RAWINPUT*>(buf);
-            if (ri->header.dwType == RIM_TYPEKEYBOARD) {
-                // Keyboard UP only, and deliberately the exact mirror of the side-button rule
-                // below (issue #167). A key UP can only ever CLEAR held state, never set it, so
-                // honoring it unconditionally is a pure safety net: idempotent with the hook's own
-                // clear, and incapable of falsely holding a key. DOWN stays hook-authoritative -
-                // the hook owns the swallow decision and the rising edge, and setting DOWN here
-                // would double-count and could disagree with it for a tick.
-                //
-                // Without this, a hook evicted mid-hold (a heavy process's first load spike is
-                // long enough to blow LowLevelHooksTimeout) never sees the release: the zoom then
-                // runs forever and the stale "held" bit also hides the dead hook from the watchdog
-                // above, since a live hook swallows bound keys so the poller can never see one.
-                const RAWKEYBOARD& kb = ri->data.keyboard;
-                if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
-                    g_input.rawKeyUp(static_cast<int>(kb.VKey), static_cast<uint32_t>(GetMessageTime()));
-                // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
-                // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
-                // the clock stays true there instead of the gate switching off (review #289).
-                if (kb.VKey > 0 && kb.VKey < 256 && kb.VKey != wind::kMaskVk)   // Wind's own mask key is not a user key
-                    g_input.noteAnyKeyDown(GetTickCount64());   // downs and ups, like the hook
-                // Typing stamp (#328), like the hook: fresh non-modifier downs only.
-                static wind::TypingKeyFilter rawTyping;
-                if (rawTyping.note(static_cast<int>(kb.VKey), (kb.Flags & RI_KEY_BREAK) == 0))
-                    g_input.noteTypingKeyDown(GetTickCount64());
-            } else if (ri->header.dwType == RIM_TYPEMOUSE) {
-                const RAWMOUSE& m = ri->data.mouse;
-                if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-                    AccumulateRaw(g_input, m.lLastX, m.lLastY);
-                }
-                // Side-button held state. The button DOWN edge stays HOOK-authoritative when the
-                // LL hook is active (it owns the swallow/edge logic; writing DOWN here too would
-                // double-count and could momentarily disagree with the hook's view) - so DOWN is
-                // decoded here only as the WIND_NOHOOK fallback. The button UP is
-                // honored from Raw Input: an LL hook can be silently skipped by Windows on a
-                // LowLevelHooksTimeout stall, and a dropped XBUTTON UP would otherwise strand the
-                // button as held (intermittent stuck-zoom, recovers only on a re-click). Raw Input
-                // is delivered through a path NOT subject to that timeout, and a UP can only CLEAR
-                // held-state, never set it, so processing it unconditionally is a pure safety net
-                // (idempotent with the hook's own clear; never falsely holds). It does not touch the
-                // hook's g_swallowedDown record, so swallowing is unaffected.
-                USHORT bf = m.usButtonFlags;
-                // The UP's event time is the WM_INPUT's queue time, not now: the hook's reordering
-                // guard compares event times (src/input/event_order.h), so a main-thread stall is harmless.
-                const uint32_t rawTime = static_cast<uint32_t>(GetMessageTime());
-                // Click quiet period: stamp the edge here instead of relying on the tick to catch the
-                // button down in GetAsyncKeyState (a click shorter than a tick was missed).
-                if (bf & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_DOWN |
-                          RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_UP))
-                    g_input.noteButtonEdge(GetTickCount64());
-                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1, rawTime);
-                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2, rawTime);
-                // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
-                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3, rawTime);
-                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4, rawTime);
-                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5, rawTime);
-                if (!g_input.hookActive()) {
-                    if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
-                    if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
-                }
-                // Diagnostics (issue #113): record whether Raw Input even reports this mouse's side
-                // buttons (some mice route them through a vendor HID collection and never raise
-                // RI_MOUSE_BUTTON_4/5). Bump counters + log ONLY on a side-button transition, never on
-                // a plain move, so this stays off the per-frame path.
-                {
-                    auto& st = g_input.state();
-                    if (bf & RI_MOUSE_BUTTON_4_DOWN) st.dbgRawDown[1].fetch_add(1, std::memory_order_relaxed);
-                    if (bf & RI_MOUSE_BUTTON_4_UP)   st.dbgRawUp[1].fetch_add(1, std::memory_order_relaxed);
-                    if (bf & RI_MOUSE_BUTTON_5_DOWN) st.dbgRawDown[2].fetch_add(1, std::memory_order_relaxed);
-                    if (bf & RI_MOUSE_BUTTON_5_UP)   st.dbgRawUp[2].fetch_add(1, std::memory_order_relaxed);
-                    if (bf & (RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
-                              RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP))
-                        wind::Log(wind::LogLevel::Info, "input", "raw xbtn bf=0x%04x", (unsigned)bf);
-                }
-            }
+            const uint32_t msgTime = static_cast<uint32_t>(GetMessageTime());
+            if (ri->header.dwType == RIM_TYPEKEYBOARD) HandleRawKeyboard(ri->data.keyboard, msgTime);
+            else if (ri->header.dwType == RIM_TYPEMOUSE) HandleRawMouse(ri->data.mouse, msgTime);
         }
         return 0;
     }
