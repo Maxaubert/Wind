@@ -189,9 +189,9 @@ The main loop in `wWinMain` paces the tick:
 | Transform | Always `DwmFlush` while zoomed (the write and the pointer land in one composite); an unpaced loop would flood DWM's transform queue until the view lags. Idle at 1x uses the timer or the idle sleep |
 | Game pacing modes | Paced inside the tick, `PaceAndPresent` (vblank waits or the present accumulator) |
 
-`DetectRefreshHz` reads the current monitor's real rate and is re-read on retarget. **Tick counts
+`DetectRefreshHz` (`src/core/display_probe.cpp`) reads the current monitor's real rate and is re-read on retarget. **Tick counts
 are refresh-rate dependent**, so every tick-tuned constant derives from the detected rate:
-`LockDetector::setTickRate`, `CursorMapper::setTickRate`, and `TicksAtHz` for the small windows in
+`LockDetector::setTickRate`, `CursorMapper::setTickRate`, and `TicksAtHz` (`src/core/tick_rate.h`) for the small windows in
 `RunTick` (`clickReleaseTicks`, `clickPauseTicks`, `restOverlapTicks`). A bare tick count tuned at
 144 Hz behaves differently at 60 or 240 Hz.
 

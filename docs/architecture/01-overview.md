@@ -83,7 +83,7 @@ build's include path.
 
 | Area | Folder | Files |
 |---|---|---|
-| Loop and session state | `core/` | `main.cpp` (`wWinMain`, `RunTick`), `uiaccess_gate.h` (refuse to start without UIAccess), `uiaccess_token.h`, `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
+| Loop and session state | `core/` | `main.cpp` (`wWinMain`, `RunTick`), `single_instance.*` (single-instance mutex, input-state heal), `display_probe.*` (refresh rate, monitor, fullscreen-cover test, focus stealer), `fg_classify.*` (churny apps, exe lists, overlay and desktop foreground tests), `tick_rate.h` (`TicksAtHz`), `uiaccess_gate.h` (refuse to start without UIAccess), `uiaccess_token.h`, `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
 | Logging and diagnostics | `core/` | `logging.*`, `log_queue.h`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h`, `com_util.h`, `reload_gate.h` |
 | Engine contract and pick | `engine/` | `magnifier_model.h`, `engine_pick.h`, `shell_desktop.h`, `launch_quiesce.h` |
 | Render engine | `render/` | `render_engine.*`, `render_model.*`, `render_params.cpp`, `render_shaders.h`, `hlsl_compile.h`, `upscale_pass.*`, `upscale_shaders.h`, `upscale_nis.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |

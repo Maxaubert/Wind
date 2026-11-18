@@ -233,7 +233,7 @@ then the cursor.
 
 ## Surviving games
 
-The game tell is `ForegroundCoversMonitor`, which also matches maximized windows, so none of these
+The game tell is `ForegroundCoversMonitor` (`src/core/display_probe.cpp`), which also matches maximized windows, so none of these
 engage by default on the desktop.
 
 | Lever | Effect |
