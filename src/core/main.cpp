@@ -3,7 +3,6 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include "blink_capture.h"   // Glint capture blink (#565)
-#include <tlhelp32.h>
 #include <magnification.h>
 #include <cmath>
 #include <cstdlib>
@@ -66,6 +65,10 @@
 #include "dwm_watch.h"        // StartDwmWatch (#396)
 #include "uiaccess_gate.h"     // refuse to start without UIAccess (#460)
 #include "uiaccess_token.h"    // ProcessHasUiAccess: the token bit the gate reads
+#include "display_probe.h"     // monitor, refresh and foreground probes (#7)
+#include "tick_rate.h"         // TicksAtHz (#7)
+#include "fg_classify.h"       // churny apps, exe lists, overlay/desktop foreground tests (#7)
+#include "single_instance.h"   // single-instance guard + input-state heal (#7)
 #include "reload_gate.h"      // DecideReload + bind-change predicates (pure, tested)
 #include "resource.h"
 
@@ -109,156 +112,6 @@ static void DetectMpoDisabled() {
     if (haveBoot && bootDisabled != regDisabled)
         wind::Log(wind::LogLevel::Warn, "startup",
                   "OverlayTestMode was changed since boot - guarding per the BOOT state until restart");
-}
-
-// Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
-// vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
-// reports a placeholder (some drivers report 0/1 for "hardware default").
-// Refresh rate of a specific display (GDI device name, e.g. "\\.\DISPLAY2"); nullptr/empty = the
-// primary/current display. Re-queried on retarget so pacing tracks the monitor we're actually on
-// (a mixed-refresh multi-monitor setup would otherwise pace a 60Hz panel at the startup 144) (#74).
-// Whether the output is rotated to portrait (90/270). The render engine cannot capture those
-// (review 2026-10-09 M3), so the engine pick needs it before the session starts.
-static bool DetectRotatedOutput(const wchar_t* device) {
-    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
-    const wchar_t* dev = (device && device[0]) ? device : nullptr;
-    if (!EnumDisplaySettingsW(dev, ENUM_CURRENT_SETTINGS, &dm)) return false;
-    return (dm.dmFields & DM_DISPLAYORIENTATION) &&
-           (dm.dmDisplayOrientation == DMDO_90 || dm.dmDisplayOrientation == DMDO_270);
-}
-
-static int DetectRefreshHz(const wchar_t* device = nullptr) {
-    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
-    const wchar_t* dev = (device && device[0]) ? device : nullptr;
-    if (EnumDisplaySettingsW(dev, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
-        return (int)dm.dmDisplayFrequency;
-    // 0, NOT a 60 fallback. A caller cannot otherwise tell a failed query from a real 60Hz panel,
-    // and issue #232 made this run on every zoom-in rather than only on a monitor change: one
-    // transient failure would have pinned a 144Hz rig to 60 for the life of the process, with every
-    // tick-derived timing scaled 2.4x wrong. Callers substitute their own default.
-    return 0;
-}
-
-// Small tick windows were field-tuned in TICKS on the 144Hz dev rig; a tick is one refresh, so
-// the same count is 2.4x longer in real time at 60Hz and 0.6x at 240Hz (issue #223). This keeps
-// their real-time duration by scaling the 144Hz-tuned count to the loop's actual tick rate.
-static int TicksAtHz(int base144, int hz) {
-    if (hz <= 0) hz = 144;
-    const int t = (base144 * hz + 72) / 144;
-    return t < 1 ? 1 : t;
-}
-
-// The primary monitor as a MonitorTarget (origin 0,0, primary size, empty device name = first
-// DXGI output). This is the legacy single-monitor target and the universal fallback.
-static MonitorTarget PrimaryMonitor() {
-    MonitorTarget t;
-    t.x = 0; t.y = 0;
-    t.w = GetSystemMetrics(SM_CXSCREEN);
-    t.h = GetSystemMetrics(SM_CYSCREEN);
-    t.device[0] = L'\0';
-    return t;
-}
-
-// The monitor the cursor is currently on, as a MonitorTarget. Falls back to the primary if the
-// query fails. Used at startup and on each zoom-in (when multiMonitor is on).
-static MonitorTarget MonitorUnderCursor() {
-    POINT pt; GetCursorPos(&pt);
-    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi);
-    if (mon && GetMonitorInfoW(mon, &mi)) {
-        MonitorTarget t;
-        t.x = mi.rcMonitor.left;
-        t.y = mi.rcMonitor.top;
-        t.w = mi.rcMonitor.right - mi.rcMonitor.left;
-        t.h = mi.rcMonitor.bottom - mi.rcMonitor.top;
-        lstrcpynW(t.device, mi.szDevice, 32);
-        return t;
-    }
-    return PrimaryMonitor();
-}
-
-// Whether two targets are the same monitor (origin + size + device name).
-static bool SameMonitor(const MonitorTarget& a, const MonitorTarget& b) {
-    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && wcscmp(a.device, b.device) == 0;
-}
-
-// True when the foreground window covers the whole target monitor - i.e. a fullscreen / borderless
-// app (typically a game). Such an app is usually promoted to an independent-flip / MPO plane that
-// Desktop Duplication can't see until our overlay forces DWM to composite it, which is what makes
-// the first zoom-in flash the previously-focused window (issue #90). We use the bridged reveal only
-// in this case so ordinary desktop zoom-ins keep the instant path.
-static bool ForegroundCoversMonitor(const MonitorTarget& mon) {
-    HWND fg = GetForegroundWindow();
-    if (!fg) return false;
-    RECT wr{};
-    if (!GetWindowRect(fg, &wr)) return false;
-    return wr.left <= mon.x && wr.top <= mon.y &&
-           wr.right >= mon.x + mon.w && wr.bottom >= mon.y + mon.h;
-}
-
-// --- Game-inspect focus steal (issue #144) ---------------------------------------------------
-// A mouselook game reads the mouse via Raw Input, which no user-mode hook can block from another
-// process (the documented LL-hook limitation): under Inspect the camera kept turning and the game
-// fought the 1px freeze clip by recentering every frame. Backgrounding the game is the one
-// user-mode lever that works - games register raw input without RIDEV_INPUTSINK and DirectInput's
-// foreground cooperative level drops too, so on focus loss the camera freezes and the game
-// releases its clip (exactly why Snipping Tool's overlay works over gameplay). Foreground goes to
-// this invisible 1x1 helper (layered alpha 0: never painted, never seen), NOT the overlay - the
-// overlay must stay WS_EX_NOACTIVATE + click-through. Wind's own pan is unaffected: raw input is
-// registered with RIDEV_INPUTSINK on a message-only window and arrives regardless of foreground.
-static HWND g_focusStealer = nullptr;
-static HWND EnsureFocusStealer(const MonitorTarget& mon) {
-    if (g_focusStealer && IsWindow(g_focusStealer)) {
-        SetWindowPos(g_focusStealer, nullptr, mon.x, mon.y, 1, 1,
-                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        return g_focusStealer;
-    }
-    static ATOM s_atom = 0;
-    if (!s_atom) {
-        WNDCLASSW wc{};
-        wc.lpfnWndProc = DefWindowProcW;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"WindFocusStealer";
-        s_atom = RegisterClassW(&wc);
-    }
-    if (!s_atom) return nullptr;
-    // No WS_EX_NOACTIVATE (it exists to accept activation); TOOLWINDOW keeps it out of the
-    // taskbar and alt-tab list.
-    g_focusStealer = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-                                     L"WindFocusStealer", L"Wind Inspect", WS_POPUP,
-                                     mon.x, mon.y, 1, 1, nullptr, nullptr,
-                                     GetModuleHandleW(nullptr), nullptr);
-    if (!g_focusStealer) return nullptr;
-    SetLayeredWindowAttributes(g_focusStealer, 0, 0, LWA_ALPHA);   // fully invisible
-    ShowWindow(g_focusStealer, SW_SHOWNOACTIVATE);   // shown (a hidden window can't take foreground)
-    return g_focusStealer;
-}
-
-// SetForegroundWindow can silently refuse under the foreground-lock rules (the signed UIAccess
-// build is exempt). Verify the result, then fall back to the AttachThreadInput handshake so the
-// unsigned dev build works too.
-static bool StealForeground(HWND w) {
-    if (!w) return false;
-    if (GetForegroundWindow() == w) return true;
-    SetForegroundWindow(w);
-    if (GetForegroundWindow() == w) return true;
-    HWND fg = GetForegroundWindow();
-    DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
-    DWORD myTid = GetCurrentThreadId();
-    if (fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE)) {
-        SetForegroundWindow(w);
-        AttachThreadInput(myTid, fgTid, FALSE);
-    }
-    return GetForegroundWindow() == w;
-}
-
-// Virtual-desktop bounds (the union of all monitors), used per zoomed frame to detect a game
-// clipping the cursor. Cached because GetSystemMetrics is a syscall and these bounds change only
-// on a display-topology change; refreshed on each zoom-in (where we also retarget the monitor).
-struct VirtualBounds { int x, y, w, h; };
-static VirtualBounds QueryVirtualBounds() {
-    return { GetSystemMetrics(SM_XVIRTUALSCREEN),  GetSystemMetrics(SM_YVIRTUALSCREEN),
-             GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN) };
 }
 
 // --- Per-tick state -------------------------------------------------------------------------
@@ -439,153 +292,6 @@ struct TickState {
           mapper(m.w, m.h) {}
 };
 static TickState* g_tick = nullptr;
-
-// --- Churny-app registry (issue #148 trigger 3). Rig-proven: a fullscreen app that CHURNS its
-// cursor SHAPE (SetCursor from hover logic - what real games do whenever the mouse moves) makes
-// per-tick fullscreen-transform writes reset the GPU driver within seconds, at ANY write rate
-// (50Hz still died; quiet-cursor apps are clean at 144Hz). Wind cannot stop another process's
-// SetCursor traffic, so hybrid LEARNS: the render device-lost path (the only writer, see
-// MarkChurnyApp's caller) attributes a driver reset to the transform game session that was live
-// just before it and records the app here; later zoom-ins over it pick render directly.
-// Persisted so the lesson survives restarts: one crash ever per such app, then never again.
-static std::set<std::wstring> g_churnyApps;
-
-static std::wstring ChurnyFilePath() {
-    std::wstring dir = wind::ResolveLogDir();          // exe-dir\logs, else %LOCALAPPDATA%\Wind\logs
-    size_t cut = dir.find_last_of(L"\\/");
-    if (cut != std::wstring::npos) dir.resize(cut);    // -> the log dir's parent
-    return dir + L"\\churny_apps.txt";
-}
-static std::wstring ExeNameOf(HWND h) {
-    DWORD pid = 0;
-    if (!h) return L"";
-    GetWindowThreadProcessId(h, &pid);
-    if (!pid) return L"";
-    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!p) return L"";
-    wchar_t buf[MAX_PATH]; DWORD len = MAX_PATH;
-    std::wstring name;
-    if (QueryFullProcessImageNameW(p, 0, buf, &len)) {
-        std::wstring full(buf, len);
-        size_t cut = full.find_last_of(L"\\/");
-        name = cut != std::wstring::npos ? full.substr(cut + 1) : full;
-        for (auto& c : name) c = (wchar_t)towlower(c);
-    }
-    CloseHandle(p);
-    return name;
-}
-static void LoadChurnyApps() {
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, ChurnyFilePath().c_str(), L"rt, ccs=UTF-8") != 0 || !f) return;
-    wchar_t line[MAX_PATH];
-    while (fgetws(line, MAX_PATH, f)) {
-        std::wstring s(line);
-        while (!s.empty() && (s.back() == L'\n' || s.back() == L'\r')) s.pop_back();
-        if (!s.empty()) g_churnyApps.insert(s);
-    }
-    fclose(f);
-}
-static void MarkChurnyApp(const std::wstring& exe, const char* why) {
-    if (exe.empty() || g_churnyApps.count(exe)) return;
-    g_churnyApps.insert(exe);
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, ChurnyFilePath().c_str(), L"at, ccs=UTF-8") == 0 && f) {
-        fwprintf(f, L"%s\n", exe.c_str());
-        fclose(f);
-    }
-    wind::Log(wind::LogLevel::Info, "churn", "app marked churny (%s): %S -> render for games",
-              why, exe.c_str());
-}
-static bool IsChurnyFg(HWND fg) {
-    if (g_churnyApps.empty()) return false;
-    return g_churnyApps.count(ExeNameOf(fg)) != 0;
-}
-
-// Is the foreground window's exe named in a comma-separated list? Shared by every exe-list check
-// (transformExclude, noSwallowApps, the built-in overlay names) so they all match identically:
-// bare file name, case-insensitive, exact - never a path.
-static bool FgExeInList(HWND fg, const std::string& list) {
-    if (list.empty()) return false;
-    const std::wstring exeW = ExeNameOf(fg);
-    if (exeW.empty()) return false;
-    std::string exe;
-    exe.reserve(exeW.size());
-    for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
-    return wind::IsExeInList(exe, list);
-}
-// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
-// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
-// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
-static bool IsTransformExcluded(HWND fg, const Config& cfg) {
-    return FgExeInList(fg, cfg.transformExclude);
-}
-// Overlays that cover the screen, look exactly like a game to the foreground test, and are gone
-// again in a couple of seconds. Hard-coded on purpose: these are system surfaces, not something a
-// user can sensibly pick out of a file browser, and a second user-managed list is not worth the
-// settings surface. Only consulted for windows that already failed the free style test below.
-static const char* kOverlayExes =
-    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe,glint.exe";
-
-// Is the foreground an overlay rather than a real app? While one is up the Auto engine choice is
-// FROZEN: such a tool holds foreground for a couple of seconds and hands it straight back, so
-// re-picking on it costs TWO engine handovers within seconds, and each one releases and rebuilds
-// DWM's magnification context - a pair of stalls exactly when the user is trying to read the
-// screen. The 350ms stickiness cannot help; these are visible for far longer than that.
-//
-// Deliberately cheap: no hook, no polling, nothing that loops.
-//   1. WS_EX_LAYERED on the foreground window - one GetWindowLongPtr, right next to the GWL_STYLE
-//      read the caller already makes. A game does not use a layered top-level window (it would
-//      cost it the redirection surface and its independent-flip plane); capture tools, dimmers and
-//      click-through HUDs do. This alone catches most of them for free.
-//   2. Only if that misses, the small built-in name list, which needs a process handle.
-// Memoised on the HWND so step 2 costs one lookup per foreground CHANGE rather than one per tick.
-// Shell surfaces that grab foreground for a moment and hand it straight back: the taskbar and
-// its preview/tray flyouts (issue #180 - clicking a taskbar preview button over a transform
-// session ping-ponged the engine, and every handover shows the over-zoom pulse), the Win10
-// thumbnail flyout, and the Start/search CoreWindow. Matched by CLASS, not exe: these all live
-// in explorer.exe, and excluding all of explorer would swallow real File Explorer windows.
-static bool IsShellTransientClass(const wchar_t* cls) {
-    return lstrcmpiW(cls, L"Shell_TrayWnd") == 0 ||
-           lstrcmpiW(cls, L"Shell_SecondaryTrayWnd") == 0 ||
-           lstrcmpiW(cls, L"TaskListThumbnailWnd") == 0 ||                 // Win10 preview flyout
-           lstrcmpiW(cls, L"XamlExplorerHostIslandWindow") == 0 ||        // Win11 flyouts/alt-tab
-           lstrcmpiW(cls, L"TopLevelWindowForOverflowXamlIsland") == 0 || // Win11 tray overflow
-           lstrcmpiW(cls, L"Windows.UI.Core.CoreWindow") == 0;            // Start menu / search
-}
-
-static bool IsOverlayFg(HWND fg) {
-    if (!fg) return false;
-    if (GetWindowLongPtrW(fg, GWL_EXSTYLE) & WS_EX_LAYERED) return true;
-    static HWND s_lastFg = nullptr;
-    static bool s_lastResult = false;
-    if (fg == s_lastFg) return s_lastResult;
-    s_lastFg = fg;
-    wchar_t cls[64]{};   // longest listed class is 35 chars; longer real classes truncate + miss
-    GetClassNameW(fg, cls, 64);
-    s_lastResult = IsShellTransientClass(cls) || FgExeInList(fg, kOverlayExes);
-    return s_lastResult;
-}
-
-// Shell desktop (issue #172): after Win+D / "show desktop", foreground goes to Progman (or a
-// WorkerW when a live-wallpaper tool has re-parented SHELLDLL_DefView) - a caption-less window
-// covering the whole monitor, indistinguishable from a game by the style test alone. The desktop
-// always wants render, so both engine picks exclude it. Class test, not exe: excluding all of
-// explorer.exe would be broader than needed, and the class also covers the Wallpaper Engine
-// WorkerW case where the foreground window is not explorer's.
-static bool IsShellDesktopFg(HWND fg) {
-    if (!fg) return false;
-    char cls[16]{};   // "Progman"/"WorkerW" fit; a longer class truncates and simply won't match
-    GetClassNameA(fg, cls, sizeof(cls));
-    return wind::IsShellDesktopClass(cls);
-}
-
-// Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
-// hook is uninstalled, so Windows' input thread stops round-tripping every keystroke through us and
-// the mouse stream to that app is never stalled. Unlike the transform exclusion this does NOT
-// require fullscreen: the user named the app, so honour it whenever it is in front.
-static bool IsNoSwallowApp(HWND fg, const Config& cfg) {
-    return FgExeInList(fg, cfg.noSwallowApps);
-}
 
 // Every cursor hide/show the tick loop performs goes through here, so cursorHiddenByUs is always an
 // exact record of whether WE are the reason the OS cursor is invisible. game-inspect needs that: a
@@ -3222,100 +2928,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-// Force-restore any global input state a previous Wind may have left dirty (cursor hidden, cursor
-// confined, a stuck show-count). Safe to call unconditionally at startup and at exit: every call
-// is idempotent. This is the net that guarantees a force-killed or crashed predecessor can never
-// leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
-static void RestoreInputState() {
-    ClipCursor(nullptr);                                         // release any cursor confinement
-    if (wind::MagApiAcquire()) { MagShowSystemCursor(TRUE); wind::MagApiRelease(); }   // un-hide the OS cursor
-    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
-    for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
-}
-
-// Minimal restore for abnormal CRT exit (atexit / ExitProcess). Non-blocking: must not touch the
-// hook thread (its stop() waits, which could hang during teardown); the hook dies with the process
-// and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
-// Only while we own the single-instance mutex: a refused or lingering second process must not heal
-// global state under the live owner, and a normal exit restores BEFORE releasing the mutex (see
-// ReleaseInstance), so a successor's tint capture never sees a half-restored scheme.
-static std::atomic<bool> g_ownsInstance{false};
-static void AtExitRestore() { if (g_ownsInstance.load()) RestoreInputState(); }
-
 // Crash safety net installed BEFORE the magnifier model is constructed, so a crash under
 // model=transform (which never touches RenderEngine) still heals the cursor. RenderEngine installs
 // the same shared filter (wind::CursorCrashFilter, mag_host.cpp) on its first cursor hide.
-
-// Single-instance startup events route through the unified logger (category "startup").
-static void SiLog(const char* msg, unsigned long val) {
-    wind::Log(wind::LogLevel::Info, "startup", "%s %lu", msg, val);
-}
-
-// Force-kill every OTHER Wind.exe (best effort; OpenProcess may be denied across integrity levels).
-static void TerminateOtherWind() {
-    const DWORD self = GetCurrentProcessId();
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W pe{ sizeof(pe) };
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"Wind.exe") == 0) {
-                HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                SiLog("terminate pid", pe.th32ProcessID);
-                if (h) { BOOL ok = TerminateProcess(h, 0); SiLog("  terminate ok", ok);
-                         if (!ok) SiLog("  terminate err", GetLastError()); CloseHandle(h); }
-                else SiLog("  openprocess err", GetLastError());
-            }
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-}
-
-// Guarantee EXACTLY ONE Wind.exe via a named mutex we OWN for our lifetime. This is the canonical,
-// integrity-independent guard: the kernel auto-releases the mutex when its owner dies (even on a
-// hard kill -> the next waiter gets WAIT_ABANDONED), so a zombie can NEVER permanently block a
-// relaunch. `mtx` receives the owned handle. Returns false only when another LIVE instance will not
-// yield - the caller then exits WITHOUT installing hooks, because two instances = two mouse hooks +
-// two cursor-warp loops = a system-wide input lock. (The previous kill-only version failed here:
-// TerminateProcess is blocked across the signed UIAccess build's integrity, and it had removed the
-// refuse-to-start backstop, so a second instance proceeded anyway and locked input.)
-//
-// quitEvent is created here, as soon as the mutex is ours, so a successor that finds us busy can
-// always signal it (it used to exist only after the whole startup). A null mutex fails closed.
-static bool AcquireSingleInstance(HANDLE& mtx, HANDLE& quitEvent) {
-    mtx = CreateMutexW(nullptr, FALSE, wind::kInstanceMutexName);
-    SiLog("createmutex err", GetLastError());
-    if (!mtx) { SiLog("mutex null - REFUSING TO START (cannot guard against a second instance)", 0); return false; }
-    // Quit-request channel for WindConfig.exe (onboarding close) and for a successor Wind. A window
-    // message can't be used: the deployed Wind.exe is UIAccess, and UIPI silently blocks PostMessage
-    // from the non-UIAccess WindConfig. A named event is a kernel object (not gated by UIPI) and
-    // both run as the same user in the same session. Auto-reset, initially unsignaled.
-    auto makeQuitEvent = [&] { quitEvent = CreateEventW(nullptr, FALSE, FALSE, wind::kQuitEventName); };
-    DWORD w = WaitForSingleObject(mtx, 0);   // WAIT_ABANDONED = prior owner died holding it -> ours now
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired immediately w", w); return true; }
-    SiLog("busy - signaling quit, w", w);
-    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
-    if (ev) { SetEvent(ev); CloseHandle(ev); SiLog("quit event set", 0); }
-    else SiLog("quit event open err", GetLastError());
-    w = WaitForSingleObject(mtx, 3000);                       // wait for it to release on clean exit
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired after quit w", w); return true; }
-    SiLog("still busy after quit - terminating, w", w);
-    TerminateOtherWind();                                     // fallback: kill the straggler
-    w = WaitForSingleObject(mtx, 2000);
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired after terminate w", w); return true; }
-    SiLog("REFUSING TO START - another instance alive, w", w);
-    CloseHandle(mtx); mtx = nullptr;
-    return false;                                             // never stack a second hook/cursor loop
-}
-
-// Normal-exit hand-over: heal the input state while the mutex is still ours, then release it.
-static void ReleaseInstance(HANDLE mtx) {
-    if (!mtx) return;
-    RestoreInputState();
-    g_ownsInstance.store(false);
-    ReleaseMutex(mtx);
-    CloseHandle(mtx);
-}
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Heal any input state a previous (possibly killed) Wind left dirty, then claim SOLE ownership.
@@ -3348,7 +2963,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HANDLE mtx = nullptr;
     HANDLE quitEvent = nullptr;
     if (!AcquireSingleInstance(mtx, quitEvent)) return 0;
-    g_ownsInstance.store(true);
+    MarkOwnsInstance(true);
     RestoreInputState();
     wind::LogClaimBase();   // a restart's per-PID fallback log moves onto wind-core.log (M6)
     atexit(AtExitRestore);

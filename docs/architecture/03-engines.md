@@ -121,7 +121,7 @@ a game at 8x swaps engines with level and lens kept. Three dampers:
   and `borderless` stay per tick.
 - **350 ms settle** (`t.wantModel`/`t.wantSinceMs`): the candidate must hold for 350 ms. Each flip
   rebuilds DWM's magnification context, a visible stall.
-- **Overlay freeze** (`IsOverlayFg`): while Snipping Tool, ScreenSketch, TextInputHost, Glint
+- **Overlay freeze** (`IsOverlayFg`, `src/core/fg_classify.cpp`): while Snipping Tool, ScreenSketch, TextInputHost, Glint
   (`kOverlayExes`) or the game-inspect focus stealer holds foreground, the pick is skipped, so
   handing foreground back is not a second handover. Inspect sessions are never switched.
 
@@ -148,7 +148,7 @@ A rapid second switch rests the pending engine first, and every teardown path cl
   `opera_gx.exe`, `vivaldi.exe`), because fullscreen browser video passes the game test. Matching
   is `FgExeInList`: bare file name, case-insensitive, exact, the same as `noSwallowApps`.
 - **`churny_apps.txt`** (`%LOCALAPPDATA%\Wind`) is learned. A render device-lost within 30 s of a
-  transform game session marks that session's exe (`MarkChurnyApp`), and later zoom-ins over it
+  transform game session marks that session's exe (`MarkChurnyApp`, `src/core/fg_classify.cpp`), and later zoom-ins over it
   pick Render: one crash per app, not two. `tdrTest` bypasses the list for field tests. Evidence:
   [../HITCH-FINDINGS.md](../HITCH-FINDINGS.md).
 
