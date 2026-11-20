@@ -220,7 +220,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `renderScaling` (0), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
-| `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
+| `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter. Warmth 50 = 1200 K (Night light at full), 100 = pure red ([04](04-render-engine.md)). `colorWarmScale=2` marks the scale: at start, `MigrateWarmScale` halves `colorWarmPct` once in the live ini and every profile that lacks it (2026-11-21), so new profile seeds carry it |
 | `outline*` | Zoom outline |
 
 **Engine.** `model` applies live on the config reload (#455); Wind relaunches only when one engine

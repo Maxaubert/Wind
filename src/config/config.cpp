@@ -478,6 +478,22 @@ WheelMigration MigrateWheelMods(const std::string& iniText) {
     r.changed = true;
     return r;
 }
+std::string MigrateWarmScale(const std::string& iniText, bool* changed) {
+    if (changed) *changed = false;
+    const auto v = ReadIniValues(iniText);
+    if (v.count(kWarmScaleKey)) return iniText;
+    std::string t = iniText;
+    auto it = v.find("colorWarmPct");
+    if (it != v.end()) {
+        int pct = 0;
+        try { pct = std::stoi(it->second); } catch (...) { pct = 0; }
+        pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+        t = UpdateIniText(t, "colorWarmPct", std::to_string((pct + 1) / 2));
+    }
+    t = UpdateIniText(t, kWarmScaleKey, "2");
+    if (changed) *changed = true;
+    return t;
+}
 }  // namespace wind
 
 namespace wind {
@@ -618,8 +634,9 @@ std::string DefaultIniText() {
                "mouseMarginPct=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
-               "; colorWarmPct: screen warmth like Night light (0-100, 0 = off); colorDimPct: artificial brightness (1-100, 100 = normal)\n"
-               "colorWarmPct=0\n"
+               "; colorWarmPct: screen warmth (0-100, 0 = off, 50 = Night light at full, 100 = pure red); colorDimPct: artificial brightness (1-100, 100 = normal)\n"
+               "; colorWarmScale: which warmth scale this file uses; leave it at 2 (without it Wind halves colorWarmPct once)\n"
+               "colorWarmPct=0\ncolorWarmScale=2\n"
                "colorDimPct=100\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"

@@ -69,7 +69,7 @@ const Field* FindField(const std::string& key) {
 }
 
 // Template keys the core never parses (UI-only): they have no Config field to compare with.
-const std::set<std::string> kTemplateUiOnly = { "uiHighResNoticeOff" };
+const std::set<std::string> kTemplateUiOnly = { "uiHighResNoticeOff", "colorWarmScale" };   // colorWarmScale: migration marker, not a Config field
 // Template values that deliberately differ from Config{}, with the reason. None today.
 const std::map<std::string, std::string> kIntendedDifferences = {};
 

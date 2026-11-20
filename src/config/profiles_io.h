@@ -257,7 +257,9 @@ inline IniMigrationResult MigrateIniFiles(const std::wstring& iniPath) {
         if (!ReadTextFileOk(path, text)) return;
         WheelMigration m = MigrateWheelMods(text);
         if (m.blocked) ++res.blocked;
-        if (m.changed && WriteTextFileAtomic(path, m.text)) ++res.rewritten;
+        bool warm = false;
+        m.text = MigrateWarmScale(m.text, &warm);
+        if ((m.changed || warm) && WriteTextFileAtomic(path, m.text)) ++res.rewritten;
     };
     one(iniPath);
     const std::wstring dir = ProfilesDirFromIni(iniPath);

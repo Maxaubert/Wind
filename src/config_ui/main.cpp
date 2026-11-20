@@ -478,7 +478,8 @@ static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
         if (!wind::EnsureProfilesSeeded(IniPath()))
             err = "Could not set up profiles (the config file may be locked); try again in a moment";
         std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
-                           "model=transform\n";
+                           "model=transform\n"
+                           "colorWarmScale=2\n";   // the current Warmth scale (MigrateWarmScale)
         if (err.empty() && fromCurrent) {
             std::string live;
             if (!ReadIni(live)) err = "Could not read the config file";

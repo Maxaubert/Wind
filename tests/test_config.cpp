@@ -637,6 +637,23 @@ TEST_CASE("uiPalette is UI-only: stripped from the core text, unknown reads grey
     CHECK(std::string(ids[3]) == "hicon");                          // High contrast is always last
     CHECK(NormalizeUiPalette(" ocean ") == "ocean");
 }
+TEST_CASE("MigrateWarmScale halves an old-scale warmth once and marks the file (2026-11-21)") {
+    bool ch = false;
+    const std::string a = MigrateWarmScale("maxLevel=8\ncolorWarmPct=100\n", &ch);
+    CHECK(ch);
+    auto v = ReadIniValues(a);
+    CHECK(v["colorWarmPct"] == "50"); CHECK(v["colorWarmScale"] == "2"); CHECK(v["maxLevel"] == "8");
+    CHECK(MigrateWarmScale(a, &ch) == a); CHECK_FALSE(ch);                       // never twice
+    CHECK(ReadIniValues(MigrateWarmScale("colorWarmPct=45\n"))["colorWarmPct"] == "23");   // rounds half up
+    CHECK(ReadIniValues(MigrateWarmScale("colorWarmPct=0\n"))["colorWarmPct"] == "0");
+    CHECK(ReadIniValues(MigrateWarmScale("colorWarmPct=junk\n"))["colorWarmPct"] == "0");
+    // No warmth key: only the marker, so a value written later is never halved.
+    v = ReadIniValues(MigrateWarmScale("maxLevel=8\n", &ch));
+    CHECK(ch); CHECK(v.count("colorWarmPct") == 0); CHECK(v["colorWarmScale"] == "2");
+    // A marked file keeps its value as is; the first-run template is already marked.
+    CHECK(MigrateWarmScale("colorWarmPct=90\ncolorWarmScale=2\n") == "colorWarmPct=90\ncolorWarmScale=2\n");
+    MigrateWarmScale(DefaultIniText(), &ch); CHECK_FALSE(ch);
+}
 TEST_CASE("the first-run ini carries the new keys and parses to the struct defaults (#318)") {
     const Config t = ParseConfig(DefaultIniText());
     CHECK(t.panKeysOn == 1); CHECK(t.hideCursorOn == 1); CHECK(t.cursorLockOn == 1);

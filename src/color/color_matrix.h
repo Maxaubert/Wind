@@ -77,9 +77,23 @@ inline void KelvinGainsLinear(double kelvin, double& r, double& g, double& b) {
 inline double SrgbEncode(double c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055; }
 inline double SrgbDecode(double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
 
-// Warmth 0..1 -> colour temperature, on Night light's own scale: 0% = 6500 K, 100% = 1200 K,
-// LINEAR in Kelvin (measured 2026-09-29 from its stored setting: 50% = 3850 K).
-inline double WarmKelvin(double warm01) { return 6500.0 - 5300.0 * warm01; }
+// Warmth 0..1, two halves (owner 2026-11-21: "make it go further", the old 100% now at 50%).
+// 0..0.5 is Night light's own scale stretched over half the slider: 0% = 6500 K, 50% = 1200 K,
+// LINEAR in Kelvin (Night light measured 2026-09-29 from its stored setting: its 50% = 3850 K).
+// 0.5..1 goes past where the blackbody table ends: the green 1200 K leaves fades out evenly in
+// sRGB-encoded terms (what the eye sees), so 100% is pure red. Blue is already 0 at 1200 K.
+inline constexpr double kWarmKelvinEnd = 1200.0;
+inline double WarmKelvin(double warm01) {
+    const double h = warm01 >= 0.5 ? 1.0 : warm01 * 2.0;
+    return 6500.0 - (6500.0 - kWarmKelvinEnd) * h;
+}
+inline void WarmGainsLinear(double warm01, double& r, double& g, double& b) {
+    KelvinGainsLinear(WarmKelvin(warm01), r, g, b);
+    if (warm01 <= 0.5) return;
+    const double t = warm01 >= 1.0 ? 1.0 : (warm01 - 0.5) * 2.0;
+    g = SrgbDecode(SrgbEncode(g) * (1.0 - t));
+    b = SrgbDecode(SrgbEncode(b) * (1.0 - t));
+}
 
 // The whole colour feature is two controls (owner decision 2026-09-29): warmth and brightness.
 // Invert, greyscale and two-colour tints were dropped: one colour matrix cannot keep multi-coloured
@@ -97,7 +111,7 @@ inline ColorMatrix BuildColorMatrix(double warm01, double dim01, bool linearLigh
     ColorMatrix m = IdentityColorMatrix();
     if (warm01 > 0.0) {
         double g[3];
-        KelvinGainsLinear(WarmKelvin(warm01), g[0], g[1], g[2]);
+        WarmGainsLinear(warm01, g[0], g[1], g[2]);
         for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(linearLight ? g[i] : SrgbEncode(g[i]));
     }
     const double d = linearLight ? SrgbDecode(dim01) : dim01;
