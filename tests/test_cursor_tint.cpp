@@ -6,7 +6,7 @@
 using namespace wind;
 
 TEST_CASE("tint scales RGB by the matrix and keeps alpha") {
-    const ColorMatrix m = BuildColorMatrix(1.0, 1.0, false);   // warmth 100%: 1200 K, encoded
+    const ColorMatrix m = BuildColorMatrix(0.5, 1.0, false);   // warmth 50%: 1200 K, encoded
     const uint32_t white = 0x80FFFFFFu;                        // half-transparent white
     const uint32_t t = TintPixel(white, m);
     CHECK((t >> 24) == 0x80u);                                 // alpha untouched

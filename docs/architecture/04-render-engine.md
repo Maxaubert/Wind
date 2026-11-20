@@ -187,6 +187,8 @@ tonemaps to SDR (`hdrTonemap=1`, default).
 
 Warmth and brightness (`colorWarmPct`, `colorDimPct`) are one colour matrix (`src/color/color_matrix.h`),
 applied by `ColorFilterController` (`src/color/color_filter.*`) through `MagSetFullscreenColorEffect`.
+Warmth 0-50% is Night light's scale (6500 K to 1200 K, linear in Kelvin); 50-100% fades the last
+green out evenly in sRGB terms, so 100% is pure red (owner 2026-11-21: "make it go further").
 
 - **Desktop Duplication sees the DWM effect.** While a render session is visible the DWM effect is
   set to identity and the render shader applies the matrix instead; otherwise the overlay would be

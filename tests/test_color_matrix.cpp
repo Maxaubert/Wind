@@ -14,10 +14,24 @@ TEST_CASE("no warmth at full brightness is the identity in both spaces") {
     CHECK_FALSE(IsIdentity(BuildColorMatrix(0.0, 0.9, false)));
     CHECK_FALSE(IsIdentity(BuildColorMatrix(0.05, 1.0, true)));
 }
-TEST_CASE("warmth uses Night light's scale: 6500 K to 1200 K, linear in Kelvin") {
+TEST_CASE("warmth: Night light's scale on the first half (6500 K to 1200 K, linear in Kelvin)") {
     CHECK(WarmKelvin(0.0) == doctest::Approx(6500));
-    CHECK(WarmKelvin(0.5) == doctest::Approx(3850));   // measured from Night light at 50%
-    CHECK(WarmKelvin(1.0) == doctest::Approx(1200));
+    CHECK(WarmKelvin(0.25) == doctest::Approx(3850));   // Night light's own 50%, measured
+    CHECK(WarmKelvin(0.5) == doctest::Approx(1200));    // Night light at full = the old 100%
+    CHECK(WarmKelvin(1.0) == doctest::Approx(1200));    // the second half stays at the table's end
+}
+TEST_CASE("warmth past 50% fades the last green out evenly, to pure red at 100%") {
+    double r, g, b, r0, g0, b0;
+    KelvinGainsLinear(1200, r0, g0, b0);
+    WarmGainsLinear(0.5, r, g, b);
+    CHECK(r == doctest::Approx(r0)); CHECK(g == doctest::Approx(g0)); CHECK(b == doctest::Approx(b0));
+    WarmGainsLinear(0.75, r, g, b);   // half the encoded green
+    CHECK(r == doctest::Approx(1.0)); CHECK(SrgbEncode(g) == doctest::Approx(SrgbEncode(g0) / 2).epsilon(0.001));
+    WarmGainsLinear(1.0, r, g, b);
+    CHECK(r == doctest::Approx(1.0)); CHECK(g == doctest::Approx(0.0)); CHECK(b == doctest::Approx(0.0));
+    double er, eg, eb;
+    ApplyToRgb(BuildColorMatrix(1.0, 1.0, false), 1, 1, 1, er, eg, eb);
+    CHECK(er == doctest::Approx(1.0)); CHECK(eg == doctest::Approx(0.0)); CHECK(eb == doctest::Approx(0.0));
 }
 TEST_CASE("blackbody gains: white at 6500 K, blue gone first, CIE values at 1200 K") {
     double r, g, b;
@@ -32,8 +46,8 @@ TEST_CASE("blackbody gains: white at 6500 K, blue gone first, CIE values at 1200
 }
 TEST_CASE("HDR (linear) and SDR (encoded) warmth are the same colour, not the same number") {
     double lr, lg, lb, er, eg, eb;
-    ApplyToRgb(BuildColorMatrix(1.0, 1.0, true), 1, 1, 1, lr, lg, lb);
-    ApplyToRgb(BuildColorMatrix(1.0, 1.0, false), 1, 1, 1, er, eg, eb);
+    ApplyToRgb(BuildColorMatrix(0.5, 1.0, true), 1, 1, 1, lr, lg, lb);    // 1200 K
+    ApplyToRgb(BuildColorMatrix(0.5, 1.0, false), 1, 1, 1, er, eg, eb);
     CHECK(lg == doctest::Approx(0.0774).epsilon(0.01));           // HDR: the linear gain itself
     CHECK(eg == doctest::Approx(SrgbEncode(lg)).epsilon(0.001));   // SDR: its sRGB encoding
     CHECK(lb == doctest::Approx(0.0)); CHECK(eb == doctest::Approx(0.0));

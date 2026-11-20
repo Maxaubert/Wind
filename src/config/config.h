@@ -457,7 +457,7 @@ struct Config {
     double brightness = 1.0;
     // Colour filters (issue #288): a DWM colour matrix (render engine: its pixel shader).
     // Two controls, always applied (zoomed or not): warmth and brightness. Both neutral = off.
-    int colorWarmPct = 0;     // warmth 0..100 (0 = off, 100 = 1200 K like Night light at full)
+    int colorWarmPct = 0;     // warmth 0..100 (0 = off, 50 = 1200 K like Night light at full, 100 = pure red)
     int colorDimPct = 100;    // artificial brightness 1..100 (100 = no dim; quitting Wind clears it)
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
@@ -568,6 +568,12 @@ std::string NormalizeUiPalette(const std::string& value);
 // `blocked` is set so the caller can log it. `changed` is true when the text was rewritten.
 struct WheelMigration { std::string text; bool changed = false; bool blocked = false; };
 WheelMigration MigrateWheelMods(const std::string& iniText);
+// One-time ini migration (2026-11-21): Warmth's scale doubled (the old 100% = 1200 K is now 50%;
+// color_matrix.h). A file without the marker `colorWarmScale=2` has the old scale: its colorWarmPct
+// is halved (rounded) and the marker added, also when the key is absent, so a value written later is
+// never halved again. Pure text transform; returns the text unchanged when the marker is there.
+inline constexpr const char* kWarmScaleKey = "colorWarmScale";
+std::string MigrateWarmScale(const std::string& iniText, bool* changed = nullptr);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.

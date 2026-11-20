@@ -2981,10 +2981,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
     // user's current settings, so existing installs get a "Default" profile with zero user action.
     EnsureProfilesSeeded(iniPath);
-    // One-time ini migration (#318): the old zoomWheelMods key becomes wheel up/down zoom binds.
+    // One-time ini migrations: the old zoomWheelMods key becomes wheel up/down zoom binds (#318), and
+    // Warmth moves to its doubled scale (MigrateWarmScale, 2026-11-21).
     {
         const wind::IniMigrationResult mig = wind::MigrateIniFiles(iniPath);
-        if (mig.rewritten) wind::Log(wind::LogLevel::Info, "config", "migrated zoomWheelMods into wheel zoom binds in %d file(s)", mig.rewritten);
+        if (mig.rewritten) wind::Log(wind::LogLevel::Info, "config", "migrated %d ini file(s) (wheel binds, warmth scale)", mig.rewritten);
         if (mig.blocked) wind::Log(wind::LogLevel::Warn, "config", "zoomWheelMods kept in %d file(s): both zoom slots of a direction are full", mig.blocked);
     }
     // Settings session (#303): unsaved changes do not survive a start, unless Wind restarted itself.
