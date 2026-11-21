@@ -95,27 +95,42 @@ inline void WarmGainsLinear(double warm01, double& r, double& g, double& b) {
     b = SrgbDecode(SrgbEncode(b) * (1.0 - t));
 }
 
-// The whole colour feature is two controls (owner decision 2026-09-29): warmth and brightness.
-// Invert, greyscale and two-colour tints were dropped: one colour matrix cannot keep multi-coloured
-// text readable (docs/COLOUR-FILTER-FINDINGS.md).
+// The colour feature is warmth and brightness (owner decision 2026-09-29) plus saturation (owner
+// 2026-11-21, floored at 20%). Invert, greyscale and two-colour tints were dropped: one colour matrix
+// cannot keep multi-coloured text readable (docs/COLOUR-FILTER-FINDINGS.md).
 // warm01: 0..1 (0 = no warmth). dim01: kMinDim01..1 (1 = no dim). Out-of-range values clamp.
 // linearLight: the matrix acts on LINEAR values. True for the DWM colour effect while Windows HDR is
 // on (measured: it scales scRGB directly); false for SDR DWM and for the render engine's shader,
 // which apply it to sRGB-encoded values. Warmth uses the blackbody gains in the matching space, and
 // brightness is decoded to linear there, so both look the same in SDR and HDR.
 // Both at their neutral ends give the identity, which the controller treats as "off".
-inline ColorMatrix BuildColorMatrix(double warm01, double dim01, bool linearLight) {
+// sat01: saturation, kMinSat01..kMaxSat01 (1 = unchanged), applied FIRST: each channel moves toward
+// (below 1) or away from (above 1) the pixel's Rec.709 luma, then warmth and dim scale the channels.
+// Same weights in both spaces (on encoded values it is the usual CSS saturate() approximation).
+// The floor is not 0: greyscale merges text colours of equal brightness (COLOUR-FILTER-FINDINGS.md).
+inline constexpr double kMinSat01 = 0.2, kMaxSat01 = 1.5;
+inline constexpr double kLumaR = 0.2126, kLumaG = 0.7152, kLumaB = 0.0722;
+inline ColorMatrix BuildColorMatrix(double warm01, double dim01, bool linearLight, double sat01 = 1.0) {
     auto clamp = [](double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); };
     warm01 = clamp(warm01, 0.0, 1.0);
     dim01 = clamp(dim01, kMinDim01, 1.0);
-    ColorMatrix m = IdentityColorMatrix();
+    sat01 = clamp(sat01, kMinSat01, kMaxSat01);
+    double gain[3] = { 1.0, 1.0, 1.0 };
     if (warm01 > 0.0) {
         double g[3];
         WarmGainsLinear(warm01, g[0], g[1], g[2]);
-        for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(linearLight ? g[i] : SrgbEncode(g[i]));
+        for (int i = 0; i < 3; ++i) gain[i] = linearLight ? g[i] : SrgbEncode(g[i]);
     }
     const double d = linearLight ? SrgbDecode(dim01) : dim01;
-    for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(m.m[i][i] * d);   // dim composes last
+    for (int i = 0; i < 3; ++i) gain[i] *= d;                          // dim composes last
+    // Row vectors: out = in * S * diag(gain), so m[i][j] = S[i][j] * gain[j].
+    const double luma[3] = { kLumaR, kLumaG, kLumaB };
+    ColorMatrix m = IdentityColorMatrix();
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            const double s = (1.0 - sat01) * luma[i] + (i == j ? sat01 : 0.0);
+            m.m[i][j] = (float)(s * gain[j]);
+        }
     return m;
 }
 

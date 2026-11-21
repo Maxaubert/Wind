@@ -145,6 +145,8 @@ export const groups = [
       { caption: 'Screen light', rows: [
         { key: 'colorWarmPct', type: 'slider', label: 'Warmth', keywords: ['night light', 'blue light', 'yellow', 'orange', 'warm', 'colour temperature', 'color temperature', 'temperature', 'eye strain', 'tint', 'filter', 'evening', 'sleep', 'amber', 'red', 'colour', 'color', 'reduce blue', 'kelvin'], desc: 'Makes the screen warmer', min: 0, max: 100, step: 5, def: 0, unit: '%' },
         { key: 'colorDimPct', type: 'slider', label: 'Brightness', keywords: ['dim', 'dark', 'darker', 'dimmer', 'light', 'luminance', 'backlight', 'night', 'screen', 'intensity', 'contrast', 'colour', 'color', 'lower', 'reduce'], desc: 'Dims the whole screen', min: 1, max: 100, step: 1, def: 100, unit: '%' },
+        // Saturation (2026-11-21): same matrix, applied first. Floor 20%: greyscale merges text colours.
+        { key: 'colorSatPct', type: 'slider', label: 'Saturation', keywords: ['saturation', 'vivid', 'vibrance', 'vibrant', 'muted', 'calm', 'washed out', 'pale', 'colourful', 'colorful', 'grey', 'gray', 'desaturate'], desc: 'Calmer or stronger colours', min: 20, max: 150, step: 5, def: 100, unit: '%' },
       ] },
       { caption: 'Troubleshooting', rows: [
         // Always visible: these are not advanced settings.

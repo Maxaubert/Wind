@@ -539,21 +539,21 @@ static bool RenderOverlayShown(TickState& t) {
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
     // The user's filter applies zoomed and at 1x alike (owner decision 2026-09-29); zoomedNow gates
     // only the MPO guard below.
-    const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
+    const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0, s = t.cfg.colorSatPct / 100.0;
     // Toggling HDR is not guaranteed to raise WM_DISPLAYCHANGE (and may settle after it), so while a
     // filter is on the state is re-read once a second. A DisplayConfig query is microseconds (the
     // render engine runs the same kind of query at 4 Hz, CLAUDE.md), so this is not a tick cost.
-    if (w > 0.0 || d < 1.0) {
+    if (w > 0.0 || d < 1.0 || s != 1.0) {
         static unsigned long long hdrReadMs = 0;
         const unsigned long long now = GetTickCount64();
         if (now - hdrReadMs >= 1000) { hdrReadMs = now; g_hdrOn.store(PrimaryHdrOn()); }
     }
     // The render shader works on sRGB-encoded values (after its HDR->SDR step), in SDR and HDR alike.
-    const wind::ColorMatrix enc = wind::BuildColorMatrix(w, d, false);
+    const wind::ColorMatrix enc = wind::BuildColorMatrix(w, d, false, s);
     const bool inShader = renderSession && !wind::IsIdentity(enc);
     if (ex) { ex->colorOn = inShader; ex->color = enc; }
     wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
-                                     : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
+                                     : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed), s);
     // MPO guard (issue #369, src/transform/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
     // non-identity effect makes DWM compose the desktop itself, so no plane can take the 16-bit
     // translation. The engine's runtime carries it (zoomed only), so it never needs our own hold.
@@ -571,7 +571,8 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
 // reload the scheme), and a fullscreen app in front (not the desktop) keeps the pristine pointers.
 static wind::CursorTint g_tint;
 static void UpdateCursorTint(TickState& t) {
-    const wind::ColorMatrix enc = wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false);
+    const wind::ColorMatrix enc = wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false,
+                                                         t.cfg.colorSatPct / 100.0);
     if (wind::IsIdentity(enc)) { g_tint.restore(true); return; }
     static unsigned long long checkedMs = 0;
     static bool fsApp = false;

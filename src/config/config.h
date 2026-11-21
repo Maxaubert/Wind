@@ -459,6 +459,7 @@ struct Config {
     // Two controls, always applied (zoomed or not): warmth and brightness. Both neutral = off.
     int colorWarmPct = 0;     // warmth 0..100 (0 = off, 50 = 1200 K like Night light at full, 100 = pure red)
     int colorDimPct = 100;    // artificial brightness 1..100 (100 = no dim; quitting Wind clears it)
+    int colorSatPct = 100;    // saturation 20..150 (100 = unchanged; never 0: greyscale merges text colours)
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.

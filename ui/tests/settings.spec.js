@@ -235,12 +235,16 @@ test('Typing and focus: caret on, focus off by default; a toggle writes at once'
   await expect(page.locator('.capsule')).toContainText('1 unsaved change');
 });
 
-test('Screen light (in Preferences): warmth and brightness, neutral by default (no warmth, full brightness)', async ({ page }) => {
+test('Screen light (in Preferences): warmth, brightness and saturation, neutral by default', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
-  await expect(page.locator('main input[type=range]')).toHaveCount(2);
+  await expect(page.locator('main input[type=range]')).toHaveCount(3);
   await expect(key(page, 'colorWarmPct').locator('input[type=range]')).toHaveValue('0');
   await expect(key(page, 'colorDimPct').locator('input[type=range]')).toHaveValue('100');
+  const sat = key(page, 'colorSatPct').locator('input[type=range]');
+  await expect(sat).toHaveValue('100');
+  await expect(sat).toHaveAttribute('min', '20');   // never greyscale
+  await expect(sat).toHaveAttribute('max', '150');
 });
 
 test('the save capsule reads on the dark surfaces', async ({ page }) => {
