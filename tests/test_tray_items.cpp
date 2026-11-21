@@ -201,23 +201,15 @@ TEST_CASE("WriteTrayLayout leaves other keys alone") {
     CHECK(v.size() == 6);
 }
 
-TEST_CASE("the five tray keys are global, not profile keys") {
+TEST_CASE("the five tray keys are profile keys (2026-11-21): saved with a profile, restored by a switch") {
     for (const char* k : {"trayPerf", "traySliders", "traySliderOrder", "trayToggles", "trayToggleOrder"})
-        CHECK(IsGlobalProfileKey(k));
-}
-
-TEST_CASE("tray keys survive a profile switch and never enter a profile file") {
+        CHECK_FALSE(IsGlobalProfileKey(k));
     std::string live = "maxLevel=8\ntrayPerf=1\ntraySliders=panSpeed\ntraySliderOrder=panSpeed,maxLevel\n"
                        "trayToggles=trackCaret\ntrayToggleOrder=trackCaret,trackFocus\n";
-    std::string prof = MakeProfileText(live);
-    CHECK(prof.find("tray") == std::string::npos);
-    std::string back = MakeLiveText("maxLevel=3\n", live, "Gaming");
-    auto v = ReadIniValues(back);
+    CHECK(MakeProfileText(live) == live);
+    auto v = ReadIniValues(MakeLiveText("maxLevel=3\n", live, "Gaming"));
     CHECK(v["maxLevel"] == "3");
-    CHECK(v["trayPerf"] == "1");
-    CHECK(v["traySliders"] == "panSpeed");
-    CHECK(v["traySliderOrder"] == "panSpeed,maxLevel");
-    CHECK(v["trayToggles"] == "trackCaret");
-    CHECK(v["trayToggleOrder"] == "trackCaret,trackFocus");
-    CHECK_FALSE(SessionDiffers(live, "maxLevel=8\n"));
+    CHECK(v.count("traySliders") == 0);   // that profile has the default tray menu
+    CHECK(SessionDiffers(live, "maxLevel=8\n"));
+    CHECK_FALSE(SessionDiffers(live, live));
 }

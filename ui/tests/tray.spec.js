@@ -161,10 +161,13 @@ test('slider cap: at four the unchecked boxes are disabled and the count says fu
   await expect(chk(page, 'sliders', 'Zoom-in speed')).toBeEnabled();
 });
 
-test('tray changes are not unsaved changes and never show the capsule', async ({ page }) => {
+test('tray changes are saved with the profile: they show the save capsule (2026-11-21)', async ({ page }) => {
   await open(page);
+  await page.getByRole('switch', { name: 'Performance in the tray' }).check({ force: true });   // already on
+  await expect(page.locator('.capsule')).toHaveCount(0);
   await chk(page, 'sliders', 'Arrow key speed').click();
-  await page.getByRole('switch', { name: 'Performance in the tray' }).check({ force: true });
+  await expect(page.locator('.capsule')).toContainText('1 unsaved change');   // traySliders (the order is still the default one)
+  await chk(page, 'sliders', 'Arrow key speed').click();   // back to the default layout: nothing to save
   await expect(page.locator('.capsule')).toHaveCount(0);
 });
 

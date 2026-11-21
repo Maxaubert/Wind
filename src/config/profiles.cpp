@@ -3,6 +3,7 @@
 #include "profiles.h"
 #include "ini_edit.h"
 #include "config.h"   // DefaultIniText: the built-in default of every templated key
+#include <map>
 #include <sstream>
 #include <cstdlib>
 namespace wind {
@@ -13,8 +14,21 @@ static std::string lower(const std::string& s) {
 }
 bool IsGlobalProfileKey(const std::string& key) {
     if (key == "profile") return true;
+    for (const char* k : kSessionKeys) if (key == k) return true;
+    for (const char* k : kProfileUiKeys) if (key == k) return false;
     for (const char* k : kUiOnlyKeys) if (key == k) return true;
     return false;
+}
+std::string ResetSessionKeys(const std::string& liveText) {
+    static const std::map<std::string, std::string> defaults = ReadIniValues(DefaultIniText());
+    const auto vals = ReadIniValues(liveText);
+    std::string out = liveText;
+    for (const char* k : kSessionKeys) {
+        auto v = vals.find(k);
+        auto d = defaults.find(k);
+        if (v != vals.end() && d != defaults.end() && v->second != d->second) out = UpdateIniText(out, k, d->second);
+    }
+    return out;
 }
 std::string ProfileNameError(const std::string& name) {
     if (name.empty()) return "Name cannot be empty";
@@ -62,11 +76,8 @@ std::string MakeProfileText(const std::string& liveText) { return StripGlobalKey
 std::string MakeLiveText(const std::string& profileText, const std::string& oldLiveText,
                          const std::string& name) {
     std::string out = StripGlobalKeyLines(profileText);
-    auto oldVals = ReadIniValues(oldLiveText);
-    for (const char* k : kUiOnlyKeys) {
-        auto it = oldVals.find(k);
-        if (it != oldVals.end()) out = UpdateIniText(out, k, it->second);
-    }
+    for (const auto& kv : ReadIniValues(oldLiveText))
+        if (kv.first != "profile" && IsGlobalProfileKey(kv.first)) out = UpdateIniText(out, kv.first, kv.second);
     return UpdateIniText(out, "profile", name);
 }
 bool SameProfileName(const std::string& a, const std::string& b) { return lower(a) == lower(b); }
@@ -93,6 +104,17 @@ static bool SameIniValue(const std::string& x, const std::string& y) {
     const double dy = std::strtod(y.c_str(), &ey);
     return *ex == '\0' && *ey == '\0' && dx == dy;
 }
+const std::map<std::string, std::string>& TrayLayoutDefaults() {
+    static const std::map<std::string, std::string> k = {
+        { "trayPerf", "1" },
+        { "traySliders", "colorWarmPct,colorDimPct" },
+        { "traySliderOrder", "colorWarmPct,colorDimPct,colorSatPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,"
+                             "panGlideMaxPx,zoomEaseOutMs" },
+        { "trayToggles", "trackCaret,trackFocus,keepEdges,engine" },
+        { "trayToggleOrder", "trackCaret,trackFocus,keepEdges,engine" },
+    };
+    return k;
+}
 bool SessionDiffers(const std::string& liveText, const std::string& profileText) {
     auto a = ReadIniValues(liveText);
     auto b = ReadIniValues(profileText);
@@ -117,6 +139,9 @@ bool SessionDiffers(const std::string& liveText, const std::string& profileText)
         d.emplace("txSamplingMode", std::to_string(c.txSamplingMode));
         d.emplace("zoomEaseOutMs", std::to_string(c.zoomEaseOutMs));
         d.emplace("lockApps", c.lockApps);
+        // The tray-menu layout (a profile key since 2026-11-21) as ParseTrayLayout reads an ini
+        // without it; tests/test_profiles.cpp pins these to WriteTrayLayout(ParseTrayLayout({})).
+        for (const auto& kv : TrayLayoutDefaults()) d.emplace(kv.first, kv.second);
         return d;
     }();
     auto valueOf = [&](const std::map<std::string, std::string>& m, const std::string& k, std::string& out) {
@@ -137,6 +162,18 @@ bool SessionDiffers(const std::string& liveText, const std::string& profileText)
         if (ha && !SameIniValue(va, vb)) return true;
     }
     return false;
+}
+std::string AddMissingTrayKeys(const std::string& profileText, const std::string& liveText, bool* changed) {
+    if (changed) *changed = false;
+    const auto prof = ReadIniValues(profileText);
+    for (const char* k : kProfileUiKeys) if (prof.count(k)) return profileText;   // already has a layout
+    const auto live = ReadIniValues(liveText);
+    std::string out = profileText;
+    for (const char* k : kProfileUiKeys) {
+        auto it = live.find(k);
+        if (it != live.end()) { out = UpdateIniText(out, k, it->second); if (changed) *changed = true; }
+    }
+    return out;
 }
 bool ParseIniTmpName(const std::wstring& fileName, unsigned long& pid) {
     auto low = [](wchar_t c) { return (c >= L'A' && c <= L'Z') ? (wchar_t)(c + 32) : c; };

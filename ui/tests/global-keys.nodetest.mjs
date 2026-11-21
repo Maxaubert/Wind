@@ -14,6 +14,6 @@ test('UI global keys match the shared list', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const keys = readFileSync(join(here, '..', '..', 'tests', 'fixtures', 'global_keys.txt'), 'utf8')
     .split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  assert.ok(keys.length > 10, `only ${keys.length} keys read`);
+  assert.ok(keys.length >= 10, `only ${keys.length} keys read`);
   assert.deepEqual([...GLOBAL_KEYS].sort(), [...keys].sort());
 });

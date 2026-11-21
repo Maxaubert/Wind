@@ -3,13 +3,16 @@
 // Pure helpers for the session model (spec 2026-10-01): the live ini is the session, the active
 // profile file is the saved state. No bridge, no DOM, so Playwright can import it directly.
 import { groups, groupRows, bindKeys } from './settings-schema.js';
+import { parseTray, serialiseList } from './tray/trayModel.js';
 
-// Mirrors IsGlobalProfileKey (kUiOnlyKeys + profile, src/config/profiles.h): these are never part of a
-// profile, so they never count as an unsaved change. tests/global-keys.nodetest.mjs pins the two
-// lists together through tests/fixtures/global_keys.txt. The five tray keys (#313) live in the live ini only.
-// uiHighResNoticeOff (#441) is the opt-out of the High resolution cursor notice.
+// Mirrors IsGlobalProfileKey (src/config/profiles.h): these are never part of a profile, so they never
+// count as an unsaved change. tests/global-keys.nodetest.mjs pins the two lists together through
+// tests/fixtures/global_keys.txt. uiHighResNoticeOff (#441) is the opt-out of the High resolution
+// cursor notice. The five tray-menu keys are profile keys (2026-11-21), so editing the tray menu
+// lights Save. Warmth, Brightness and Saturation are session-only: never saved, never unsaved, and
+// back to their defaults at every Wind start.
 export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalette', 'showAdvanced',
-  'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder', 'trayPinned', 'uiHighResNoticeOff']);
+  'trayPinned', 'uiHighResNoticeOff', 'trayInProfiles', 'colorWarmPct', 'colorDimPct', 'colorSatPct']);
 
 // Must match the core's shipped defaults (src/config/config.h): every keybind ships unbound except Quick
 // zoom. Seeding anything else here would invent a binding the user never chose.
@@ -27,7 +30,9 @@ const KB_DEFAULTS = {
 // Defaults for every key the page shows. Applied to BOTH sides of the comparison, so a key the file
 // does not mention reads the same as the default and never counts as a change.
 function schemaDefaults() {
-  const d = { ...KB_DEFAULTS };
+  // The tray-menu keys as an ini without them reads (TrayLayoutDefaults in src/config/profiles.cpp).
+  const t = parseTray({});
+  const d = { ...KB_DEFAULTS, trayPerf: '1', ...serialiseList('sliders', t.sliders), ...serialiseList('toggles', t.toggles) };
   for (const r of groups.flatMap(groupRows)) {
     if (r.key[0] !== '_' && r.def !== undefined) d[r.key] = r.def;
     for (const k of bindKeys(r)) if (!(k in d)) d[k] = '0';

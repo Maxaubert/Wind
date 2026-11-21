@@ -14,7 +14,9 @@ import { fill, GLOBAL_KEYS } from '../src/session.js';
 // fails when the fixture goes stale), so a default changed on either side fails one of the two tests.
 
 // Keys the page owns: the core never parses them, so they have no row in the fixture.
-const UI_ONLY = new Set(['uiPalette', 'showAdvanced', 'trayPerf']);
+// The tray-menu keys are UI-only too, but saved with a profile (2026-11-21), so they are not global.
+const TRAY_KEYS = new Set(['trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder']);
+const UI_ONLY = new Set(['uiPalette', 'showAdvanced', ...TRAY_KEYS]);
 
 // Sliders that deliberately offer less than the core accepts from a hand-edited ini. A slider may be
 // narrower than the core's clamp, never wider; list a narrower one here with the reason.
@@ -57,7 +59,7 @@ test('every default the page fills in matches the core default', () => {
   for (const [key, def] of Object.entries(defaults)) {
     if (UI_ONLY.has(key)) {
       assert.ok(!core.has(key), `${key} is listed as UI-only but the core parses it`);
-      assert.ok(GLOBAL_KEYS.has(key), `${key} is UI-only, so it must also be a global (non-profile) key`);
+      assert.ok(GLOBAL_KEYS.has(key) || TRAY_KEYS.has(key), `${key} is UI-only, so it must also be a global (non-profile) key`);
       continue;
     }
     assert.ok(core.has(key), `${key}: the schema has a default but the core does not parse this key`);

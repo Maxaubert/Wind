@@ -2986,7 +2986,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Warmth moves to its doubled scale (MigrateWarmScale, 2026-11-21).
     {
         const wind::IniMigrationResult mig = wind::MigrateIniFiles(iniPath);
-        if (mig.rewritten) wind::Log(wind::LogLevel::Info, "config", "migrated %d ini file(s) (wheel binds, warmth scale)", mig.rewritten);
+        if (mig.rewritten) wind::Log(wind::LogLevel::Info, "config", "migrated %d ini file(s) (wheel binds, warmth scale, tray menu into profiles)", mig.rewritten);
         if (mig.blocked) wind::Log(wind::LogLevel::Warn, "config", "zoomWheelMods kept in %d file(s): both zoom slots of a direction are full", mig.blocked);
     }
     // Settings session (#303): unsaved changes do not survive a start, unless Wind restarted itself.
@@ -2996,7 +2996,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         wind::ResetSessionToProfile(iniPath);
         if (keep) wind::Log(wind::LogLevel::Info, "session", "kept unsaved settings across a self-triggered restart");
         else if (wind::ReadTextFile(iniPath) != before)
-            wind::Log(wind::LogLevel::Info, "session", "unsaved settings reset to the saved profile at start");
+            wind::Log(wind::LogLevel::Info, "session", "unsaved settings and screen colour reset at start");
     }
     // Seed the reload mtime and fingerprint from the text the config is loaded from, not from a
     // later read: a write landing after this point then differs from the seed and is applied.

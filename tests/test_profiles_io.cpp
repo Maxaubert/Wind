@@ -131,3 +131,29 @@ TEST_CASE("EnsureProfilesSeeded reports whether the profiles dir is in place") {
     DeleteFileW((dir + L"\\Default.ini").c_str());
     RemoveDirectoryW(dir.c_str());
 }
+
+TEST_CASE("MigrateIniFiles copies the live tray menu into tray-less profiles once (marker), never again") {
+    TempDir d; const std::wstring ini = d.path + L"\\magnifier.ini";
+    const std::wstring dir = d.path + L"\\profiles";
+    REQUIRE(CreateDirectoryW(dir.c_str(), nullptr));
+    REQUIRE(WriteTextFileAtomic(ini, "colorWarmScale=2\nprofile=A\ntraySliders=panSpeed\n"));
+    REQUIRE(WriteTextFileAtomic(dir + L"\\A.ini", "colorWarmScale=2\nmaxLevel=4\n"));
+    REQUIRE(WriteTextFileAtomic(dir + L"\\B.ini", "colorWarmScale=2\ntrayPerf=0\n"));
+    MigrateIniFiles(ini);
+    std::string a, b, live;
+    REQUIRE(ReadTextFileOk(dir + L"\\A.ini", a));
+    REQUIRE(ReadTextFileOk(dir + L"\\B.ini", b));
+    REQUIRE(ReadTextFileOk(ini, live));
+    CHECK(ReadIniValues(a).at("traySliders") == "panSpeed");   // took the layout the user had
+    CHECK(ReadIniValues(b).count("traySliders") == 0);          // already had its own
+    CHECK(ReadIniValues(live).at(kTrayInProfilesKey) == "1");
+    // A later start with another live layout leaves a tray-less (default layout) profile alone.
+    REQUIRE(WriteTextFileAtomic(dir + L"\\C.ini", "colorWarmScale=2\nmaxLevel=2\n"));
+    REQUIRE(WriteTextFileAtomic(ini, live + "traySliderOrder=maxLevel\n"));
+    MigrateIniFiles(ini);
+    std::string c;
+    REQUIRE(ReadTextFileOk(dir + L"\\C.ini", c));
+    CHECK(c == "colorWarmScale=2\nmaxLevel=2\n");
+    for (const wchar_t* n : { L"A.ini", L"B.ini", L"C.ini" }) DeleteFileW((dir + L"\\" + n).c_str());
+    RemoveDirectoryW(dir.c_str());
+}
