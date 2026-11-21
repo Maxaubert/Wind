@@ -47,7 +47,7 @@ harness, not committed.)
   in an FP16 duplication. In SDR it acts on encoded values. So the same number is a far weaker tint
   under HDR.
 - **Night light's scale is linear in Kelvin**: 0% = 6500 K, 50% = 3850 K, 100% = 1200 K (from its
-  stored setting). Warmth uses the same scale (`WarmKelvin`).
+  stored setting). Warmth's first half uses the same scale (`WarmKelvin`: Wind 50% = 1200 K); its second half fades the remaining green to pure red (#597, 2026-11-21).
 - Night light runs in the display pipeline and is invisible to capture under HDR, so Wind models it:
   CIE 1931 blackbody gains in linear light (`kKelvinGains`), encoded for SDR and the render shader,
   linear for DWM under HDR (`BuildColorMatrix(..., linearLight)`). Brightness is decoded to linear
@@ -59,7 +59,7 @@ harness, not committed.)
 
 Windows draws the pointer on a hardware cursor plane after composition, outside the DWM effect
 (Night light does reach it). Wind swaps the standard pointers for tinted copies while idle
-(`src/color/cursor_tint.*`): at warmth 100 the arrow read 246,76,0 in Desktop Duplication, size and
+(`src/color/cursor_tint.*`): at warmth 100 (1200 K, now 50%) the arrow read 246,76,0 in Desktop Duplication, size and
 hotspot kept. Zoom-in swaps back in 1.1 ms. Idle restores always reload the real scheme, because
 in-memory copies of the pointers are not identical to the scheme's own. A force-killed Wind leaves
 the tint until its next start. Night-light apps that use the gamma ramp (f.lux, Iris) have the same
