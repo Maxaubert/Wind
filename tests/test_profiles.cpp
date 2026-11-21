@@ -4,14 +4,15 @@
 #include "profiles.h"
 #include "ini_edit.h"
 #include "config.h"
+#include "tray_items.h"
 #include <fstream>
 #include <set>
 #include <vector>
 using namespace wind;
 
 // tests/fixtures/global_keys.txt is the cross-language copy of the global keys: this test pins it to
-// kUiOnlyKeys + "profile", and ui/tests/global-keys.nodetest.mjs pins the UI's GLOBAL_KEYS to it.
-TEST_CASE("global keys: kUiOnlyKeys + profile match the shared fixture the UI is tested against") {
+// IsGlobalProfileKey, and ui/tests/global-keys.nodetest.mjs pins the UI's GLOBAL_KEYS to it.
+TEST_CASE("global keys: profile + UI-only - tray menu + session colour match the shared fixture") {
     std::string here = __FILE__;
     const size_t cut = here.find_last_of("/\\");
     std::vector<std::string> tries;
@@ -31,7 +32,10 @@ TEST_CASE("global keys: kUiOnlyKeys + profile match the shared fixture the UI is
     }
     std::set<std::string> code = { "profile" };
     for (const char* k : kUiOnlyKeys) code.insert(k);
+    for (const char* k : kProfileUiKeys) code.erase(k);
+    for (const char* k : kSessionKeys) code.insert(k);
     CHECK(fixture == code);
+    for (const char* k : kProfileUiKeys) CHECK_FALSE(IsGlobalProfileKey(k));
 }
 
 TEST_CASE("global keys are exactly profile/onboarded/uiTheme/uiPalette/showAdvanced") {
@@ -242,20 +246,83 @@ TEST_CASE("uiHighResNoticeOff is global: stripped from profiles, carried into th
     CHECK(live.find("uiHighResNoticeOff=1") != std::string::npos);
     CHECK(live.find("a=2") != std::string::npos);
 }
-TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits must not reload the core)") {
+TEST_CASE("StripUiOnlyKeys strips every UI-only key, never profile (tray edits must not reload the core)") {
     for (const char* k : kUiOnlyKeys) {
-        REQUIRE(IsGlobalProfileKey(k));
         const std::string line = std::string(k) + "=1\n";
         CHECK(StripUiOnlyKeys("maxLevel=8\n" + line) == "maxLevel=8\n");
         CHECK(StripUiOnlyKeys("maxLevel=8\n" + std::string(k) + "=2\n") == StripUiOnlyKeys("maxLevel=8\n" + line));
-        // The carry-over list in MakeLiveText keeps the live value across a profile switch; profiles never store it.
+        if (!IsGlobalProfileKey(k)) continue;   // the tray-menu keys are profile keys (below)
+        // The carry-over in MakeLiveText keeps the live value across a profile switch; profiles never store it.
         CHECK(ReadIniValues(MakeLiveText("", std::string(k) + "=0\n", "X"))[k] == "0");
         CHECK(MakeProfileText("maxLevel=8\n" + line).find(std::string(k) + "=") == std::string::npos);
     }
+    // The session colour keys are global but the core reads them: a change must reload it.
+    for (const char* k : kSessionKeys) CHECK(StripUiOnlyKeys(std::string(k) + "=5\n") == std::string(k) + "=5\n");
     // profile stays IN the fingerprint: a profile switch must still reload the core.
     CHECK(StripUiOnlyKeys("profile=A\n") != StripUiOnlyKeys("profile=B\n"));
     // Prefix siblings are different keys.
     CHECK(StripUiOnlyKeys("traySlidersX=1\n") == "traySlidersX=1\n");
+}
+
+TEST_CASE("tray menu keys travel with a profile and count as unsaved (2026-11-21)") {
+    CHECK(MakeProfileText("maxLevel=8\ntraySliders=panSpeed\n") == "maxLevel=8\ntraySliders=panSpeed\n");
+    // A switch brings the profile's tray menu, not the old live one.
+    const auto v = ReadIniValues(MakeLiveText("traySliders=panSpeed\n", "traySliders=maxLevel\n", "P"));
+    CHECK(v.at("traySliders") == "panSpeed");
+    CHECK(SessionDiffers("traySliders=panSpeed\n", "traySliders=maxLevel\n"));
+    CHECK(SessionDiffers("traySliders=panSpeed\n", ""));
+    // Ticking a slider and unticking it again writes the default back explicitly: not unsaved.
+    for (const auto& kv : TrayLayoutDefaults()) {
+        CHECK_FALSE(SessionDiffers(kv.first + "=" + kv.second + "\n", ""));
+        CHECK_FALSE(SessionDiffers("", kv.first + "=" + kv.second + "\n"));
+    }
+}
+TEST_CASE("TrayLayoutDefaults is what ParseTrayLayout reads from an ini without the tray keys") {
+    IniValues w;
+    WriteTrayLayout(ParseTrayLayout({}), w);
+    CHECK(w.size() == TrayLayoutDefaults().size());
+    for (const auto& kv : w) CHECK_MESSAGE(TrayLayoutDefaults().at(kv.first) == kv.second, kv.first);
+}
+TEST_CASE("AddMissingTrayKeys gives an older profile the live tray menu, once") {
+    const std::string live = "maxLevel=8\ntraySliders=panSpeed\ntraySliderOrder=panSpeed,maxLevel\n";
+    bool changed = false;
+    const std::string p = AddMissingTrayKeys("maxLevel=4\n", live, &changed);
+    CHECK(changed);
+    const auto v = ReadIniValues(p);
+    CHECK(v.at("maxLevel") == "4");
+    CHECK(v.at("traySliders") == "panSpeed");
+    CHECK(v.at("traySliderOrder") == "panSpeed,maxLevel");
+    CHECK(v.count("trayPerf") == 0);   // only what the live ini sets
+    // A profile that already has a tray key keeps its own layout.
+    CHECK(AddMissingTrayKeys("trayPerf=0\n", live, &changed) == "trayPerf=0\n");
+    CHECK_FALSE(changed);
+    // A live ini without tray keys (the default layout) changes nothing.
+    CHECK(AddMissingTrayKeys("maxLevel=4\n", "maxLevel=8\n", &changed) == "maxLevel=4\n");
+    CHECK_FALSE(changed);
+}
+TEST_CASE("screen colour is session-only: never saved, never unsaved, kept on a switch (2026-11-21)") {
+    for (const char* k : kSessionKeys) {
+        const std::string line = std::string(k) + "=40\n";
+        CHECK(IsGlobalProfileKey(k));
+        CHECK(MakeProfileText("maxLevel=8\n" + line) == "maxLevel=8\n");
+        CHECK_FALSE(SessionDiffers("maxLevel=8\n" + line, "maxLevel=8\n"));
+        // A switch keeps the live colour and ignores an old profile's saved one.
+        const auto v = ReadIniValues(MakeLiveText(std::string(k) + "=70\n", line, "P"));
+        CHECK(v.at(k) == "40");
+    }
+}
+TEST_CASE("ResetSessionKeys puts Warmth, Brightness and Saturation back to their defaults") {
+    const auto d = ReadIniValues(DefaultIniText());
+    for (const char* k : kSessionKeys) REQUIRE(d.count(k) == 1);
+    const std::string out = ResetSessionKeys("colorWarmPct=60\nmaxLevel=8\ncolorSatPct=40\n");
+    const auto v = ReadIniValues(out);
+    CHECK(v.at("colorWarmPct") == d.at("colorWarmPct"));
+    CHECK(v.at("colorSatPct") == d.at("colorSatPct"));
+    CHECK(v.at("maxLevel") == "8");
+    CHECK(v.count("colorDimPct") == 0);   // absent stays absent (it reads as the default)
+    CHECK(out.find("maxLevel=8") < out.find("colorSatPct="));   // edited in place, order kept
+    const std::string neutral = "colorWarmPct=" + d.at("colorWarmPct") + "\nzoomInSpeed=2\n";
+    CHECK(ResetSessionKeys(neutral) == neutral);
 }
 
 TEST_CASE("profile names: a device name is reserved with any extension, and the cap counts characters (review 2026-10-09 #73, #90)") {

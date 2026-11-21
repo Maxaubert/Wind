@@ -114,14 +114,25 @@ A profile is a named full snapshot of the settings, keybinds included, stored as
 `profiles\<Name>.ini` next to the resolved ini, with `profile=<name>` in the live ini. Pure logic is
 in `src/config/profiles.*` (tested); I/O in `src/config/profiles_io.h`.
 
-**Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile` plus the
-`kUiOnlyKeys` list (`src/config/profiles.h`): `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`,
-`trayPinned`, `uiHighResNoticeOff` and the five tray layout keys (`trayPerf`, `traySliders`,
-`traySliderOrder`, `trayToggles`, `trayToggleOrder`). `MakeProfileText` strips them from profile
-files; `MakeLiveText` carries them over from the old live text. Both work line by line and keep
-comments and order. `kUiOnlyKeys` is the only C++ copy of the list; the UI's `GLOBAL_KEYS`
-(`ui/src/session.js`) is pinned to it through `tests/fixtures/global_keys.txt`, which a doctest and
-a node test (`npm run test:rules`) both read.
+**Global keys never travel with a profile.** `IsGlobalProfileKey` (`src/config/profiles.h`) covers
+`profile`, the UI-only keys `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`, `trayPinned` and
+`uiHighResNoticeOff`, and the session-only screen colour `kSessionKeys` (`colorWarmPct`,
+`colorDimPct`, `colorSatPct`). `MakeProfileText` strips them from profile files; `MakeLiveText`
+carries them over from the old live text. Both work line by line and keep comments and order. The
+UI's `GLOBAL_KEYS` (`ui/src/session.js`) is pinned to the same set through
+`tests/fixtures/global_keys.txt`, which a doctest and a node test (`npm run test:rules`) both read.
+
+**The tray menu is saved with a profile** (2026-11-21). The five tray layout keys (`kProfileUiKeys`:
+`trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) are UI-only (no
+reload) but profile keys: editing the tray menu lights Save, and a switch brings that profile's
+tray menu. A side without them reads as the default layout (`TrayLayoutDefaults`). They were
+global before, so `MigrateIniFiles` gives every profile that has none of them the live ini's once
+(`AddMissingTrayKeys`), then marks the live ini with the global `trayInProfiles=1` so it never runs again.
+
+**Screen colour is session-only** (2026-11-21). Warmth, Brightness and Saturation apply at once but
+are never saved, never count as unsaved, and keep their value across a profile switch, a Discard
+and a self-triggered restart. A plain start puts them back to the template defaults
+(`ResetSessionKeys`, run by `ResetSessionToProfile`).
 
 **Session model: the live ini is the session, the profile file is the saved state.**
 
@@ -133,7 +144,7 @@ a node test (`npm run test:rules`) both read.
   built-in default when the first-run template carries it, so a tray slider dragged back to its
   default is not "unsaved" (`model` is excluded from that rule; keys outside the template stay
   missing-versus-present).
-- At start the core runs `ResetSessionToProfile`, so unsaved changes never survive a restart,
+- At start the core runs `ResetSessionToProfile`, so unsaved changes and the screen colour never survive a restart,
   unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (Restart Wind, or
   an engine change or profile switch with a model change while Wind runs one engine). It is
   consumed once.
@@ -220,7 +231,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `renderScaling` (0), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
-| `colorSatPct` (100) | Saturation, 20-150 (never 0: greyscale merges text colours); applied before warmth and brightness ([04](04-render-engine.md)) |
+| `colorSatPct` (100) | Session-only like warmth and brightness (reset at every start, never in a profile). Saturation, 20-150 (never 0: greyscale merges text colours); applied before warmth and brightness ([04](04-render-engine.md)) |
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter. Warmth 50 = 1200 K (Night light at full), 100 = pure red ([04](04-render-engine.md)). `colorWarmScale=2` marks the scale: at start, `MigrateWarmScale` halves `colorWarmPct` once in the live ini and every profile that lacks it (2026-11-21), so new profile seeds carry it |
 | `outline*` | Zoom outline |
 
@@ -237,11 +248,11 @@ failed to init.
 | `zorderBand` (0, restart) | 16 covers the shell in the UIAccess build, at the cost of the Snipping Tool ([04](04-render-engine.md)) |
 
 **Global and UI.** `profile`, `onboarded`, `uiPalette` (`grey`, `ember`, `ocean`, `hicon`),
-`showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`,
-`trayPinned` (1 = keep the tray icon on the taskbar, 0 = hidden-icons overflow; applied by WindTray),
+`showAdvanced`, `trayPinned` (1 = keep the tray icon on the taskbar, 0 = hidden-icons overflow; applied by WindTray),
 `uiHighResNoticeOff` (1 = the Smooth transform scaling notice is never shown; set by its
 "Don't show this again" box, #441).
-`uiTheme` is a legacy key, ignored.
+`uiTheme` is a legacy key, ignored. The tray layout keys `trayPerf`, `traySliders`,
+`traySliderOrder`, `trayToggles`, `trayToggleOrder` are UI-only but saved with a profile.
 
 **Transform and diagnostics.** Hot unless noted; the full text is on the `Config` field.
 

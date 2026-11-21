@@ -245,6 +245,10 @@ test('Screen light (in Preferences): warmth, brightness and saturation, neutral 
   await expect(sat).toHaveValue('100');
   await expect(sat).toHaveAttribute('min', '20');   // never greyscale
   await expect(sat).toHaveAttribute('max', '150');
+  // Session-only (2026-11-21): a change applies at once but never counts as unsaved.
+  await sat.fill('50');
+  await expect.poll(async () => (await sent(page, 'setConfig')).some((m) => m.key === 'colorSatPct' && String(m.value) === '50')).toBe(true);
+  await expect(page.locator('.capsule')).toHaveCount(0);
 });
 
 test('the save capsule reads on the dark surfaces', async ({ page }) => {

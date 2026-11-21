@@ -252,18 +252,27 @@ inline bool EnsureProfilesSeeded(const std::wstring& iniPath) {
 struct IniMigrationResult { int rewritten = 0; int blocked = 0; };
 inline IniMigrationResult MigrateIniFiles(const std::wstring& iniPath) {
     IniMigrationResult res;
-    auto one = [&](const std::wstring& path) {
+    // Tray-menu keys moved into profiles (2026-11-21): once, each profile without them takes the live
+    // layout, then the live ini gets the marker. Only when the live ini reads (a locked one waits).
+    std::string live;
+    const bool trayPending = ReadTextFileOk(iniPath, live) && !ReadIniValues(live).count(kTrayInProfilesKey);
+    auto one = [&](const std::wstring& path, bool isProfile) {
         std::string text;
         if (!ReadTextFileOk(path, text)) return;
         WheelMigration m = MigrateWheelMods(text);
         if (m.blocked) ++res.blocked;
-        bool warm = false;
+        bool warm = false, tray = false;
         m.text = MigrateWarmScale(m.text, &warm);
-        if ((m.changed || warm) && WriteTextFileAtomic(path, m.text)) ++res.rewritten;
+        if (trayPending && isProfile) m.text = AddMissingTrayKeys(m.text, live, &tray);
+        if ((m.changed || warm || tray) && WriteTextFileAtomic(path, m.text)) ++res.rewritten;
     };
-    one(iniPath);
     const std::wstring dir = ProfilesDirFromIni(iniPath);
-    for (const auto& n : ListProfileFiles(dir)) one(dir + L"\\" + n + L".ini");
+    for (const auto& n : ListProfileFiles(dir)) one(dir + L"\\" + n + L".ini", true);
+    one(iniPath, false);
+    if (trayPending) {
+        std::string now;
+        if (ReadTextFileOk(iniPath, now)) WriteTextFileAtomic(iniPath, UpdateIniText(now, kTrayInProfilesKey, "1"));
+    }
     return res;
 }
 // %LOCALAPPDATA%\Wind\session.keep: written by the host right before a restart Wind triggers itself
@@ -284,7 +293,8 @@ inline bool EngineSwitchesLive() {
 }
 
 // Settings session model: the live ini is the session, the active profile file is the saved state.
-// A plain start discards unsaved changes by rewriting the live ini from the profile (globals kept).
+// A plain start discards unsaved changes by rewriting the live ini from the profile (globals kept),
+// and puts the session-only screen colour (kSessionKeys) back to its defaults.
 // A self-triggered restart leaves session.keep behind; it is consumed here and the session survives.
 inline void ResetSessionToProfile(const std::wstring& iniPath) {
     std::wstring keep = SessionKeepPath();
@@ -294,13 +304,16 @@ inline void ResetSessionToProfile(const std::wstring& iniPath) {
     }
     std::string live;
     if (!ReadLiveIni(iniPath, live)) return;
-    auto vals = ReadIniValues(live);
+    std::string out = ResetSessionKeys(live);
+    auto vals = ReadIniValues(out);
     auto it = vals.find("profile");
-    if (it == vals.end() || it->second.empty()) return;
-    std::wstring pp = ProfilesDirFromIni(iniPath) + L"\\" + WidenUtf8(it->second) + L".ini";
-    std::string profile;
-    if (GetFileAttributesW(pp.c_str()) == INVALID_FILE_ATTRIBUTES || !ReadTextFileOk(pp, profile)) return;
-    if (!SessionDiffers(live, profile)) return;
-    WriteTextFileAtomic(iniPath, MakeLiveText(profile, live, it->second));
+    if (it != vals.end() && !it->second.empty()) {
+        std::wstring pp = ProfilesDirFromIni(iniPath) + L"\\" + WidenUtf8(it->second) + L".ini";
+        std::string profile;
+        if (GetFileAttributesW(pp.c_str()) != INVALID_FILE_ATTRIBUTES && ReadTextFileOk(pp, profile) &&
+            SessionDiffers(out, profile))
+            out = MakeLiveText(profile, out, it->second);
+    }
+    if (out != live) WriteTextFileAtomic(iniPath, out);
 }
 }  // namespace wind

@@ -431,8 +431,8 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         size_t b = line.find_first_not_of(" \t");
         bool uiOnly = false;
         if (b != std::string::npos) {
-            // The global keys minus "profile" (kUiOnlyKeys, src/config/profiles.h): a profile switch must
-            // still reload the core.
+            // The keys the core never reads (kUiOnlyKeys, src/config/profiles.h). `profile` is not one:
+            // a profile switch must still reload the core.
             for (const char* k : kUiOnlyKeys) {
                 const size_t n = strlen(k);
                 if (line.compare(b, n, k) == 0 && b + n < line.size() && line[b + n] == '=') { uiOnly = true; break; }
