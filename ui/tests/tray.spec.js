@@ -53,7 +53,7 @@ test('model: round trip keeps order and enabled, drops unknown keys, appends mis
   const v = { traySliders: 'zoomInSpeed,colorWarmPct,bogus', traySliderOrder: 'panSpeed,zoomInSpeed,nope,colorWarmPct',
               trayToggles: 'keepEdges', trayToggleOrder: 'keepEdges,trackCaret' };
   const s = parseList(v, 'sliders');
-  expect(s.map((i) => i.key)).toEqual(['panSpeed', 'zoomInSpeed', 'colorWarmPct', 'colorDimPct', 'maxLevel', 'zoomOutSpeed', 'panGlideMaxPx', 'zoomEaseOutMs']);
+  expect(s.map((i) => i.key)).toEqual(['panSpeed', 'zoomInSpeed', 'colorWarmPct', 'colorDimPct', 'colorSatPct', 'maxLevel', 'zoomOutSpeed', 'panGlideMaxPx', 'zoomEaseOutMs']);
   expect(s.filter((i) => i.on).map((i) => i.key)).toEqual(['zoomInSpeed', 'colorWarmPct']);
   const w = serialiseList('sliders', s);
   expect(w.traySliders).toBe('zoomInSpeed,colorWarmPct');
@@ -63,6 +63,15 @@ test('model: round trip keeps order and enabled, drops unknown keys, appends mis
   const t = parseList(v, 'toggles');
   expect(t.map((i) => i.key)).toEqual(['keepEdges', 'trackCaret', 'trackFocus', 'engine']);
   expect(t.filter((i) => i.on).map((i) => i.key)).toEqual(['keepEdges']);
+});
+
+test('model: Saturation joins a saved order next to Brightness, off, not at the bottom', () => {
+  const old = 'colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,panGlideMaxPx,zoomEaseOutMs';
+  const s = parseList({ traySliders: 'colorWarmPct,colorDimPct', traySliderOrder: old }, 'sliders');
+  expect(s.map((i) => i.key)).toEqual(SLIDERS.map((i) => i.key));
+  expect(s.filter((i) => i.on).map((i) => i.key)).toEqual(['colorWarmPct', 'colorDimPct']);
+  const moved = parseList({ traySliderOrder: 'maxLevel,colorWarmPct,panSpeed,colorDimPct,zoomInSpeed' }, 'sliders');
+  expect(moved.map((i) => i.key)).toEqual(['maxLevel', 'colorWarmPct', 'panSpeed', 'colorDimPct', 'colorSatPct', 'zoomInSpeed', 'zoomOutSpeed', 'panGlideMaxPx', 'zoomEaseOutMs']);
 });
 
 test('model: more than four enabled sliders read the first four as on, toggles are uncapped', () => {
@@ -87,7 +96,7 @@ test('tab: below the sidebar divider, banner, performance card and both lists', 
   await expect(page.getByRole('switch', { name: 'Performance in the tray' })).toBeChecked();   // on by default (#329)
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
-  expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Arrow key speed', 'Pan glide', 'Release glide']);
+  expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Saturation', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Arrow key speed', 'Pan glide', 'Release glide']);
   expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred', 'Engine']);
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('2 of 4');
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('4 on');   // every toggle on by default (#329)
@@ -101,7 +110,7 @@ test('tab: item icons are bare line icons without a background box', async ({ pa
   const st = await tic.evaluate((el) => { const c = getComputedStyle(el); return { bg: c.backgroundColor, bw: c.borderTopWidth, br: c.borderTopLeftRadius }; });
   expect(st.bg).toBe('rgba(0, 0, 0, 0)');
   expect(st.bw).toBe('0px');
-  expect(await page.locator('.tic svg').count()).toBe(12);
+  expect(await page.locator('.tic svg').count()).toBe(13);
 });
 
 test('performance switch writes trayPerf', async ({ page }) => {
@@ -118,7 +127,7 @@ test('check and uncheck write the enabled list and the full order', async ({ pag
   await chk(page, 'sliders', 'Arrow key speed').click();
   let v = await live(page);
   expect(v.traySliders).toBe('colorWarmPct,colorDimPct,panSpeed');
-  expect(v.traySliderOrder).toBe('colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,panGlideMaxPx,zoomEaseOutMs');
+  expect(v.traySliderOrder).toBe('colorWarmPct,colorDimPct,colorSatPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,panGlideMaxPx,zoomEaseOutMs');
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('3 of 4');
   await chk(page, 'sliders', 'Warmth').click();
   v = await live(page);
@@ -184,7 +193,7 @@ test('drag reorders the Sliders list and writes the order, enabled flags kept', 
 });
 
 test('drag reorders the Toggles list, and a row dragged in one list stays in it', async ({ page }) => {
-  await page.setViewportSize({ width: 1120, height: 1100 });   // the whole Sliders card in view: the drag spans all eight rows
+  await page.setViewportSize({ width: 1120, height: 1100 });   // the whole Sliders card in view: the drag spans all nine rows
   await open(page);
   await dragRow(page, 'toggles', 'Keep cursor centred', 'Follow the text cursor');
   await expect.poll(() => names(page, 'toggles')).toEqual(['Keep cursor centred', 'Follow the text cursor', 'Follow keyboard focus', 'Engine']);
@@ -193,7 +202,7 @@ test('drag reorders the Toggles list, and a row dragged in one list stays in it'
   await dragRow(page, 'sliders', 'Warmth', 'Release glide');
   await expect.poll(async () => (await names(page, 'sliders')).at(-1)).toBe('Warmth');
   expect(await rowsOf(page, 'toggles').count()).toBe(4);
-  expect(await rowsOf(page, 'sliders').count()).toBe(8);
+  expect(await rowsOf(page, 'sliders').count()).toBe(9);
   expect(await names(page, 'toggles')).toEqual(['Keep cursor centred', 'Follow the text cursor', 'Follow keyboard focus', 'Engine']);
 });
 
@@ -205,16 +214,16 @@ test('keyboard: Space picks up, arrows move, Space drops; Escape cancels', async
   await expect(grip('sliders', 'Warmth')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
-  await expect.poll(async () => (await names(page, 'sliders')).slice(0, 3)).toEqual(['Brightness', 'Max zoom', 'Warmth']);
+  await expect.poll(async () => (await names(page, 'sliders')).slice(0, 3)).toEqual(['Brightness', 'Saturation', 'Warmth']);
   await expect(grip('sliders', 'Warmth')).toBeFocused();
   await page.keyboard.press('Space');
   await expect(grip('sliders', 'Warmth')).toHaveAttribute('aria-pressed', 'false');
-  expect((await live(page)).traySliderOrder.split(',').slice(0, 3)).toEqual(['colorDimPct', 'maxLevel', 'colorWarmPct']);
+  expect((await live(page)).traySliderOrder.split(',').slice(0, 3)).toEqual(['colorDimPct', 'colorSatPct', 'colorWarmPct']);
   // Escape puts it back
   await page.keyboard.press('Space');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Escape');
-  await expect.poll(async () => (await names(page, 'sliders')).slice(0, 3)).toEqual(['Brightness', 'Max zoom', 'Warmth']);
+  await expect.poll(async () => (await names(page, 'sliders')).slice(0, 3)).toEqual(['Brightness', 'Saturation', 'Warmth']);
   // toggles list: move the last one to the top
   await grip('toggles', 'Keep cursor centred').focus();
   await page.keyboard.press('Space');

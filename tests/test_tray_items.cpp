@@ -29,7 +29,7 @@ TEST_CASE("tray layout: an explicit trayPerf=0 and an empty toggle list still hi
 }
 
 TEST_CASE("eligible lists match the owner's choice") {
-    CHECK(EligibleSliders() == V{"colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed",
+    CHECK(EligibleSliders() == V{"colorWarmPct", "colorDimPct", "colorSatPct", "maxLevel", "zoomInSpeed",
                                  "zoomOutSpeed", "panSpeed", "panGlideMaxPx", "zoomEaseOutMs"});
     CHECK(EligibleToggles() == V{"trackCaret", "trackFocus", "keepEdges", "engine"});
 }
@@ -37,7 +37,8 @@ TEST_CASE("eligible lists match the owner's choice") {
 TEST_CASE("tray layout round trip keeps order and enabled state") {
     TrayLayout l = ParseTrayLayout({});
     // Move panSpeed to the front, enable it, disable warmth; enable two toggles in a custom order.
-    l.sliders = {{"panSpeed", true}, {"colorDimPct", true}, {"colorWarmPct", false}, {"maxLevel", true},
+    l.sliders = {{"panSpeed", true}, {"colorDimPct", true}, {"colorWarmPct", false},
+                 {"colorSatPct", false}, {"maxLevel", true},
                  {"zoomInSpeed", false}, {"zoomOutSpeed", false}, {"panGlideMaxPx", false},
                  {"zoomEaseOutMs", false}};
     l.toggles = {{"keepEdges", true}, {"trackCaret", false}, {"trackFocus", true}, {"engine", false}};
@@ -82,11 +83,31 @@ TEST_CASE("unknown keys are dropped and missing eligible items appended off") {
     v["trayToggleOrder"] = "trackFocus";
     TrayLayout l = ParseTrayLayout(v);
     CHECK(Keys(l.sliders, false) ==
-          V{"zoomInSpeed", "panSpeed", "colorWarmPct", "colorDimPct", "maxLevel", "zoomOutSpeed",
-            "panGlideMaxPx", "zoomEaseOutMs"});
+          V{"zoomInSpeed", "panSpeed", "colorWarmPct", "colorDimPct", "colorSatPct", "maxLevel",
+            "zoomOutSpeed", "panGlideMaxPx", "zoomEaseOutMs"});
     CHECK(Keys(l.sliders, true) == V{"panSpeed", "colorWarmPct"});
     CHECK(Keys(l.toggles, false) == V{"trackFocus", "trackCaret", "keepEdges", "engine"});
     CHECK(Keys(l.toggles, true) == V{"trackFocus"});
+}
+
+TEST_CASE("Saturation joins a saved order next to Brightness, off, not at the bottom") {
+    IniValues v;
+    v["traySliders"] = "colorWarmPct,colorDimPct";
+    v["traySliderOrder"] = "colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,"
+                           "panGlideMaxPx,zoomEaseOutMs";
+    TrayLayout l = ParseTrayLayout(v);
+    CHECK(Keys(l.sliders, false) == EligibleSliders());
+    CHECK(Keys(l.sliders, true) == V{"colorWarmPct", "colorDimPct"});
+    // Brightness dragged down: Saturation follows it there.
+    v["traySliderOrder"] = "maxLevel,colorWarmPct,panSpeed,colorDimPct,zoomInSpeed";
+    l = ParseTrayLayout(v);
+    CHECK(Keys(l.sliders, false) == V{"maxLevel", "colorWarmPct", "panSpeed", "colorDimPct", "colorSatPct",
+                                      "zoomInSpeed", "zoomOutSpeed", "panGlideMaxPx", "zoomEaseOutMs"});
+    // No Brightness in a hand-edited order (it comes from the enabled list): still right after it.
+    v["traySliders"] = "panSpeed,colorDimPct";
+    v["traySliderOrder"] = "panSpeed";
+    l = ParseTrayLayout(v);
+    CHECK(Keys(l.sliders, false)[2] == "colorSatPct");
 }
 
 TEST_CASE("an order key missing from the file falls back to the enabled list's order") {

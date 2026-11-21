@@ -11,6 +11,8 @@ export const MAX_SLIDERS = 4;
 export const SLIDERS = [
   { key: 'colorWarmPct', icon: 'warm', name: 'Warmth', desc: 'Screen warmth' },
   { key: 'colorDimPct', icon: 'bright', name: 'Brightness', desc: 'Screen brightness' },
+  // `after`: added after the list shipped; a saved order without it gets it next to that item (JoinAfter in tray_items.cpp).
+  { key: 'colorSatPct', icon: 'sat', name: 'Saturation', desc: 'Screen colour strength', after: 'colorDimPct' },
   { key: 'maxLevel', icon: 'maxz', name: 'Max zoom', desc: 'The highest zoom level' },
   { key: 'zoomInSpeed', icon: 'zin', name: 'Zoom-in speed', desc: 'How fast the view zooms in' },
   { key: 'zoomOutSpeed', icon: 'zout', name: 'Zoom-out speed', desc: 'How fast the view zooms out' },
@@ -34,7 +36,7 @@ const KINDS = {
 const split = (s) => String(s).split(',').map((t) => t.trim()).filter(Boolean);
 
 // Order = the order key's known items, then the enabled list's known items not yet seen, then every
-// remaining eligible item. Enabled = the enabled list (the defaults when its key is absent); enabled
+// remaining eligible item: after its `after` neighbour when that is in the order, else at the end. Enabled = the enabled list (the defaults when its key is absent); enabled
 // items beyond the cap read as off, in list order. Returns [{ ...itemMeta, on }].
 export function parseList(values, kind) {
   const k = KINDS[kind];
@@ -45,7 +47,12 @@ export function parseList(values, kind) {
   const add = (key) => { if (eligible.includes(key) && !order.includes(key)) order.push(key); };
   if (od !== undefined && od !== null) split(od).forEach(add);
   enabled.forEach(add);
-  eligible.forEach(add);
+  k.items.forEach(({ key, after }) => {
+    if (order.includes(key)) return;
+    const at = after ? order.indexOf(after) : -1;
+    if (at >= 0) order.splice(at + 1, 0, key);
+    else order.push(key);
+  });
   let on = 0;
   return order.map((key) => {
     const meta = k.items.find((i) => i.key === key);

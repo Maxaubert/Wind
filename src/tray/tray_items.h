@@ -33,7 +33,8 @@ const std::vector<std::string>& EligibleSliders();
 const std::vector<std::string>& EligibleToggles();
 
 // Missing keys give the defaults (Performance off; Warmth and Brightness on; toggles off). Unknown
-// keys are dropped, eligible items missing from the order are appended off, and enabled sliders
+// keys are dropped, eligible items missing from the order are appended off (an item added later,
+// such as Saturation, goes after its neighbour instead; JoinAfter in tray_items.cpp), and enabled sliders
 // beyond kMaxTraySliders are read as off.
 TrayLayout ParseTrayLayout(const IniValues& v);
 // Sets the five keys; other entries are untouched.

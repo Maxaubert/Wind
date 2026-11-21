@@ -5,8 +5,8 @@
 #include <algorithm>
 namespace wind {
 const std::vector<std::string>& EligibleSliders() {
-    static const std::vector<std::string> k = {"colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed",
-                                               "zoomOutSpeed", "panSpeed", "panGlideMaxPx", "zoomEaseOutMs"};
+    static const std::vector<std::string> k = {"colorWarmPct", "colorDimPct", "colorSatPct", "maxLevel",
+                                               "zoomInSpeed", "zoomOutSpeed", "panSpeed", "panGlideMaxPx", "zoomEaseOutMs"};
     return k;
 }
 const std::vector<std::string>& EligibleToggles() {
@@ -34,8 +34,16 @@ static const std::string* Find(const IniValues& v, const char* key) {
     return it == v.end() ? nullptr : &it->second;
 }
 
+// Items added to an eligible list after it shipped, with the item they sit after. A saved order from
+// before the item existed gets it next to that neighbour, not at the bottom of the list.
+static const char* JoinAfter(const std::string& k) {
+    if (k == "colorSatPct") return "colorDimPct";   // Saturation joins Warmth and Brightness
+    return nullptr;
+}
+
 // Order = the order key's known items, then the enabled list's known items not yet seen, then every
-// remaining eligible item. Enabled = the enabled list (defaults when its key is absent).
+// remaining eligible item: after its JoinAfter neighbour when that is in the order, else at the end.
+// Enabled = the enabled list (defaults when its key is absent).
 static std::vector<TrayItem> ParseList(const IniValues& v, const char* enabledKey, const char* orderKey,
                                        const std::vector<std::string>& eligible,
                                        const std::vector<std::string>& defaultOn, int cap) {
@@ -48,7 +56,13 @@ static std::vector<TrayItem> ParseList(const IniValues& v, const char* enabledKe
     };
     if (od) for (const auto& k : SplitList(*od)) add(k);
     for (const auto& k : enabled) add(k);
-    for (const auto& k : eligible) add(k);
+    for (const auto& k : eligible) {
+        if (Has(order, k)) continue;
+        const char* after = JoinAfter(k);
+        auto at = after ? std::find(order.begin(), order.end(), after) : order.end();
+        if (at != order.end()) order.insert(at + 1, k);
+        else order.push_back(k);
+    }
     std::vector<TrayItem> out;
     int on = 0;
     for (const auto& k : order) {
