@@ -179,7 +179,9 @@ sequenceDiagram
 toggle turns the Performance header on; two cards, Sliders (up to 4) and Toggles, list the eligible
 items with a drag handle, icon, name, description and a check button. Rows reorder inside their
 card by pointer drag, or with the keyboard: Space to pick up and drop, arrows to move. The keys are
-global, not profile keys. Spec:
+global, not profile keys. An item added to a list later (Saturation, `colorSatPct`) carries the item
+it sits after (`after` in `trayModel.js`, `JoinAfter` in `tray_items.cpp`), so a saved order from
+before it existed shows it next to that item, off, instead of at the bottom. Spec:
 [../specs/2026-10-01-tray-flyout-design.md](../specs/2026-10-01-tray-flyout-design.md).
 
 ## Pin to taskbar
