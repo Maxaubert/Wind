@@ -185,10 +185,13 @@ tonemaps to SDR (`hdrTonemap=1`, default).
 
 ## Colour filters
 
-Warmth and brightness (`colorWarmPct`, `colorDimPct`) are one colour matrix (`src/color/color_matrix.h`),
+Warmth, brightness and saturation (`colorWarmPct`, `colorDimPct`, `colorSatPct`) are one colour matrix (`src/color/color_matrix.h`),
 applied by `ColorFilterController` (`src/color/color_filter.*`) through `MagSetFullscreenColorEffect`.
 Warmth 0-50% is Night light's scale (6500 K to 1200 K, linear in Kelvin); 50-100% fades the last
 green out evenly in sRGB terms, so 100% is pure red (owner 2026-11-21: "make it go further").
+Saturation (20-150%) is applied first: each channel moves toward or away from the pixel's Rec.709
+luma, then warmth and brightness scale the channels. It stops at 20% because greyscale merges text
+colours of equal brightness (`docs/COLOUR-FILTER-FINDINGS.md`).
 
 - **Desktop Duplication sees the DWM effect.** While a render session is visible the DWM effect is
   set to identity and the render shader applies the matrix instead; otherwise the overlay would be

@@ -375,7 +375,7 @@ test('Troubleshooting is always there, and the advanced switch is the last row o
   await go(page, 'prefs');
   await expect(page.locator('main .cap')).toHaveText(['General', 'Screen light', 'Troubleshooting']);
   await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Theme', 'Profile', 'Pin to taskbar', 'Show advanced settings']);
-  await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Warmth', 'Brightness']);
+  await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Warmth', 'Brightness', 'Saturation']);
   await expect(page.locator('main .card').nth(2).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
 });
 

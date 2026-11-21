@@ -256,6 +256,7 @@ constexpr ValueRow kValueRows[] = {
     DblRange("brightness", &Config::brightness, 0.5, 1.5),
     IntRange("colorWarmPct", &Config::colorWarmPct, 0, 100),
     IntRange("colorDimPct", &Config::colorDimPct, 1, 100),
+    IntRange("colorSatPct", &Config::colorSatPct, 20, 150),
     IntRow("hdrTonemap", &Config::hdrTonemap),
     IntRow("multiMonitor", &Config::multiMonitor),
     IntRow("cropCapture", &Config::cropCapture),
@@ -638,6 +639,8 @@ std::string DefaultIniText() {
                "; colorWarmScale: which warmth scale this file uses; leave it at 2 (without it Wind halves colorWarmPct once)\n"
                "colorWarmPct=0\ncolorWarmScale=2\n"
                "colorDimPct=100\n"
+               "; colorSatPct: saturation (20-150, 100 = normal; below 100 calmer colours, above stronger)\n"
+               "colorSatPct=100\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
                "; model: transform = DWM fullscreen transform (default; the compositor zooms, smooth\n"

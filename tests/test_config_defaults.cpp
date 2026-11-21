@@ -48,7 +48,7 @@ const Field kFields[] = {
     F(zoomEaseOutMs), F(vsync), F(dwmFlush), F(diagnostics), F(cursorSensitivity), F(panGlideMaxPx),
     F(gameCursorLagMs), F(cursorConstantSize), F(trayPinned), F(cursorVisibility), F(model),
     F(fastPan), F(smoothPan), F(magInputTransform), F(bilinear), F(renderScaling), F(upscaleTiming),
-    F(sharpness), F(zorderBand), F(brightness), F(colorWarmPct), F(colorDimPct), F(hdrTonemap),
+    F(sharpness), F(zorderBand), F(brightness), F(colorWarmPct), F(colorDimPct), F(colorSatPct), F(hdrTonemap),
     F(multiMonitor), F(cropCapture), F(lowGpuPriority), F(gpuPriority), F(gameCrop), F(tdrTest),
     F(probeClicks), F(desktopTransform), F(cursorBandAuto),
     F(trackCaret), F(trackFocus), F(trackJava), F(trackAlign), F(mouseAlign), F(trackGlideMs), F(trackMarginPct),

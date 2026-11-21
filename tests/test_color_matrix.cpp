@@ -44,6 +44,31 @@ TEST_CASE("blackbody gains: white at 6500 K, blue gone first, CIE values at 1200
     KelvinGainsLinear(99999, r, g, b); CHECK(b == doctest::Approx(1.0));   // clamps to the table
     KelvinGainsLinear(0, r, g, b);     CHECK(b == doctest::Approx(0.0));
 }
+TEST_CASE("saturation: 100% is the identity, greys stay grey, the range is 20-150%") {
+    CHECK(IsIdentity(BuildColorMatrix(0.0, 1.0, false, 1.0)));
+    CHECK(IsIdentity(BuildColorMatrix(0.0, 1.0, true, 1.0)));
+    CHECK_FALSE(IsIdentity(BuildColorMatrix(0.0, 1.0, false, 0.5)));
+    double r, g, b;
+    const double sats[] = { 0.2, 0.5, 1.5 };
+    for (double s : sats) {                                    // a grey has no colour to move
+        ApplyToRgb(BuildColorMatrix(0.0, 1.0, false, s), 0.4, 0.4, 0.4, r, g, b);
+        CHECK(r == doctest::Approx(0.4)); CHECK(g == doctest::Approx(0.4)); CHECK(b == doctest::Approx(0.4));
+    }
+    // Pure red at 50%: halfway to its luma (0.2126), in every channel.
+    ApplyToRgb(BuildColorMatrix(0.0, 1.0, false, 0.5), 1, 0, 0, r, g, b);
+    CHECK(r == doctest::Approx(0.5 + 0.5 * kLumaR)); CHECK(g == doctest::Approx(0.5 * kLumaR)); CHECK(b == doctest::Approx(0.5 * kLumaR));
+    // Clamped: 0 reads as the 20% floor (never greyscale), 3 as the 150% ceiling.
+    CHECK(SameMatrix(BuildColorMatrix(0.0, 1.0, false, 0.0), BuildColorMatrix(0.0, 1.0, false, 0.2)));
+    CHECK(SameMatrix(BuildColorMatrix(0.0, 1.0, false, 3.0), BuildColorMatrix(0.0, 1.0, false, 1.5)));
+    // Saturation first, then warmth and dim: the warm gains scale the desaturated colour.
+    double wr, wg, wb;
+    ApplyToRgb(BuildColorMatrix(0.5, 0.8, false, 1.0), 0.3, 0.6, 0.9, wr, wg, wb);
+    double sr, sg, sb;
+    ApplyToRgb(BuildColorMatrix(0.0, 1.0, false, 0.5), 0.3, 0.6, 0.9, sr, sg, sb);
+    ApplyToRgb(BuildColorMatrix(0.5, 0.8, false, 0.5), 0.3, 0.6, 0.9, r, g, b);
+    const ColorMatrix wm = BuildColorMatrix(0.5, 0.8, false, 1.0);
+    CHECK(r == doctest::Approx(sr * wm.m[0][0])); CHECK(g == doctest::Approx(sg * wm.m[1][1])); CHECK(b == doctest::Approx(sb * wm.m[2][2]));
+}
 TEST_CASE("HDR (linear) and SDR (encoded) warmth are the same colour, not the same number") {
     double lr, lg, lb, er, eg, eb;
     ApplyToRgb(BuildColorMatrix(0.5, 1.0, true), 1, 1, 1, lr, lg, lb);    // 1200 K
