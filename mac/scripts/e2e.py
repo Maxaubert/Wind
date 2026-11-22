@@ -71,9 +71,16 @@ check("zoom out ends at 1x", s["level"] == 1 and s["sky"]["scale"] == 1, f"level
 # Colour filter: the display's transfer formula follows warmth and dim, and resets when off.
 def gamma():
     return [float(x) for x in subprocess.check_output(["python3", os.path.join(ROOT, "scripts/gamma.py")], text=True).split()]
-saved = set_config(warmthPct=50, dimPct=100); time.sleep(0.4)
+# Gains from tests/fixtures/shared/color_cases.txt (the Windows scale, #597): 25% = 3850 K, 50% = 1200 K, 100% = red.
+saved = set_config(warmthPct=25, dimPct=100); time.sleep(0.4)
 g = gamma()
-check("warmth lowers blue more than green", g[0] == 1 and 0.6 < g[2] < g[1] < 1, f"rgb max {g}")
+check("warmth 25% is 3850 K", all(abs(x - y) < 0.01 for x, y in zip(g, (1, 0.8394, 0.6222))), f"rgb max {g}")
+set_config(warmthPct=50, dimPct=100); time.sleep(0.4)
+g = gamma()
+check("warmth 50% is 1200 K: no blue, a little green", all(abs(x - y) < 0.01 for x, y in zip(g, (1, 0.3083, 0))), f"rgb max {g}")
+set_config(warmthPct=100, dimPct=80); time.sleep(0.4)
+g = gamma()
+check("warmth 100% is pure red, dimmed", all(abs(x - y) < 0.01 for x, y in zip(g, (0.8, 0, 0))), f"rgb max {g}")
 set_config(warmthPct=0, dimPct=60); time.sleep(0.4)
 g = gamma()
 check("dim scales all channels", all(abs(x - 0.6) < 0.01 for x in g), f"rgb max {g}")

@@ -60,7 +60,7 @@ public struct Config: Codable, Equatable {
     public var trackMarginPct = 15.0
 
     // Colour.
-    public var warmthPct = 0.0                    // 0 = off, 100 = strongest
+    public var warmthPct = 0.0                    // 0 = off, 50 = 1200 K (Night light at full), 100 = pure red (ColorMath.swift)
     public var dimPct = 100.0                     // 100 = no dimming
 
     /// macOS slows the pointer by the zoom level (it moves in screen space). true = Wind's

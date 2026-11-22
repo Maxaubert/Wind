@@ -1859,14 +1859,17 @@ final class Magnifier {
 enum ColorFilter {
     private static var active = false
 
-    /// Warmth lowers blue (and some green) at the top of the transfer curve; dim scales all three.
+    /// Warmth follows the Windows scale (#597, WindCore/ColorMath.swift): 0-50% is Night light's 6500 K to
+    /// 1200 K, 50-100% fades the last green out to pure red. Each channel's sRGB-encoded gain times dim is
+    /// the top of its transfer curve (the formula acts on encoded framebuffer values, like Windows' SDR matrix).
     static func apply(warmthPct: Double, dimPct: Double) {
         let w = warmthPct / 100, d = dimPct / 100
         if w <= 0 && d >= 1 {
             if active { restore() }
             return
         }
-        let r = Float(d), g = Float(d * (1 - 0.22 * w)), b = Float(d * (1 - 0.62 * w))
+        let gain = warmGainsSrgb(warm01: w, dim01: d)
+        let r = Float(gain.r), g = Float(gain.g), b = Float(gain.b)
         var count: UInt32 = 0
         CGGetOnlineDisplayList(0, nil, &count)
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))

@@ -2,13 +2,14 @@
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The cases Wind shares with Wind for Mac (tests/fixtures/shared/, also read by
 // mac/Tests/WindCoreChecks/SharedFixtures.swift): view geometry, the zoom controller, the view
-// owner and the caret filter, whose Swift code is a port of this. Rows tagged all or win run here; mac rows are the Mac's.
+// owner, the caret filter and the colour filter's gains, whose Swift code is a port of this. Rows tagged all or win run here; mac rows are the Mac's.
 // The file headers give the formats.
 //
 // Windows is the origin, so the all and win rows' expected values come from this code. After an
 // intended change, regenerate them and let the Mac follow:
 //   set WIND_UPDATE_FIXTURES=1 && build.bat test
 #include "doctest.h"
+#include "color_matrix.h"
 #include "edge_pan.h"
 #include "keyboard_pan.h"
 #include "track_filter.h"
@@ -122,6 +123,23 @@ Tokens EvalPlain(const std::string& fn, const Tokens& a) {
         need(4);
         const QuickZoomResult r = ApplyQuickZoom(d(0), d(1), d(2), d(3));
         return { Num(r.newLevel), Num(r.newStored) };
+    }
+    // Colour (color_cases.txt): warmth gains, linear and sRGB-encoded.
+    if (fn == "kelvin") {
+        need(1);
+        double r, g, b; KelvinGainsLinear(d(0), r, g, b);
+        return { Num(r), Num(g), Num(b) };
+    }
+    if (fn == "warmk") { need(1); return { Num(WarmKelvin(d(0))) }; }
+    if (fn == "warm") {
+        need(1);
+        double r, g, b; WarmGainsLinear(d(0), r, g, b);
+        return { Num(r), Num(g), Num(b) };
+    }
+    if (fn == "gains") {   // the SDR matrix's diagonal: what the Mac's display transfer formula uses
+        need(2);
+        const ColorMatrix m = BuildColorMatrix(d(0), d(1), false);
+        return { Num(m.m[0][0]), Num(m.m[1][1]), Num(m.m[2][2]) };
     }
     throw std::invalid_argument("unknown function " + fn);
 }
@@ -294,4 +312,8 @@ TEST_CASE("the view owner matches the cases shared with the Mac") {
 }
 TEST_CASE("the caret filter matches the cases shared with the Mac") {
     CHECK(RunSharedFile("caret_cases.txt") >= 17);
+}
+
+TEST_CASE("the colour filter's gains match the cases shared with the Mac") {
+    CHECK(RunSharedFile("color_cases.txt") >= 40);
 }

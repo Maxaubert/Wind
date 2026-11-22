@@ -615,6 +615,11 @@ when it never settles), so the view follows where the cursor settles. The view-o
   cannot take focus, and disassociation only applies to the frontmost app. Skipped while the screen
   is locked (`loginwindow` in front).
 - The colour filter is checked by reading the display transfer formula back (`scripts/gamma.py`).
+  It is the display transfer formula (`CGSetDisplayTransferByFormula`, `ColorFilter` in `Magnifier.swift`): each
+  channel's max is its warmth gain, sRGB-encoded, times brightness. Warmth follows the Windows scale (#597,
+  `WindCore/ColorMath.swift`, a port of `src/color/color_matrix.h`): 0-50% is Night light's 6500 K to 1200 K,
+  linear in Kelvin; 50-100% fades the last green out evenly in sRGB terms, so 100% is pure red. Both
+  platforms check the gains against `tests/fixtures/shared/color_cases.txt`.
 - The Settings window (a WKWebView page) is checked by `scripts/e2e_settings.py`: the test-only
   channel command `settings js <base64>` runs JavaScript in the page and writes the result to
   `js.json`; the script then reads config.json and the config Wind runs on (`config` in state.json).
