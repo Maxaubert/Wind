@@ -59,7 +59,7 @@ public struct Config: Codable, Equatable {
     public var hidePointerWhileTracking = true    // hide the pointer while the caret owns the view
     public var trackMarginPct = 15.0
 
-    // Colour.
+    // Colour: session-only (#601), reset in config.json at every plain start (SessionColour.swift).
     public var warmthPct = 0.0                    // 0 = off, 50 = 1200 K (Night light at full), 100 = pure red (ColorMath.swift)
     public var dimPct = 100.0                     // 100 = no dimming
 

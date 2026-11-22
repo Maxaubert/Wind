@@ -4,10 +4,10 @@
 """End-to-end checks against the running, installed Wind (it must have the Accessibility grant).
 Drives it through the command channel: synthetic input goes through Wind's real event tap.
 The screen visibly zooms while this runs. Exit 0 = every check passed."""
-import os, sys, time
+import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import subprocess
-from windtest import ROOT, ctl, check, finish, relaunch_with_channel, set_config
+from windtest import D, ROOT, ctl, check, finish, kill_all_wind, relaunch_with_channel, set_config
 
 relaunch_with_channel()
 
@@ -87,6 +87,26 @@ check("dim scales all channels", all(abs(x - 0.6) < 0.01 for x in g), f"rgb max 
 set_config(warmthPct=0, dimPct=100); time.sleep(0.4)
 g = gamma()
 check("filter off restores the display", all(abs(x - 1) < 0.01 for x in g), f"rgb max {g}")
+set_config(**saved)
+
+# The screen colour is session-only (#601): a plain start puts Warmth and Brightness back to their
+# defaults in config.json, a relaunch Wind caused itself (--keep-colour, or the marker a quit after a
+# permission request leaves) keeps them.
+def restart(*args):
+    kill_all_wind()
+    subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")] + (["--args", *args] if args else []))
+    time.sleep(2.0)
+    with open(os.path.join(D, "config.json")) as f: c = json.load(f)
+    return c, ctl("state")["config"]
+saved = set_config(warmthPct=30, dimPct=70)
+c, run = restart("--keep-colour")
+check("a self-triggered relaunch keeps the screen colour", c.get("warmthPct") == 30 and c.get("dimPct") == 70
+      and run["warmthPct"] == 30 and run["dimPct"] == 70, f"file {c.get('warmthPct')}/{c.get('dimPct')}, running {run['warmthPct']}/{run['dimPct']}")
+c, run = restart()
+check("a plain start resets the screen colour", c.get("warmthPct") == 0 and c.get("dimPct") == 100
+      and run["warmthPct"] == 0 and run["dimPct"] == 100, f"file {c.get('warmthPct')}/{c.get('dimPct')}, running {run['warmthPct']}/{run['dimPct']}")
+g = gamma()
+check("the reset colour reaches the display", all(abs(x - 1) < 0.01 for x in g), f"rgb max {g}")
 set_config(**saved)
 
 # The settings window (the web page) has its own suite: scripts/e2e_settings.py.

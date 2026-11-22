@@ -158,9 +158,10 @@ export const groups = [
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', keywords: ['expert', 'extra', 'more', 'hidden', 'options', 'all settings', 'power user', 'developer', 'reveal', 'show all', 'additional', 'engine'], desc: 'Shows extra options on every page', def: 0 },
       ] },
       { caption: 'Screen light', rows: [
+        // warmthPct and dimPct are session-only (#601, WindCore/SessionColour.swift): reset at every plain start.
         // warmthPct: Windows' scale (#597, WindCore/ColorMath.swift): 50% = 1200 K (Night light at full), 100% = pure red.
-        { key: 'warmthPct', type: 'slider', label: 'Warmth', keywords: ['night light', 'night shift', 'blue light', 'yellow', 'orange', 'warm', 'colour temperature', 'color temperature', 'temperature', 'eye strain', 'tint', 'filter', 'evening', 'sleep', 'amber', 'red', 'colour', 'color', 'reduce blue', 'kelvin'], desc: 'Makes the screen warmer, red at 100%', min: 0, max: 100, step: 5, def: 0, unit: '%' },
-        { key: 'dimPct', type: 'slider', label: 'Brightness', keywords: ['dim', 'dark', 'darker', 'dimmer', 'light', 'luminance', 'backlight', 'night', 'screen', 'intensity', 'contrast', 'colour', 'color', 'lower', 'reduce'], desc: 'Dims the whole screen', min: 10, max: 100, step: 5, def: 100, unit: '%' },
+        { key: 'warmthPct', type: 'slider', label: 'Warmth', keywords: ['night light', 'night shift', 'blue light', 'yellow', 'orange', 'warm', 'colour temperature', 'color temperature', 'temperature', 'eye strain', 'tint', 'filter', 'evening', 'sleep', 'amber', 'red', 'colour', 'color', 'reduce blue', 'kelvin'], desc: 'Warmer screen, red at 100%. Off again at every start', min: 0, max: 100, step: 5, def: 0, unit: '%' },
+        { key: 'dimPct', type: 'slider', label: 'Brightness', keywords: ['dim', 'dark', 'darker', 'dimmer', 'light', 'luminance', 'backlight', 'night', 'screen', 'intensity', 'contrast', 'colour', 'color', 'lower', 'reduce'], desc: 'Dims the whole screen. Full again at every start', min: 10, max: 100, step: 5, def: 100, unit: '%' },
       ] },
       // Mac status (getMacStatus / macStatus pushes) and the fixes (macAction).
       { caption: 'macOS', rows: [
