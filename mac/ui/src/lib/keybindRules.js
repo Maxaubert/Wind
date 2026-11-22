@@ -76,8 +76,8 @@ export const splitBinds = (v) => String(v ?? '').split(',').map((s) => s.trim())
 
 // Stored binds Wind ignores (unreadable text, a modifier-only action bind, or a refused bind).
 // Returns [{ label, key, keys: [key], binds: ['opt+a'], patch: { [key]: '<the list without them>' } }];
-// the caller applies `patch` (an empty string clears the list). wheelZoomMods is checked too: it must
-// be modifiers only.
+// the caller applies `patch` (an empty string clears the list). wheelZoomMods and wheelZoomMods2 are
+// checked too: they must be modifiers only.
 export function droppedBinds(cfg) {
   const out = [];
   for (const [key, label] of BIND_KEYS) {
@@ -85,11 +85,12 @@ export function droppedBinds(cfg) {
     const bad = list.filter((t) => { const b = parseBind(t); return !b || (b.key === undefined && b.mouse === undefined) || bindVerdict(b) !== 'ok'; });
     if (bad.length) out.push({ label, key, keys: [key], binds: bad, patch: { [key]: list.filter((t) => !bad.includes(t)).join(',') } });
   }
-  const w = String(cfg.wheelZoomMods ?? '');
-  if (w) {
+  for (const [key, label] of [['wheelZoomMods', 'Zoom with the scroll wheel'], ['wheelZoomMods2', 'Or zoom with']]) {
+    const w = String(cfg[key] ?? '');
+    if (!w) continue;
     const b = parseBind(w);
     if (!b || b.key !== undefined || b.mouse !== undefined)
-      out.push({ label: 'Zoom with the scroll wheel', key: 'wheelZoomMods', keys: ['wheelZoomMods'], binds: [w], patch: { wheelZoomMods: '' } });
+      out.push({ label, key, keys: [key], binds: [w], patch: { [key]: '' } });
   }
   return out;
 }

@@ -13,7 +13,8 @@ public struct Config: Codable, Equatable {
     public var zoomIn: [String] = []
     public var zoomOut: [String] = []
     public var wheelZoomMods = "ctrl"            // modifier(s) + scroll wheel/trackpad zooms; "" = off
-    public var wheelZoomSpeed = 0.6               // zoom per wheel notch, relative to the hold speed
+    public var wheelZoomMods2 = ""                // a second, independent set that also zooms (owner 2026-11-22); "" = none
+    public var wheelZoomSpeed = 0.4               // zoom per wheel notch, relative to the hold speed (0.05-0.5, owner 2026-11-22)
     public var quickZoom: [String] = []
     public var panLeft = ["ctrl+opt+left"]
     public var panRight = ["ctrl+opt+right"]
@@ -123,7 +124,7 @@ public struct Config: Codable, Equatable {
         maxLevel = min(64, max(1.5, maxLevel))
         zoomInSpeed = min(4, max(0.25, zoomInSpeed))
         zoomOutSpeed = min(4, max(0.25, zoomOutSpeed))
-        wheelZoomSpeed = min(3, max(0.1, wheelZoomSpeed))
+        wheelZoomSpeed = min(0.5, max(0.05, wheelZoomSpeed))
         smoothZoomAccel = min(10, max(1, smoothZoomAccel))
         smoothZoomRamp = min(3, max(0, smoothZoomRamp))
         zoomEaseOutMs = min(1000, max(0, zoomEaseOutMs))
@@ -168,9 +169,19 @@ public struct Config: Codable, Equatable {
         return (out, problems)
     }
 
-    public var wheelMods: Mods? {
-        if wheelZoomMods.isEmpty { return nil }
-        guard let b = parseBind(wheelZoomMods), b.trigger == .none else { return nil }
+    public var wheelMods: Mods? { Config.wheelModsOf(wheelZoomMods) }
+
+    /// Every modifier set that zooms with the scroll wheel or trackpad: the main one and the second one.
+    /// The second is an "or" to the first: with scroll zoom off (the first empty) it is off too, as the
+    /// settings page hides it then.
+    public var wheelModsAll: [Mods] {
+        guard let first = wheelMods else { return [] }
+        return [first] + [Config.wheelModsOf(wheelZoomMods2)].compactMap { $0 }
+    }
+
+    static func wheelModsOf(_ text: String) -> Mods? {
+        if text.isEmpty { return nil }
+        guard let b = parseBind(text), b.trigger == .none else { return nil }
         return b.mods
     }
 }

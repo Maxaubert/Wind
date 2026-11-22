@@ -46,8 +46,11 @@ export const groups = [
           desc: 'Hold a key or mouse button to zoom out', def: '' },
         { key: 'wheelZoomMods', type: 'keybind', wheelMods: true, label: 'Zoom with the scroll wheel', keywords: ['wheel', 'mouse wheel', 'scroll', 'trackpad', 'two fingers', 'swipe', 'modifier', 'control', 'ctrl', 'hotkey', 'shortcut', 'zoom in', 'zoom out'],
           desc: 'Hold these keys and scroll to zoom', def: 'ctrl' },
+        { key: 'wheelZoomMods2', type: 'keybind', wheelMods: true, label: 'Or zoom with', keywords: ['wheel', 'mouse wheel', 'scroll', 'trackpad', 'two fingers', 'second', 'another', 'alternative', 'also', 'modifier', 'option', 'alt', 'control', 'ctrl'],
+          desc: 'Other keys that also zoom when you scroll', def: '',
+          showIf: { key: 'wheelZoomMods', ne: '' } },
         { key: 'wheelZoomSpeed', type: 'slider', label: 'Scroll zoom speed', keywords: ['wheel', 'mouse wheel', 'scroll', 'trackpad', 'notch', 'faster', 'slower', 'rate', 'step', 'how fast', 'sensitivity'],
-          desc: 'How far each scroll step zooms', min: 0.1, max: 3, step: 0.05, def: 0.6, unit: 'times',
+          desc: 'How far each scroll step zooms', min: 0.05, max: 0.5, step: 0.01, def: 0.4, unit: 'times',
           showIf: { key: 'wheelZoomMods', ne: '' } },
       ] },
       { caption: 'Quick zoom', rows: [

@@ -163,7 +163,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     if not os.path.exists(CAP): subprocess.run([os.path.join(ROOT, "tools/viewcap/build.sh")], check=True)
     W.relaunch_with_channel(direct=True, extra={"engine": "draw", "zoomInSpeed": a.speed, "zoomOutSpeed": a.speed,
-                                                "wheelZoomSpeed": 0.6, "smoothZoom": True, "logLevel": 2,
+                                                "wheelZoomSpeed": 0.4, "smoothZoom": True, "logLevel": 2,
                                                 "smoothImages": bool(a.smooth_images)})
     vm()                                         # before any capture: the virtual HID device appearing
                                                  # slowed the display link to 8-15 ms ticks for ~1 s

@@ -85,6 +85,8 @@ final class Magnifier {
     private var wroteThisTick = false
     private var idleTicks = 0
     private var scrollGestureZooms = false      // the current trackpad gesture (and momentum) zooms
+    private var scrollGestureLate = false       // ...and only since its keys went down mid-gesture: the app saw its start
+    private var wheelMissLoggedAt = 0.0         // last "scroll with other modifiers" log line (throttle)
     private var storedQuickLevel = 0.0
     private(set) var inspect = false
     private var inspectAnchor = CGPoint.zero
@@ -377,19 +379,31 @@ final class Magnifier {
 
         case .scrollWheel:
             let continuous = e.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
-            let modsOK = config.wheelMods.map { modsMatch(testMods ?? mods, $0) } ?? false
+            let held = testMods ?? mods
+            let wanted = config.wheelModsAll
+            let modsOK = wanted.contains { modsMatch(held, $0) }
             var steps: Double
             if continuous {
-                // A trackpad gesture is decided once, when it begins, and its momentum follows that
-                // decision: otherwise releasing the modifier mid-gesture splits it between zoom and app.
+                // A trackpad gesture is decided when it begins, and its momentum follows that decision:
+                // releasing the keys mid-gesture must not split it between zoom and app. Pressing them
+                // mid-gesture does turn it into a zoom (owner 2026-11-22: a swipe started a moment before the
+                // key went down did nothing until the fingers lifted, which read as zoom freezing).
                 let phase = e.getIntegerValueField(CGEventField(rawValue: 99)!)       // scroll phase
                 let momentum = e.getIntegerValueField(CGEventField(rawValue: 123)!)   // momentum phase
                 if momentum != 0 { return scrollGestureZooms ? nil : pass }
-                if phase == 1 || phase == 128 || phase == 0 { scrollGestureZooms = modsOK }
+                if phase == 1 || phase == 128 || phase == 0 {
+                    scrollGestureZooms = modsOK; scrollGestureLate = false
+                    if !modsOK && phase != 128 { logWheelMiss(held, wanted, now) }
+                } else if modsOK && !scrollGestureZooms {
+                    scrollGestureZooms = true; scrollGestureLate = true
+                    Log.info("wheel: zoom keys pressed mid-gesture, zooming from here")
+                }
+                // The app saw this gesture begin: let it see the end too, or it can keep a half-done scroll.
+                if scrollGestureLate && (phase == 4 || phase == 8) { scrollGestureLate = false; return pass }
                 guard scrollGestureZooms else { return shooting ? nil : pass }
                 steps = e.getDoubleValueField(.scrollWheelEventPointDeltaAxis1) / 12.0
             } else {
-                guard modsOK else { return shooting ? nil : pass }
+                guard modsOK else { logWheelMiss(held, wanted, now); return shooting ? nil : pass }
                 // One notch is one step, as in Wind on Windows. macOS accelerates wheel deltas
                 // (measured: a slow notch reports 0.1, quick notches ramp to 3.9), which made the
                 // zoom crawl on slow scrolls and leap on fast ones.
@@ -410,6 +424,21 @@ final class Magnifier {
         default:
             return pass
         }
+    }
+
+    /// A scroll went to the app while some modifiers were held but not a zoom set. Logged (at most every 2 s)
+    /// so a zoom that "does not react" shows what the event carried: a modifier macOS still thinks is down
+    /// (after Cmd+Tab, Spotlight or a prompt) makes the held set miss the zoom set.
+    private func logWheelMiss(_ held: Mods, _ wanted: [Mods], _ now: Double) {
+        guard !held.intersection(.all).isEmpty, !wanted.isEmpty, now - wheelMissLoggedAt > 2 else { return }
+        wheelMissLoggedAt = now
+        Log.info("wheel: scroll passed to the app with \(modsText(held)) held; zoom keys \(wanted.map(modsText).joined(separator: " or "))")
+    }
+
+    private func modsText(_ m: Mods) -> String {
+        let names: [(Mods, String)] = [(.ctrl, "ctrl"), (.opt, "opt"), (.shift, "shift"), (.cmd, "cmd")]
+        let t = names.filter { m.contains($0.0) }.map(\.1).joined(separator: "+")
+        return t.isEmpty ? "none" : t
     }
 
     /// Wind's own screenshot selection in the tap: nil lets the event go on through `handle`, .some

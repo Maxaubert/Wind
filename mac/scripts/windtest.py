@@ -78,7 +78,7 @@ TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZo
                       "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "fullPointerSpeed", "panSmoothMs", "slowPrecision",
                       "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
                       "engine", "handover", "slowPanGlide", "cursor", "renderScaling",
-                      "wheelZoomMods", "panLeft", "panRight", "panUp", "panDown", "hideCursor", "quit"]
+                      "wheelZoomMods", "wheelZoomMods2", "panLeft", "panRight", "panUp", "panDown", "hideCursor", "quit"]
 # The binds the checks press. Since 2026-11-01 most actions have no preset, so the tests set their own
 # (the owner's own setup may have changed them too).
 TEST_BINDS = {"zoomIn": ["mouse4", "ctrl+opt+equal"], "zoomOut": ["mouse3", "ctrl+opt+minus"],
