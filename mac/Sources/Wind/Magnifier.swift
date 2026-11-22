@@ -254,7 +254,7 @@ final class Magnifier {
         caret.stop()
         SkyLight.reset()
         ColorFilter.restore()
-        Saturation.shared.remove()
+        Saturation.shared.stop()
     }
 
     private func updateScreen() {

@@ -70,7 +70,10 @@ final class Saturation {
         changed()
     }
 
-    /// Every window gone (100%, quit).
+    /// Quit: every window gone and nothing rebuilt by a later display change.
+    func stop() { remove(); pct = 100 }
+
+    /// Every window gone (100%, quit, before a rebuild).
     func remove() {
         for w in windows { w.orderOut(nil); w.close() }
         windows = []; backdrops = []; frames = []
@@ -111,7 +114,8 @@ final class Saturation {
             // A display added, removed or rearranged: one window per display again. The Dock posts this too
             // with nothing changed (DrawZoom.screensChanged): then the frames are equal and nothing happens.
             NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-                guard let self, self.active, self.frames != NSScreen.screens.map(\.frame) else { return }
+                // Wanted, not `active`: built while no display was attached, it has no window yet.
+                guard let self, !saturationIsNeutral(self.pct), self.frames != NSScreen.screens.map(\.frame) else { return }
                 self.build()
                 Log.info("saturation: displays changed, \(self.windows.count) window(s)")
                 self.changed()
