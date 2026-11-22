@@ -404,3 +404,41 @@ struct ShotTests {
         expect(e.map { [$0.x, $0.y, $0.w, $0.h] } == [1900, 1000, 20, 80])
     }
 }
+
+/// The screen colour is session-only (#601): reset at a plain start, kept by a self-triggered relaunch.
+struct SessionColourTests {
+    func json(_ d: Data) -> [String: Any] { (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:] }
+
+    func plainStartResetsOnlyTheColour() {
+        let src = Data(#"{"warmthPct": 40, "dimPct": 55, "maxLevel": 12.5, "engine": "draw", "futureKey": "x"}"#.utf8)
+        guard let r = SessionColour.reset(src) else { expect(false); return }
+        let o = json(r.data)
+        expect((o["warmthPct"] as? Double) == 0 && (o["dimPct"] as? Double) == 100)
+        expect((o["maxLevel"] as? Double) == 12.5 && (o["engine"] as? String) == "draw" && (o["futureKey"] as? String) == "x")
+        expect(Set(r.was.keys) == ["warmthPct", "dimPct"])
+        let c = try? Config.load(from: r.data)
+        expect(c?.warmthPct == 0 && c?.dimPct == 100 && c?.maxLevel == 12.5)
+    }
+
+    func nothingToResetWritesNothing() {
+        expect(SessionColour.reset(Data(#"{"warmthPct": 0, "dimPct": 100, "maxLevel": 8}"#.utf8)) == nil)
+        expect(SessionColour.reset(Data(#"{"maxLevel": 8}"#.utf8)) == nil)          // absent keys read as the defaults
+        expect(SessionColour.reset(Data("not json".utf8)) == nil)                     // an unreadable file is left alone
+        expect(SessionColour.reset(Data("[1, 2]".utf8)) == nil)
+        // A wrong type (it would load as the default anyway) is replaced by the default.
+        let r = SessionColour.reset(Data(#"{"warmthPct": "warm"}"#.utf8))
+        expect(r != nil && (json(r!.data)["warmthPct"] as? Double) == 0)
+    }
+
+    func relaunchKeepsTheColour() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        expect(!SessionColour.keepsColour(arguments: ["/Applications/Wind.app/Contents/MacOS/Wind"], quitMarker: nil, now: now))
+        expect(SessionColour.keepsColour(arguments: ["Wind", SessionColour.relaunchArgument], quitMarker: nil, now: now))
+        expect(SessionColour.keepsColour(arguments: ["Wind"], quitMarker: now.addingTimeInterval(-3), now: now))
+        expect(!SessionColour.keepsColour(arguments: ["Wind"], quitMarker: now.addingTimeInterval(-SessionColour.markerWindow - 1), now: now))
+        expect(!SessionColour.keepsColour(arguments: ["Wind"], quitMarker: now.addingTimeInterval(30), now: now))   // clock moved back
+        expect(!SessionColour.quitKeepsColour(permissionAskedAt: nil, now: now))
+        expect(SessionColour.quitKeepsColour(permissionAskedAt: now.addingTimeInterval(-60), now: now))
+        expect(!SessionColour.quitKeepsColour(permissionAskedAt: now.addingTimeInterval(-SessionColour.permissionWindow - 1), now: now))
+    }
+}

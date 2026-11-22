@@ -23,6 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
     private var polls = 0
     private let settingsWindow = SettingsWindowController()
+    /// When Wind last asked for a permission (a Privacy & Security pane opened, or a permission it needs
+    /// missing at launch, so macOS asks): a quit soon after is likely macOS's "Quit & Reopen" after the
+    /// grant, which keeps the screen colour (SessionColour, #601).
+    private var permissionAskedAt: Date?
+    static let keepColourMarkerKey = "keepColourQuitAt"
 
     func applicationDidFinishLaunching(_ n: Notification) {
         Log.info("Wind \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") starting, pid \(getpid())")
@@ -41,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.terminate(nil)
             return
         }
+        resetSessionColour()
         loadConfig(force: true)
         mag.onLevelChange = { [weak self] lv in self?.showLevel(lv) }
         mag.onQuitRequested = { NSApp.terminate(nil) }
@@ -50,6 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // shown only when the setup is not.
         let setup = AppDelegate.needsSetup(mag.config, accessibility: AXIsProcessTrusted(),
                                            screenRecording: CGPreflightScreenCaptureAccess())
+        if !AXIsProcessTrusted() || (mag.config.engine != "zoom" && !CGPreflightScreenCaptureAccess()) {
+            permissionAskedAt = Date()
+        }
         tryStart(prompt: !setup)
         if setup { showSettings(onboard: true) }
     }
@@ -71,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ n: Notification) {
+        if SessionColour.quitKeepsColour(permissionAskedAt: permissionAskedAt, now: Date()) {
+            UserDefaults.standard.set(Date(), forKey: AppDelegate.keepColourMarkerKey)
+            Log.info("session: quitting soon after a permission was asked for; the screen colour is kept at the next start")
+        }
         mag.stop()
         HIDGain.shared.restoreNow()
         Log.info("Wind quit")
@@ -159,6 +172,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: config
+
+    /// Warmth and Brightness go back to their defaults at every plain start (#601, as on Windows);
+    /// a relaunch Wind caused itself keeps them (`SessionColour.keepsColour`). Runs before the first
+    /// config load, so the old colour is never applied.
+    private func resetSessionColour() {
+        let d = UserDefaults.standard
+        let marker = d.object(forKey: AppDelegate.keepColourMarkerKey) as? Date
+        d.removeObject(forKey: AppDelegate.keepColourMarkerKey)
+        if SessionColour.keepsColour(arguments: CommandLine.arguments, quitMarker: marker, now: Date()) {
+            Log.info("session: relaunch, screen colour kept")
+            return
+        }
+        guard let data = try? Data(contentsOf: Paths.config), let r = SessionColour.reset(data) else { return }
+        do {
+            try r.data.write(to: Paths.config, options: .atomic)
+            Log.info("session: screen colour reset at start (was " + r.was.keys.sorted().map { "\($0)=\(r.was[$0]!)" }.joined(separator: " ") + ")")
+        } catch {
+            Log.error("session: could not reset the screen colour: \(error.localizedDescription)")
+        }
+    }
 
     private func loadConfig(force: Bool) {
         let fm = FileManager.default
@@ -271,8 +304,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsWindow.macAction = { [weak self] action, value in
             switch action {
             case "openAccessibility":
+                self?.permissionAskedAt = Date()
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
             case "openScreenRecording":
+                self?.permissionAskedAt = Date()
                 // The request adds Wind to the list; opened at the same moment, System Settings drew
                 // the list before Wind was in it (2026-11-01). Ask first, open the pane a moment later.
                 let asked = !CGPreflightScreenCaptureAccess()
@@ -323,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openConfig() { NSWorkspace.shared.open(Paths.config) }
     @objc private func openLog() { NSWorkspace.shared.open(Paths.log) }
     @objc private func openPrivacy() {
+        permissionAskedAt = Date()
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
     @objc private func quit() { NSApp.terminate(nil) }

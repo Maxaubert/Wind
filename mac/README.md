@@ -28,7 +28,7 @@ mouse when a game locks the pointer.
 - Keeps panning from mouse movement when a game locks the pointer.
 - Follows the text caret as you type (and, optionally, keyboard focus), tested in TextEdit, Terminal, Safari, Chrome and Claude Code.
 - Inspect mode: hides and freezes the pointer so a tooltip stays open; the mouse moves a crosshair and the view, which never jumps on entering or leaving.
-- Quick zoom toggle, keyboard panning, warmth and brightness filter.
+- Quick zoom toggle, keyboard panning, warmth and brightness filter (back to off at every start, as on Windows).
 - A Settings window, Open at login.
 - Detects macOS Zoom's shortcuts, which fight Wind, and switches them off in one click (releasing macOS Zoom if it is stuck zoomed in).
 - A crash watchdog that puts the screen back to 1x if Wind dies.

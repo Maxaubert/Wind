@@ -620,6 +620,14 @@ when it never settles), so the view follows where the cursor settles. The view-o
   `WindCore/ColorMath.swift`, a port of `src/color/color_matrix.h`): 0-50% is Night light's 6500 K to 1200 K,
   linear in Kelvin; 50-100% fades the last green out evenly in sRGB terms, so 100% is pure red. Both
   platforms check the gains against `tests/fixtures/shared/color_cases.txt`.
+- The screen colour (Warmth, Brightness) is session-only, as on Windows (#601): it applies at once, but
+  every plain start puts `warmthPct`/`dimPct` back to their defaults in config.json before the first config
+  load (`AppDelegate.resetSessionColour`, `WindCore/SessionColour.swift`; only those keys change, an
+  unreadable file is left alone). A relaunch Wind caused itself keeps them: the `--keep-colour` launch
+  argument, or the `keepColourQuitAt` defaults marker a quit leaves when a permission was asked for in the
+  15 minutes before (macOS's "Quit & Reopen" after the Screen Recording grant); the marker counts for 60 s
+  and is cleared at every start. Windows' Saturation has no Mac key yet; the tray-in-profile half of #601
+  is Windows-only (no profiles on the Mac). `scripts/e2e.py` checks both starts.
 - The Settings window (a WKWebView page) is checked by `scripts/e2e_settings.py`: the test-only
   channel command `settings js <base64>` runs JavaScript in the page and writes the result to
   `js.json`; the script then reads config.json and the config Wind runs on (`config` in state.json).
