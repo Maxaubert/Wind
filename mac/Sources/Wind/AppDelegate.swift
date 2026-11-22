@@ -447,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
             "shot": shotState(),
             "scaling": DrawZoom.shared.scalingState(),
+            "saturation": ["pct": Saturation.shared.pct, "windows": Saturation.shared.windowIDs.map(Int.init), "covered": Saturation.shared.covered],
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "config": (try? JSONSerialization.jsonObject(with: mag.config.encoded())) ?? NSNull(),   // what Wind runs on now
             "settings": ["open": settingsWindow.isOpen, "windowId": settingsWindow.testWindowId, "url": settingsWindow.testLoadedURL],

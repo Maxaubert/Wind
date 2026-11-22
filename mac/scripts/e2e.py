@@ -109,6 +109,29 @@ g = gamma()
 check("the reset colour reaches the display", all(abs(x - 1) < 0.01 for x in g), f"rgb max {g}")
 set_config(**saved)
 
+# Saturation (#599): one overlay window per display below render's overlay, none at 100%, and the transfer
+# formula (warmth and dim) left alone. What it looks like is the on-screen checklist in docs/architecture.md.
+def own_windows(ids):
+    import Quartz
+    info = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID) or []
+    return {int(w["kCGWindowNumber"]): w for w in info if int(w["kCGWindowNumber"]) in ids}
+saved = set_config(satPct=50); time.sleep(0.6)
+s = ctl("state", wait=0.3)
+sat = s.get("saturation", {})
+check("saturation 50%: one window per display", sat.get("pct") == 50 and len(sat.get("windows", [])) >= 1, f"{sat}")
+try:
+    w = own_windows(set(sat.get("windows", [])))
+    check("saturation windows are on screen, click-through level, not shared",
+          len(w) == len(sat.get("windows", [])) and all(x.get("kCGWindowSharingState") == 0 for x in w.values()),
+          f"{[(x.get('kCGWindowLayer'), x.get('kCGWindowSharingState'), x.get('kCGWindowIsOnscreen')) for x in w.values()]}")
+except ImportError:
+    print("  (no pyobjc Quartz: window list check skipped)")
+check("saturation leaves the transfer formula alone", all(abs(x - 1) < 0.01 for x in gamma()), "gamma changed")
+set_config(satPct=100); time.sleep(0.6)
+sat = ctl("state", wait=0.3).get("saturation", {})
+check("saturation 100%: no window at all", sat.get("pct") == 100 and sat.get("windows") == [], f"{sat}")
+set_config(**saved)
+
 # The settings window (the web page) has its own suite: scripts/e2e_settings.py.
 
 finish()

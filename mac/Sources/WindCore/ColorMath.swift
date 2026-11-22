@@ -65,3 +65,31 @@ public func warmGainsSrgb(warm01: Double, dim01: Double) -> (r: Double, g: Doubl
     let g = warmGainsLinear(w)
     return (srgbEncode(g.r) * d, srgbEncode(g.g) * d, srgbEncode(g.b) * d)
 }
+
+/// Saturation (#599), Windows' BuildColorMatrix(0, 1, false, sat01): applied FIRST, each channel moves toward
+/// (below 1) or away from (above 1) the pixel's Rec.709 luma; warmth and dim then scale the channels (on the
+/// Mac the display transfer formula, which acts after composition, so the order is the same). Floored at 0.2:
+/// greyscale merges text colours of equal brightness (docs/COLOUR-FILTER-FINDINGS.md on Windows).
+public let minSat01 = 0.2, maxSat01 = 1.5
+public let lumaR = 0.2126, lumaG = 0.7152, lumaB = 0.0722
+
+/// The 3x3 matrix in Windows' row-vector layout: m[i][j] is input channel i's share of output channel j
+/// (out = in * M). Out of range clamps.
+public func saturationMatrix(_ sat01: Double) -> [[Double]] {
+    let s = min(maxSat01, max(minSat01, sat01))
+    let luma = [lumaR, lumaG, lumaB]
+    return (0..<3).map { i in (0..<3).map { j in (1 - s) * luma[i] + (i == j ? s : 0) } }
+}
+
+/// Saturation at 100% (or near enough that no slider step reaches it): Wind puts nothing on screen for it.
+public func saturationIsNeutral(_ satPct: Double) -> Bool { abs(satPct - 100) < 0.01 }
+
+/// saturationMatrix as Core Animation's CAColorMatrix (20 floats, rows are OUTPUT channels:
+/// R' = m11 R + m12 G + m13 B + m14 A + m15), alpha passed through. The Mac's overlay filter (Saturation.swift).
+public func caColorMatrix(_ sat01: Double) -> [Float] {
+    let m = saturationMatrix(sat01)
+    var f = [Float](repeating: 0, count: 20)
+    for out in 0..<3 { for inp in 0..<3 { f[out * 5 + inp] = Float(m[inp][out]) } }
+    f[3 * 5 + 3] = 1
+    return f
+}

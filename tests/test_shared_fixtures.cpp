@@ -141,6 +141,14 @@ Tokens EvalPlain(const std::string& fn, const Tokens& a) {
         const ColorMatrix m = BuildColorMatrix(d(0), d(1), false);
         return { Num(m.m[0][0]), Num(m.m[1][1]), Num(m.m[2][2]) };
     }
+    if (fn == "sat") {     // saturation alone (#599): what the Mac's overlay filter uses
+        need(1);
+        const ColorMatrix m = BuildColorMatrix(0.0, 1.0, false, d(0));
+        Tokens out;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) out.push_back(Num(m.m[i][j]));
+        return out;
+    }
     throw std::invalid_argument("unknown function " + fn);
 }
 
@@ -315,5 +323,5 @@ TEST_CASE("the caret filter matches the cases shared with the Mac") {
 }
 
 TEST_CASE("the colour filter's gains match the cases shared with the Mac") {
-    CHECK(RunSharedFile("color_cases.txt") >= 40);
+    CHECK(RunSharedFile("color_cases.txt") >= 49);
 }
