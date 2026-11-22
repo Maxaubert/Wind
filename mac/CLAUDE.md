@@ -7,9 +7,9 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 ## Commands
 - `swift run wind-checks`: unit checks for `Sources/WindCore` (no XCTest/swift-testing in CLT).
 - `scripts/build.sh` builds `build/Wind.app`; `scripts/build.sh install` installs to /Applications
-  and relaunches. Signs with the local "Wind Mac Dev" identity (keychain
-  `~/Library/Keychains/windmac-dev.keychain-db`; its password is the login keychain item `windmac-dev-keychain`) so the
-  Accessibility grant survives rebuilds. Without that keychain it signs ad hoc.
+  and relaunches. Signs with the Developer ID Application identity in the
+  login keychain (team WV7BY8CUM8 first; `WIND_SIGN_IDENTITY` overrides) so the Accessibility grant survives rebuilds.
+  Without one it signs ad hoc. The old `windmac-dev` keychain is retired (its password was lost, 2026-11-22).
 - `scripts/release.sh`: the public release zip (`dist/Wind-mac-<version>.zip`, ad hoc signed, licence inside, refuses a
   build with the test channel). `.github/workflows/mac.yml` runs the checks on PRs and publishes `mac-v<VERSION>` on main
   (never the repo's latest release). Bump `VERSION` in the PR, like the Windows version.
