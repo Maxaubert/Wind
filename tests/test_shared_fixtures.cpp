@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The cases Wind shares with Wind for Mac (tests/fixtures/shared/, also read by
-// mac/Tests/WindCoreChecks/SharedFixtures.swift): view geometry, the zoom controller and the view
-// owner, whose Swift code is a port of this. Rows tagged all or win run here; mac rows are the Mac's.
+// mac/Tests/WindCoreChecks/SharedFixtures.swift): view geometry, the zoom controller, the view
+// owner and the caret filter, whose Swift code is a port of this. Rows tagged all or win run here; mac rows are the Mac's.
 // The file headers give the formats.
 //
 // Windows is the origin, so the all and win rows' expected values come from this code. After an
@@ -11,6 +11,7 @@
 #include "doctest.h"
 #include "edge_pan.h"
 #include "keyboard_pan.h"
+#include "track_filter.h"
 #include "transform.h"
 #include "view_glide.h"
 #include "view_target.h"
@@ -99,6 +100,12 @@ Tokens EvalPlain(const std::string& fn, const Tokens& a) {
         const TrackRect rc{ d(0), d(1), d(2), d(3) };
         if (!TrackTargetCenter(rc, d(4), d(5), d(6), n(7), n(8), n(9), n(10), cx, cy)) return { "none" };
         return { Num(cx), Num(cy) };
+    }
+    if (fn == "inside") {   // CaretInsideElement with its default slack
+        need(8);
+        auto w = [&](size_t i) { return (long)n(i); };
+        const bool in = CaretInsideElement({ w(0), w(1), w(2), w(3) }, { w(4), w(5), w(6), w(7) });
+        return { in ? "yes" : "no" };
     }
     if (fn == "keypan") {   // KeyPan::step's continuous rate, in desktop px per second
         need(3);
@@ -284,4 +291,7 @@ TEST_CASE("the zoom controller matches the cases shared with the Mac") {
 }
 TEST_CASE("the view owner matches the cases shared with the Mac") {
     CHECK(RunSharedFile("view_owner_cases.txt") >= 14);
+}
+TEST_CASE("the caret filter matches the cases shared with the Mac") {
+    CHECK(RunSharedFile("caret_cases.txt") >= 18);
 }

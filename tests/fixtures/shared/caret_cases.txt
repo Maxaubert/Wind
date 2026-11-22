@@ -1,0 +1,42 @@
+# Caret sanity cases shared by Wind (Windows) and Wind for Mac. Read by tests/test_shared_fixtures.cpp
+# (src/track/track_filter.h, CaretInsideElement) and by mac/Tests/WindCoreChecks/SharedFixtures.swift
+# (mac/Sources/WindCore/CaretFilter.swift, caretInsideElement).
+#
+# One case per line: <function> <platform> <inputs...> =<expected> ...
+#   platform: all (both run it), win (Windows only), mac (Mac only).
+#   Coordinates are desktop px (Windows) or points (Mac), top-left origin. Windows takes the caret's
+#   centre in whole px (integer halving), the Mac in fractional points, so all rows keep their centres
+#   off the 8 slack line where the two could differ.
+# all and win rows come from the C++ code (Windows is the origin): after an intended change there,
+#   set WIND_UPDATE_FIXTURES=1 && build.bat test
+# rewrites them, then the Mac must match. mac rows are written by hand from the Swift code.
+#
+#   inside  cl ct cr cb  el et er eb   =yes or =no   (the caret's centre within the element plus 8;
+#                                                     an empty element is unknown and trusts the caret)
+
+# #278: Firefox in a zoomed iframe (field 2026-09-29), input 2226,997 798x74
+inside all 2453 991 2478 1077 2226 997 3024 1071 =yes
+inside all 3097 1226 3098 1344 2226 997 3024 1071 =no
+inside all 3020 1000 3022 1068 2226 997 3024 1071 =yes
+# unknown element: trust
+inside all 5 5 6 20 0 0 0 0 =yes
+inside all 5 5 6 20 100 100 100 140 =yes
+# #561: Prism's new-folder dialog (Electron, field 2026-11-10), input 1520,1022 852x86
+inside all 2070 1170 2072 1208 1520 1022 2372 1108 =no
+inside all 1541 1046 1543 1083 1520 1022 2372 1108 =yes
+inside all 1540 1046 1697 1084 1520 1022 2372 1108 =yes
+# a terminal caret beside its cell
+inside all 332 1692 343 1737 322 1692 346 1737 =yes
+# the slack: a centre 6 outside is inside, 10 outside is not, on every side
+inside all 92 50 96 60 100 40 300 70 =yes
+inside all 88 50 92 60 100 40 300 70 =no
+inside all 304 50 308 60 100 40 300 70 =yes
+inside all 308 50 312 60 100 40 300 70 =no
+inside all 150 14 152 42 100 40 300 70 =no
+inside all 150 24 152 44 100 40 300 70 =yes
+inside all 150 70 152 82 100 40 300 70 =yes
+inside all 150 74 152 86 100 40 300 70 =no
+# Mac: fractional points (an AX caret is often a half point wide)
+inside mac 107.5 44.25 108 61.75 100 40 300 70 =yes
+inside mac 92 50 92.5 60 100 40 300 70 =yes
+inside mac 91 50 91.5 60 100 40 300 70 =no

@@ -209,14 +209,25 @@ final class CaretTracker {
     private func handle(_ notification: String, element: AXUIElement) {
         let el = focusedElement() ?? element
         if notification == kAXFocusedUIElementChangedNotification as String {
-            if let c = caretInfo(of: el) {
+            if let c = caretInfo(of: el), insideElement(c, el) {
                 if !parkedInTerminal(c, el) { publish(.caret, c.rect) }
             } else if let r = frame(of: el), !keepsCaret(el, r) {
                 publish(.focus, r)
             }
-        } else if let c = caretInfo(of: el), !parkedInTerminal(c, el) {
+        } else if let c = caretInfo(of: el), insideElement(c, el), !parkedInTerminal(c, el) {
             publish(.caret, c.rect)
         }
+    }
+
+    /// A caret outside its own focused element is a bad report, not a place to look (Windows #561:
+    /// an Electron dialog reported a fixed caret below its input on every keystroke, and the view
+    /// jumped away; #278 Firefox in a zoomed iframe). It is treated as no caret: a newly focused
+    /// field is followed as a whole, and a caret move within the field leaves the view where it is.
+    /// No Mac repro is known (2026-11-22): the rule is the Windows one, kept in step.
+    private func insideElement(_ c: (rect: Rc, insertion: Bool), _ el: AXUIElement) -> Bool {
+        guard let f = frame(of: el, anySize: true), !caretInsideElement(c.rect, f) else { return true }
+        Log.verbose("caret: skipped (outside its element \(Int(f.l)),\(Int(f.t)) \(Int(f.width))x\(Int(f.height))): \(Int(c.rect.l)),\(Int(c.rect.t))")
+        return false
     }
 
     /// A terminal caret in the last two columns of the text area is a TUI's parked cursor, not
@@ -273,7 +284,7 @@ final class CaretTracker {
                 return
             }
             let started = Date()
-            if let c = self.caretInfo(of: el) {
+            if let c = self.caretInfo(of: el), self.insideElement(c, el) {
                 if !self.parkedInTerminal(c, el) { self.publish(.caret, c.rect) }
             } else if let r = self.frame(of: el), !self.keepsCaret(el, r) {
                 // A focused control without a caret (button, link, list): keyboard focus. Chromium
