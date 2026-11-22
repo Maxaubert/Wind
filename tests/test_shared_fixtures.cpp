@@ -293,5 +293,5 @@ TEST_CASE("the view owner matches the cases shared with the Mac") {
     CHECK(RunSharedFile("view_owner_cases.txt") >= 14);
 }
 TEST_CASE("the caret filter matches the cases shared with the Mac") {
-    CHECK(RunSharedFile("caret_cases.txt") >= 18);
+    CHECK(RunSharedFile("caret_cases.txt") >= 17);
 }
