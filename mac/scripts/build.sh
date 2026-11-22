@@ -3,8 +3,9 @@
 # Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Build Wind.app into build/. `scripts/build.sh install` also installs it to /Applications and
 # relaunches it. `scripts/build.sh test` builds build/test/Wind.app with the e2e command channel
-# compiled in (WIND_TEST_CHANNEL); the installed app never has it. Signs with the local "Wind Mac Dev" identity when present (a stable identity keeps
-# the Accessibility grant across rebuilds), otherwise ad-hoc.
+# compiled in (WIND_TEST_CHANNEL); the installed app never has it. Signs with the Developer ID Application identity
+# in the login keychain when present (a stable identity keeps the Accessibility grant across rebuilds; override with
+# WIND_SIGN_IDENTITY), otherwise ad hoc.
 set -euo pipefail
 cd "${0:A:h}/.."
 VERSION=$(cat VERSION 2>/dev/null || echo 0.1.0)
@@ -53,13 +54,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-KC="$HOME/Library/Keychains/windmac-dev.keychain-db"
+# The Developer ID identity, found by its name (2026-11-22: it replaced the "Wind Mac Dev" keychain, whose password
+# was lost). Prefer team WV7BY8CUM8 when several are there.
+ID="${WIND_SIGN_IDENTITY:-}"
+if [[ -z "$ID" ]]; then
+  ids="$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application: [^"]*"' | tr -d '"' || true)"
+  ID="$(grep 'WV7BY8CUM8' <<<"$ids" | head -1 || true)"
+  [[ -n "$ID" ]] || ID="$(head -1 <<<"$ids")"
+fi
 if [[ "${WIND_SIGN:-}" == "adhoc" ]]; then
   codesign --force --options runtime -s - "$APP"     # release builds (scripts/release.sh): no local identity
-elif [[ -f "$KC" ]]; then
-  # The keychain's password lives in the login keychain (item windmac-dev-keychain), never in the repo.
-  security unlock-keychain -p "$(security find-generic-password -s windmac-dev-keychain -w 2>/dev/null)" "$KC" 2>/dev/null || true
-  codesign --force --options runtime --keychain "$KC" -s "Wind Mac Dev" "$APP"
+elif [[ -n "$ID" ]]; then
+  codesign --force --options runtime --timestamp -s "$ID" "$APP"
 else
   codesign --force -s - "$APP"
 fi
