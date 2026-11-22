@@ -5,8 +5,8 @@ import Foundation
 @testable import WindCore
 
 /// The cases Wind for Mac shares with Windows Wind (the repo's tests/fixtures/shared/, also read by
-/// tests/test_shared_fixtures.cpp): view geometry, the zoom controller and the view owner, which are
-/// ports of the Windows code. Rows tagged all or mac run here; win rows are Windows-only. The file
+/// tests/test_shared_fixtures.cpp): view geometry, the zoom controller, the view owner and the caret
+/// filter, which are ports of the Windows code. Rows tagged all or mac run here; win rows are Windows-only. The file
 /// headers give the formats. Windows is the origin, so a change there regenerates the all rows and
 /// this side has to follow.
 struct SharedFixtureTests {
@@ -23,6 +23,7 @@ struct SharedFixtureTests {
     func viewMathCases() throws { try runFile("view_math_cases.txt", atLeast: 50) }
     func zoomControllerCases() throws { try runFile("zoom_controller_cases.txt", atLeast: 50) }
     func viewOwnerCases() throws { try runFile("view_owner_cases.txt", atLeast: 14) }
+    func caretCases() throws { try runFile("caret_cases.txt", atLeast: 20) }
 
     func runFile(_ name: String, atLeast: Int) throws {
         let text = try String(contentsOf: Self.dir.appendingPathComponent(name), encoding: .utf8)
@@ -103,6 +104,9 @@ struct SharedFixtureTests {
             let c = stillViewTarget(Pt(a[0], a[1]), cur: Pt(a[2], a[3]), ptr: Pt(a[4], a[5]), level: a[6],
                                     screen: Sz(a[7], a[8]), marginPct: a[9], leadPct: a[10])
             return [num(c.x), num(c.y)]
+        case "inside":
+            try need(8)
+            return [caretInsideElement(Rc(l: a[0], t: a[1], r: a[2], b: a[3]), Rc(l: a[4], t: a[5], r: a[6], b: a[7])) ? "yes" : "no"]
         case "keypan":
             try need(3)
             return [num(keyPanSpeed(level: a[0], screenWidth: a[1], panSpeed: a[2]))]

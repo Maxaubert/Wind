@@ -569,6 +569,11 @@ rest it trailed by 9 pt and carried it in one frame). Explorer, zooming scenario
 
 ## Caret following
 
+- **A caret outside its element.** A caret whose centre lies outside its focused element's frame (plus 8 points)
+  is a bad report and is treated as no caret: a newly focused field is followed as a whole, a caret move inside
+  it is not. A port of Windows #561 (an Electron dialog's fixed caret below its input) and #278; preventive, no
+  Mac repro is known (2026-11-22). Pure rule `caretInsideElement` in `WindCore/CaretFilter.swift`, cases shared
+  with Windows in `tests/fixtures/shared/caret_cases.txt`.
 - **Parked TUI cursors.** In terminals, a caret in the last two columns of the text area is a TUI's
   parked cursor and is ignored. Claude Code parks it at the right edge on every space.
 - **Chromium.** Chromium browsers get `AXEnhancedUserInterface` while they are frontmost (switched
