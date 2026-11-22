@@ -302,6 +302,23 @@ struct ConfigTests {
     func defaultBindsAreAllValid() {
         expect(Config().binds().problems.isEmpty)
         expect(Config().wheelMods == [.ctrl])
+        expect(Config().wheelModsAll == [[.ctrl]])
+    }
+
+    func secondWheelModsAlsoZoom() throws {
+        let c = try Config.load(from: Data(#"{"wheelZoomMods": "opt", "wheelZoomMods2": "ctrl"}"#.utf8))
+        expect(c.wheelModsAll == [[.opt], [.ctrl]])
+        let off = try Config.load(from: Data(#"{"wheelZoomMods": "", "wheelZoomMods2": "cmd+a"}"#.utf8))
+        expect(off.wheelModsAll.isEmpty)
+        let bad = try Config.load(from: Data(#"{"wheelZoomMods": "opt", "wheelZoomMods2": "cmd+a"}"#.utf8))
+        expect(bad.wheelModsAll == [[.opt]])      // a key in a wheel bind is not a modifier set
+        let second = try Config.load(from: Data(#"{"wheelZoomMods": "", "wheelZoomMods2": "ctrl"}"#.utf8))
+        expect(second.wheelModsAll.isEmpty)       // the second is an "or" to the first
+    }
+
+    func wheelZoomSpeedRange() throws {
+        expect(try Config.load(from: Data(#"{"wheelZoomSpeed": 3}"#.utf8)).wheelZoomSpeed == 0.5)
+        expect(try Config.load(from: Data(#"{"wheelZoomSpeed": 0.01}"#.utf8)).wheelZoomSpeed == 0.05)
     }
 }
 

@@ -206,7 +206,12 @@ followed by its own switch.
 - The tick sleeps after 30 idle ticks while zoomed. Mouse moves, binds, the wheel, buttons and
   caret events wake it.
 - A tap timeout stops held actions but keeps swallowing their repeats and ups (`InputRouter.stopAll`).
-- A trackpad gesture is zoom or scroll as decided when it begins, momentum included.
+- A trackpad gesture is zoom or scroll as decided when it begins, momentum included. Releasing the keys
+  mid-gesture keeps it a zoom; pressing them mid-gesture turns it into one from there (owner 2026-11-22: a
+  swipe begun a moment before the key did nothing until the fingers lifted), and its end still goes to the app.
+  Scroll zoom takes either of two modifier sets (`wheelZoomMods`, then `wheelZoomMods2`, an "or" that is off with
+  the first). A scroll passed to an app with other modifiers held is logged (`wheel: scroll passed`, every 2 s at
+  most), so a stale modifier after Cmd+Tab, Spotlight or a prompt shows in the log.
 - A config key with the wrong type falls back to its default alone. An unreadable file is backed
   up before Wind writes over it.
 - Accessibility calls time out after 0.25 s (the system-wide element sets it for all of them). `CaretTracker` makes

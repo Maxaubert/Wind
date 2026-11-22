@@ -90,7 +90,7 @@ def cap(secs, out):
     c.stdout.readline(); return c
 
 subprocess.run([os.path.join(W.ROOT, "tools/viewcap/build.sh")], check=True, stdout=subprocess.DEVNULL)
-# The owner's feel settings are Wind's defaults (zoomInSpeed 1.75, wheelZoomSpeed 0.6, smoothZoom on).
+# The owner's feel settings are Wind's defaults (zoomInSpeed 1.75, wheelZoomSpeed 0.4, smoothZoom on).
 W.relaunch_with_channel(direct=True, extra={"engine": "draw", "logLevel": 2})
 only = a.only.split(",")
 vm = None
