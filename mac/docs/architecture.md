@@ -626,8 +626,9 @@ when it never settles), so the view follows where the cursor settles. The view-o
   unreadable file is left alone). A relaunch Wind caused itself keeps them: the `--keep-colour` launch
   argument, or the `keepColourQuitAt` defaults marker a quit leaves when a permission was asked for in the
   15 minutes before (macOS's "Quit & Reopen" after the Screen Recording grant); the marker counts for 60 s
-  and is cleared at every start. Windows' Saturation has no Mac key yet; the tray-in-profile half of #601
-  is Windows-only (no profiles on the Mac). `scripts/e2e.py` checks both starts.
+  and is cleared at every start. `satPct` (Windows' Saturation) is in the list too and resets once Config
+  has it (#599 port); the tray-in-profile half of #601 is Windows-only (no profiles on the Mac).
+  `scripts/e2e.py` checks both starts.
 - The Settings window (a WKWebView page) is checked by `scripts/e2e_settings.py`: the test-only
   channel command `settings js <base64>` runs JavaScript in the page and writes the result to
   `js.json`; the script then reads config.json and the config Wind runs on (`config` in state.json).

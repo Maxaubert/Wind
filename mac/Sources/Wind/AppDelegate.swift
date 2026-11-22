@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // shown only when the setup is not.
         let setup = AppDelegate.needsSetup(mag.config, accessibility: AXIsProcessTrusted(),
                                            screenRecording: CGPreflightScreenCaptureAccess())
-        if !AXIsProcessTrusted() || (mag.config.engine != "zoom" && !CGPreflightScreenCaptureAccess()) {
+        if !AXIsProcessTrusted() || (mag.config.engine == "draw" && !CGPreflightScreenCaptureAccess()) {   // as needsSetup
             permissionAskedAt = Date()
         }
         tryStart(prompt: !setup)

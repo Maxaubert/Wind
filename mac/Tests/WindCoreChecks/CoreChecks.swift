@@ -416,6 +416,7 @@ struct SessionColourTests {
         expect((o["warmthPct"] as? Double) == 0 && (o["dimPct"] as? Double) == 100)
         expect((o["maxLevel"] as? Double) == 12.5 && (o["engine"] as? String) == "draw" && (o["futureKey"] as? String) == "x")
         expect(Set(r.was.keys) == ["warmthPct", "dimPct"])
+        expect(SessionColour.keys == ["warmthPct", "dimPct", "satPct"])   // Windows' kSessionKeys (src/config/profiles.h)
         let c = try? Config.load(from: r.data)
         expect(c?.warmthPct == 0 && c?.dimPct == 100 && c?.maxLevel == 12.5)
     }

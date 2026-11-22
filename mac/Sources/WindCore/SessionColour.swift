@@ -8,8 +8,9 @@ import Foundation
 /// line, or a marker the quitting Wind left (`keepsColour`). AppDelegate resets config.json before the
 /// first config load, so the colour filter is never applied with the old values.
 public enum SessionColour {
-    /// config.json keys reset at a plain start (Windows also has Saturation; the Mac has no such key).
-    public static let keys = ["warmthPct", "dimPct"]
+    /// config.json keys reset at a plain start: Windows' colorWarmPct, colorDimPct, colorSatPct. A key
+    /// Config does not have yet (satPct until Saturation is ported, #599) has no default and is skipped.
+    public static let keys = ["warmthPct", "dimPct", "satPct"]
     /// A launch argument for a relaunch Wind starts itself: the colour is kept.
     public static let relaunchArgument = "--keep-colour"
     /// A quit marker older than this (seconds) is a plain start: macOS's "Quit & Reopen" relaunches
