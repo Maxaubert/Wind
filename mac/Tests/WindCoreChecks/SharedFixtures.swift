@@ -5,8 +5,8 @@ import Foundation
 @testable import WindCore
 
 /// The cases Wind for Mac shares with Windows Wind (the repo's tests/fixtures/shared/, also read by
-/// tests/test_shared_fixtures.cpp): view geometry, the zoom controller, the view owner and the caret
-/// filter, which are ports of the Windows code. Rows tagged all or mac run here; win rows are Windows-only. The file
+/// tests/test_shared_fixtures.cpp): view geometry, the zoom controller, the view owner, the caret
+/// filter and the colour filter's gains, which are ports of the Windows code. Rows tagged all or mac run here; win rows are Windows-only. The file
 /// headers give the formats. Windows is the origin, so a change there regenerates the all rows and
 /// this side has to follow.
 struct SharedFixtureTests {
@@ -24,6 +24,7 @@ struct SharedFixtureTests {
     func zoomControllerCases() throws { try runFile("zoom_controller_cases.txt", atLeast: 50) }
     func viewOwnerCases() throws { try runFile("view_owner_cases.txt", atLeast: 14) }
     func caretCases() throws { try runFile("caret_cases.txt", atLeast: 20) }
+    func colorCases() throws { try runFile("color_cases.txt", atLeast: 40) }
 
     func runFile(_ name: String, atLeast: Int) throws {
         let text = try String(contentsOf: Self.dir.appendingPathComponent(name), encoding: .utf8)
@@ -124,6 +125,21 @@ struct SharedFixtureTests {
             try need(4)
             let r = applyQuickZoom(cur: a[0], stored: a[1], def: a[2], maxLevel: a[3])
             return [num(r.newLevel), num(r.newStored)]
+        case "kelvin":
+            try need(1)
+            let g = kelvinGainsLinear(a[0])
+            return [num(g.r), num(g.g), num(g.b)]
+        case "warmk":
+            try need(1)
+            return [num(warmKelvin(a[0]))]
+        case "warm":
+            try need(1)
+            let g = warmGainsLinear(a[0])
+            return [num(g.r), num(g.g), num(g.b)]
+        case "gains":
+            try need(2)
+            let g = warmGainsSrgb(warm01: a[0], dim01: a[1])
+            return [num(g.r), num(g.g), num(g.b)]
         default:
             throw BadRow("unknown function \(fn)")
         }

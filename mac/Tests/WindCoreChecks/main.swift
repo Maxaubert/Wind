@@ -69,6 +69,7 @@ run("sharedViewMathCases", sf.viewMathCases)
 run("sharedZoomControllerCases", sf.zoomControllerCases)
 run("sharedViewOwnerCases", sf.viewOwnerCases)
 run("sharedCaretCases", sf.caretCases)
+run("sharedColorCases", sf.colorCases)
 
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

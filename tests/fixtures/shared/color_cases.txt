@@ -1,0 +1,68 @@
+# Colour filter cases shared by Wind (Windows) and Wind for Mac. Read by tests/test_shared_fixtures.cpp
+# (src/color/color_matrix.h) and by mac/Tests/WindCoreChecks/SharedFixtures.swift
+# (mac/Sources/WindCore/ColorMath.swift).
+#
+# One case per line: <function> <platform> <inputs...> =<expected> ...
+#   platform: all (both run it), win (Windows only), mac (Mac only).
+#   Expected values are the tokens that start with '='. Numbers match within 1e-6 (absolute).
+#   Warmth is 0..1 (the slider's percent / 100), brightness (dim) 0..1 with 1 = no dimming.
+# all and win rows come from the C++ code (Windows is the origin): after an intended change there,
+#   set WIND_UPDATE_FIXTURES=1 && build.bat test
+# rewrites them, then the Mac must match.
+#
+#   kelvin K         =r =g =b   blackbody gains in LINEAR light, 6500 K white (KelvinGainsLinear / kelvinGainsLinear)
+#   warmk  warm      =K         the Kelvin a warmth maps to (WarmKelvin / warmKelvin): 0..0.5 is 6500 K -> 1200 K
+#   warm   warm      =r =g =b   warmth gains in LINEAR light (WarmGainsLinear / warmGainsLinear); past 0.5 the
+#                               last green fades out evenly in sRGB terms, so 1 is pure red
+#   gains  warm dim  =r =g =b   each channel's scale on sRGB-ENCODED values, saturation 100%: the SDR colour
+#                               matrix's diagonal (BuildColorMatrix(warm, dim, false)) on Windows, the display
+#                               transfer formula's max per channel (warmGainsSrgb) on the Mac
+
+kelvin all 6500 =1 =1 =1
+kelvin all 6000 =1 =0.9539999962 =0.882799983
+kelvin all 5250 =1 =0.8729499876 =0.6977999806
+kelvin all 4000 =1 =0.6978999972 =0.3817000091
+kelvin all 3850 =1 =0.6728000045 =0.3451000005
+kelvin all 2700 =1 =0.4480000138 =0.1004000008
+kelvin all 2050 =1 =0.2944499999 =0.0125500001
+kelvin all 1200 =1 =0.0773999989 =0
+kelvin all 1150 =1 =0.06529999897 =0
+kelvin all 1000 =1 =0.03030000068 =0
+kelvin all 900 =1 =0.03030000068 =0
+kelvin all 7000 =1 =1 =1
+
+warmk all 0 =6500
+warmk all 0.05 =5970
+warmk all 0.1 =5440
+warmk all 0.25 =3850
+warmk all 0.4 =2260
+warmk all 0.5 =1200
+warmk all 0.55 =1200
+warmk all 0.6 =1200
+warmk all 0.75 =1200
+warmk all 0.9 =1200
+warmk all 1 =1200
+
+warm all 0 =1 =1 =1
+warm all 0.05 =1 =0.951030004 =0.8755699813
+warm all 0.1 =1 =0.8949200034 =0.7454999924
+warm all 0.25 =1 =0.6728000045 =0.3451000005
+warm all 0.4 =1 =0.3460199893 =0.0355599992
+warm all 0.5 =1 =0.0773999989 =0
+warm all 0.55 =1 =0.06256211214 =0
+warm all 0.6 =1 =0.04953141358 =0
+warm all 0.75 =1 =0.02056907359 =0
+warm all 0.9 =1 =0.005066997792 =0
+warm all 1 =1 =0 =0
+
+gains all 0 1 =1 =1 =1
+gains all 0 0.6 =0.6000000238 =0.6000000238 =0.6000000238
+gains all 0.05 1 =1 =0.9781579375 =0.9431756735
+gains all 0.25 1 =1 =0.8394134045 =0.6222196221
+gains all 0.5 1 =1 =0.3082686067 =0
+gains all 0.5 0.5 =0.5 =0.1541343033 =0
+gains all 0.75 1 =1 =0.1541343033 =0
+gains all 0.75 0.8 =0.8000000119 =0.1233074367 =0
+gains all 1 1 =1 =0 =0
+gains all 1 0.1 =0.1000000015 =0 =0
+gains all 0.3 0.7 =0.6999999881 =0.5486547351 =0.3561919034
