@@ -43,6 +43,7 @@ test('ranking: exact label first, label beats keyword', () => {
   expect(keys('warmth')[0]).toBe('warmthPct');
   expect(keys('theme')).toEqual(['uiPalette']);
   expect(keys('brigh')[0]).toBe('dimPct');
+  expect(keys('saturation')[0]).toBe('satPct');
   expect(keys('max zoom')[0]).toBe('maxLevel');
   expect(keys('soft start length')[0]).toBe('smoothZoomRamp');
   expect(rank('speed', 'zoomInSpeed')).toBeLessThan(rank('speed', 'zoomEaseOutMs'));
@@ -67,6 +68,8 @@ test('keywords reach rows without their label words', () => {
   expect(keys('hotkey')).toEqual(expect.arrayContaining(['zoomIn', 'zoomOut', 'quickZoom', '__pan']));
   expect(keys('night light')[0]).toBe('warmthPct');
   expect(keys('dim')).toContain('dimPct');
+  expect(keys('vibrance')).toContain('satPct');
+  expect(keys('desaturate')[0]).toBe('satPct');
   expect(keys('renderer')).toContain('engine');
   expect(keys('freeze')).toContain('inspect');
   expect(keys('crosshair')).toContain('inspect');

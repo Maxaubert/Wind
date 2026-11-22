@@ -91,11 +91,25 @@ test('the sharp radii belong to High contrast only', async ({ page }) => {
   }
 });
 
+test('Screen light: warmth, brightness and saturation (#599), neutral by default; saturation never greyscale', async ({ page }) => {
+  await mockHost(page);
+  await open(page);
+  await go(page, 'prefs');
+  await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Warmth', 'Brightness', 'Saturation']);
+  await expect(row(page, 'warmthPct').locator('input[type=range]')).toHaveValue('0');
+  await expect(row(page, 'dimPct').locator('input[type=range]')).toHaveValue('100');
+  const sat = row(page, 'satPct').locator('input[type=range]');
+  await expect(sat).toHaveValue('100');
+  await expect(sat).toHaveAttribute('min', '20');
+  await expect(sat).toHaveAttribute('max', '150');
+  await expect(sat).toHaveAttribute('step', '5');
+});
+
 test('General holds the theme, the screenshot and advanced switches; the macOS card is last', async ({ page }) => {
   await mockHost(page);
   await open(page);
   await go(page, 'prefs');
   const keys = await page.locator('main .row').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-key')));
-  expect(keys).toEqual(['uiPalette', 'ownScreenshot', 'showAdvanced', 'warmthPct', 'dimPct', '__accessibility', '__screenRecording',
+  expect(keys).toEqual(['uiPalette', 'ownScreenshot', 'showAdvanced', 'warmthPct', 'dimPct', 'satPct', '__accessibility', '__screenRecording',
     '__zoomShortcuts', '__loginItem', 'showMenuBarIcon', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
 });

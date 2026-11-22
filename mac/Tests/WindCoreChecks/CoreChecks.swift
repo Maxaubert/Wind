@@ -443,3 +443,26 @@ struct SessionColourTests {
         expect(!SessionColour.quitKeepsColour(permissionAskedAt: now.addingTimeInterval(-SessionColour.permissionWindow - 1), now: now))
     }
 }
+
+/// Saturation (#599): the overlay's Core Animation matrix is saturationMatrix transposed (CA rows are outputs);
+/// the matrix values themselves are the shared cases (color_cases.txt, sat rows).
+struct SaturationTests {
+    func caMatrixIsTheSharedMatrixTransposed() {
+        for s in [0.2, 0.5, 1.0, 1.25, 1.5] {
+            let m = saturationMatrix(s), f = caColorMatrix(s)
+            for out in 0..<3 { for inp in 0..<3 { expect(abs(Double(f[out * 5 + inp]) - m[inp][out]) < 1e-6) } }
+            for out in 0..<3 { expect(f[out * 5 + 3] == 0 && f[out * 5 + 4] == 0) }      // no alpha mix, no offset
+            expect(f[15...19] == [0, 0, 0, 1, 0])                                       // alpha passes through
+            // Grey stays grey (each output row sums to 1), and a grey's luma is kept.
+            for out in 0..<3 { expect(abs(Double(f[out * 5] + f[out * 5 + 1] + f[out * 5 + 2]) - 1) < 1e-6) }
+        }
+        expect(caColorMatrix(1) == [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0])
+    }
+
+    func neutralOnlyAt100() {
+        expect(saturationIsNeutral(100) && !saturationIsNeutral(95) && !saturationIsNeutral(105))
+        expect(try! Config.load(from: Data(#"{"satPct": 5}"#.utf8)).satPct == 20)
+        expect(try! Config.load(from: Data(#"{"satPct": 400}"#.utf8)).satPct == 150)
+        expect(Config().satPct == 100)
+    }
+}

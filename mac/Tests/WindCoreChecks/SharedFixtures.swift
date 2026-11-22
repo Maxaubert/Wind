@@ -24,7 +24,7 @@ struct SharedFixtureTests {
     func zoomControllerCases() throws { try runFile("zoom_controller_cases.txt", atLeast: 50) }
     func viewOwnerCases() throws { try runFile("view_owner_cases.txt", atLeast: 14) }
     func caretCases() throws { try runFile("caret_cases.txt", atLeast: 20) }
-    func colorCases() throws { try runFile("color_cases.txt", atLeast: 40) }
+    func colorCases() throws { try runFile("color_cases.txt", atLeast: 49) }
 
     func runFile(_ name: String, atLeast: Int) throws {
         let text = try String(contentsOf: Self.dir.appendingPathComponent(name), encoding: .utf8)
@@ -140,6 +140,9 @@ struct SharedFixtureTests {
             try need(2)
             let g = warmGainsSrgb(warm01: a[0], dim01: a[1])
             return [num(g.r), num(g.g), num(g.b)]
+        case "sat":
+            try need(1)
+            return saturationMatrix(a[0]).flatMap { $0.map(num) }
         default:
             throw BadRow("unknown function \(fn)")
         }

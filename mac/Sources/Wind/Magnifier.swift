@@ -175,6 +175,7 @@ final class Magnifier {
         zoom.setEaseOut(seconds: c.zoomEaseOutMs / 1000)
         caret.enabled = c.trackCaret || c.trackFocus
         ColorFilter.apply(warmthPct: c.warmthPct, dimPct: c.dimPct)
+        Saturation.shared.apply(pct: c.satPct)   // its own windows: the transfer formula cannot mix channels
         lastWritten = nil
         wake()
     }
@@ -253,6 +254,7 @@ final class Magnifier {
         caret.stop()
         SkyLight.reset()
         ColorFilter.restore()
+        Saturation.shared.remove()
     }
 
     private func updateScreen() {

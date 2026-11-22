@@ -62,6 +62,7 @@ public struct Config: Codable, Equatable {
     // Colour: session-only (#601), reset in config.json at every plain start (SessionColour.swift).
     public var warmthPct = 0.0                    // 0 = off, 50 = 1200 K (Night light at full), 100 = pure red (ColorMath.swift)
     public var dimPct = 100.0                     // 100 = no dimming
+    public var satPct = 100.0                     // saturation 20..150, 100 = unchanged (#599; never 0: greyscale merges text colours)
 
     /// macOS slows the pointer by the zoom level (it moves in screen space). true = Wind's
     /// behaviour: the pointer covers the same desktop distance per hand movement at any zoom.
@@ -140,6 +141,7 @@ public struct Config: Codable, Equatable {
         trackMarginPct = min(40, max(0, trackMarginPct))
         warmthPct = min(100, max(0, warmthPct))
         dimPct = min(100, max(10, dimPct))
+        satPct = min(150, max(20, satPct))            // maxSat01, minSat01 (ColorMath.swift)
         logLevel = min(3, max(0, logLevel))
         if RenderScaling(rawValue: renderScaling) == nil { renderScaling = 0 }   // like Windows: unknown is Nearest
         if engine != "draw" && engine != "backdrop" { engine = "zoom" }

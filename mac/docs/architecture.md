@@ -640,6 +640,36 @@ when it never settles), so the view follows where the cursor settles. The view-o
   WINDTEST title.
 - `screencapture` captures the desktop before the zoom, so screenshots never show the zoomed view.
 
+## Saturation (`satPct`, #599, 2026-11-22; built without an on-screen run)
+
+Windows applies saturation first in its colour matrix (each channel toward or away from the Rec.709 luma), then
+warmth and brightness, floored at 20%. The Mac's display transfer formula is per channel and cannot mix them, so
+`Saturation.swift` puts a click-through window on each display at `DrawZoom.overlayLevel - 1` (above every app,
+the Dock, Wind's cursor panel and the crosshair; below render's overlay) holding a `CABackdropLayer`
+(`windowServerAware`, what NSVisualEffectView uses) with a `CAFilter` `colorMatrix`: `saturationMatrix` in
+`WindCore/ColorMath.swift`, checked against Windows in `tests/fixtures/shared/color_cases.txt` (`sat` rows).
+It acts in composition, before the transfer formula, so the order is Windows'.
+- 100% puts nothing on screen (no window); back to 100 and at quit the windows close. They die with the process.
+- `sharingType = .none` and `IgnoreForScreencaptureWindowSelection`: screenshots show the real colours, as with warmth.
+- Render: its capture leaves these windows out (also updated on a running stream) and the overlay filters its own
+  picture (`DrawZoom.saturationChanged`, `image` and `metal`), so the colour is applied once whatever the capture
+  does with `sharingType`. Backdrop: the engine's backdrop gets the filter and these layers hide while it is up
+  (`covered`), so no backdrop samples another. Transform: macOS's zoom magnifies them like any window.
+- The hardware cursor is never filtered; neither is Wind's drawn cursor on Render and Backdrop.
+- Cost: only when not 100%. A full-screen backdrop keeps WindowServer compositing it, so full-screen video and
+  games lose direct scan-out (more power). Every damaged rect below is re-filtered; at 1x the backdrop is per
+  pixel, so no keep-alive (Backdrop's engine needs one only because its zoom maps damage elsewhere).
+
+On-screen check (one run, `satPct` 20, then 150, then 100; the e2e suite only checks the windows exist):
+1. 1x: colours calmer at 20% (red text greyish but readable), stronger at 150%; nothing clickable changed, hover
+   and tooltips in apps work, scrolling a Terminal and a playing video stay filtered (no unfiltered patches).
+2. Each engine zoomed (Transform, Render Nearest and xBR, Backdrop): filtered once, no double strength, no
+   unfiltered frame at zoom in or out beyond a single frame; `pan_truth.py` and `hitch_truth.py` as usual.
+3. Cmd+Shift+3/4/5 and Wind's own selection: saved images show the real colours; window mode does not pick Wind.
+4. Power: Activity Monitor's WindowServer energy at 1x with a video playing, 100% vs 20%.
+5. Back to 100%: no Wind window left (`state.json` `saturation.windows` empty); a display unplugged or added while
+   at 20% keeps one window per display.
+
 ## The owner's mouse (Razer Basilisk V3 Pro, 2026-10-30)
 
 Its onboard profile (from Windows) sends: side buttons = mouse 4/5 (Wind zoom), wheel tilt =

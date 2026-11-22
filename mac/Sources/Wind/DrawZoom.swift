@@ -75,7 +75,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private var generation = 0                       // frames from older streams are dropped
     private var starting = false
     private var restarts = 0
-    private(set) var visible = false
+    private(set) var visible = false {
+        didSet { Saturation.shared.covered = visible && DrawZoom.backdrop }   // the backdrop filters itself
+    }
     private(set) var center = CGPoint(x: 0, y: 0)
     private(set) var scale = 1.0
     private var haveFrame = false
@@ -165,6 +167,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             b.setValue(true, forKey: "windowServerAware"); b.setValue(true, forKey: "enabled")
             window?.contentView?.layer?.insertSublayer(b, at: 0)
             backdropLayer = b
+            b.filters = Saturation.shared.makeFilter().map { [$0] }
         }
         guard let b = backdropLayer else { return false }
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -558,6 +561,34 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if stream != nil || starting { stopStream(); Log.info("draw engine: capture stopped (engine switched)") }
     }
 
+    /// Saturation (#599) changed: render filters its own picture (the capture leaves Saturation's windows out,
+    /// which stay below the opaque overlay), Backdrop its own backdrop (Saturation's layers hide while it is up).
+    /// Wind's drawn cursor and the crosshair stay unfiltered, like the real cursor at 1x.
+    func saturationChanged() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        image.filters = Saturation.shared.makeFilter().map { [$0] }
+        metal.filters = Saturation.shared.makeFilter().map { [$0] }
+        backdropLayer?.filters = Saturation.shared.makeFilter().map { [$0] }
+        CATransaction.commit()
+        Saturation.shared.covered = visible && DrawZoom.backdrop
+        updateCaptureExclusions()
+    }
+
+    /// A running capture leaves out the overlay and Saturation's current windows.
+    private func updateCaptureExclusions() {
+        guard let s = stream, let win = window else { return }
+        let left = Set([CGWindowID(win.windowNumber)] + Saturation.shared.windowIDs)
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return }
+                try await s.updateContentFilter(SCContentFilter(display: display, excludingWindows: content.windows.filter { left.contains($0.windowID) }))
+            } catch {
+                Log.error("draw engine: could not update the capture for saturation: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func stopStream() {
         generation += 1
         latest = nil; latestBuffer = nil; captureStale = false
@@ -799,6 +830,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         guard stream == nil, !starting, !DrawZoom.backdrop, let win = window else { return }
         starting = true
         let windowID = CGWindowID(win.windowNumber)
+        let left = Set([windowID] + Saturation.shared.windowIDs)   // Saturation's windows: the overlay filters itself
         generation += 1
         let gen = generation
         Task {
@@ -812,7 +844,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else {
                     throw NSError(domain: "Wind", code: 2, userInfo: [NSLocalizedDescriptionKey: "main display not capturable"])
                 }
-                let own = content.windows.filter { $0.windowID == windowID }
+                let own = content.windows.filter { left.contains($0.windowID) }
                 let filter = SCContentFilter(display: display, excludingWindows: own)
                 let cfg = SCStreamConfiguration()
                 let px = await MainActor.run { NSScreen.screens.first?.backingScaleFactor ?? 2 }
@@ -826,7 +858,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
                 try await s.startCapture()
                 await MainActor.run {
                     self.starting = false
-                    if self.generation == gen && (self.visible || self.idleStop != nil) { self.stream = s } else { s.stopCapture { _ in } }
+                    if self.generation == gen && (self.visible || self.idleStop != nil) {
+                        self.stream = s
+                        if left != Set([windowID] + Saturation.shared.windowIDs) { self.updateCaptureExclusions() }   // changed meanwhile
+                    } else { s.stopCapture { _ in } }
                 }
                 Log.info("draw engine: capturing \(cfg.width)x\(cfg.height), overlay excluded (\(own.count) window)")
             } catch {
