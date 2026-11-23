@@ -152,7 +152,7 @@ static bool SectionSecurityOk(HANDLE section) {
         return false;
     bool ok = owner && IsValidSid(owner) && EqualSid(owner, me);
     bool hasLabel = false;
-    DWORD labelRid = 0;
+    DWORD labelRid = 0, labelPolicy = 0;
     if (ok && sacl) {
         for (DWORD i = 0; i < sacl->AceCount; ++i) {
             void* ace = nullptr;
@@ -161,11 +161,12 @@ static bool SectionSecurityOk(HANDLE section) {
             auto* ml = static_cast<SYSTEM_MANDATORY_LABEL_ACE*>(ace);
             hasLabel = true;
             labelRid = SidLastRid(reinterpret_cast<PSID>(&ml->SidStart));
+            labelPolicy = ml->Mask;
             break;
         }
     }
     if (sd) LocalFree(sd);
-    return ok && BlinkSectionLabelOk(hasLabel, labelRid);
+    return ok && BlinkSectionLabelOk(hasLabel, labelRid, labelPolicy);
 }
 
 // The copy into the tool's section, under an SEH guard: a file-backed section can raise an in-page
@@ -196,7 +197,7 @@ bool BlinkCapture::openSection(const MonitorTarget& mon, DWORD toolPid) {
         return false;
     }
     if (!SectionSecurityOk(section)) {
-        Log(LogLevel::Warn, "blink", "section for pid %lu refused: not this user's or labelled below Medium",
+        Log(LogLevel::Warn, "blink", "section for pid %lu refused: not this user's, or no Medium no-read-up label (Glint older than 0.3.3)",
             (unsigned long)toolPid);
         CloseHandle(section);
         return false;

@@ -35,11 +35,13 @@ TEST_CASE("blink exe base: the file name after the last separator") {
 }
 
 TEST_CASE("blink section label: none means Medium, Low is refused") {
-    CHECK(BlinkSectionLabelOk(false, 0));
-    CHECK(BlinkSectionLabelOk(true, kBlinkMediumRid));
-    CHECK(BlinkSectionLabelOk(true, 0x3000));
-    CHECK_FALSE(BlinkSectionLabelOk(true, kBlinkLowRid));
-    CHECK_FALSE(BlinkSectionLabelOk(true, 0));
+    CHECK(BlinkSectionLabelOk(true, kBlinkMediumRid, kBlinkNoReadUp));
+    CHECK(BlinkSectionLabelOk(true, kBlinkMediumRid, kBlinkNoReadUp | 0x1));   // NWNR, as Glint 0.3.3
+    CHECK(BlinkSectionLabelOk(true, 0x3000, kBlinkNoReadUp));
+    CHECK_FALSE(BlinkSectionLabelOk(false, 0, 0));                            // Glint 0.3.2: no label
+    CHECK_FALSE(BlinkSectionLabelOk(true, kBlinkMediumRid, 0x1));             // no-write-up only
+    CHECK_FALSE(BlinkSectionLabelOk(true, kBlinkLowRid, kBlinkNoReadUp));
+    CHECK_FALSE(BlinkSectionLabelOk(true, 0, kBlinkNoReadUp));
 }
 
 TEST_CASE("blink section: committed, mapped and large enough") {

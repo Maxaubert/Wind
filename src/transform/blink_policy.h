@@ -38,20 +38,22 @@ inline bool BlinkEqualsNoCase(std::wstring_view a, std::wstring_view b) {
 }
 
 // Sender rule: the claimed pid runs at Medium integrity or above, outside an AppContainer, in
-// Wind's session, from an image named glint.exe. The pid is only a claim, so this alone does not
-// stop a Low IL or sandboxed caller: it can name a running Glint's pid, and while Glint's section
-// has no Medium no-read-up label (today's default descriptor) a same-user Low IL process can open
-// that section for reading and take the frame Wind wrote. That path closes only on Glint's side
-// (see docs/architecture/05-transform-engine.md, "Capture blink"). A Medium same-user process is
-// not a boundary: it could read Glint's memory or the screen anyway.
+// Wind's session, from an image named glint.exe. The pid is only a claim: a Low IL or sandboxed
+// caller can name a running Glint's pid. What stops it taking the frame is the section rule below,
+// which requires Glint's Medium no-read-up label, so a Low IL process cannot open the section for
+// reading. A Medium same-user process is not a boundary: it could read Glint's memory or the
+// screen anyway.
 inline bool BlinkSenderOk(uint32_t ilRid, bool appContainer, bool sameSession, std::wstring_view exeBase) {
     return ilRid >= kBlinkMediumRid && !appContainer && sameSession && BlinkEqualsNoCase(exeBase, L"glint.exe");
 }
 
-// Section label rule: no mandatory label means Medium; a label must be Medium or above, so a
-// section created at Low IL (which gets a Low label) is never written.
-inline bool BlinkSectionLabelOk(bool hasLabel, uint32_t labelRid) {
-    return !hasLabel || labelRid >= kBlinkMediumRid;
+// Section label rule: the section carries a mandatory label of Medium or above WITH the no-read-up
+// policy, as Glint 0.3.3 creates it (SDDL S:(ML;;NWNR;;;ME)). Without it a Low IL process could read
+// the frame Wind writes, so Wind writes nothing (Glint then keeps its normal capture). A section with
+// no label (Glint 0.3.2 and older, an implicit Medium no-write-up label) or a Low label is refused.
+constexpr uint32_t kBlinkNoReadUp = 0x2;   // SYSTEM_MANDATORY_LABEL_NO_READ_UP
+inline bool BlinkSectionLabelOk(bool hasLabel, uint32_t labelRid, uint32_t labelPolicy) {
+    return hasLabel && labelRid >= kBlinkMediumRid && (labelPolicy & kBlinkNoReadUp) != 0;
 }
 
 // Section view rule: the mapped view is committed (not a SEC_RESERVE section whose pages fault),

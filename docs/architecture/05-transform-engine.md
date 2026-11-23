@@ -395,15 +395,15 @@ Then:
 
 Reply 1 means the frame is in the section; 0 means not zoomed, refused or a step failed, and Glint
 captures as usual. These checks need no Glint change (the protocol stays v1). An elevated Glint
-creates its section owned by Administrators and is refused; Glint runs unelevated. Wind does not
-stop a Low IL process from reading the frame: it can name a running Glint's pid, Glint's section
-with today's default descriptor (owner the user, no label, so an implicit Medium label with
-no-write-up only) passes every check, and the same-user Low IL process can then open that section
-with `FILE_MAP_READ` and read what Wind wrote. That path closes only when Glint makes its section
-with an explicit owner-only descriptor carrying a Medium no-read-up label
-(`D:P(A;;GA;;;OW)S:(ML;;NWNR;;;ME)`) and fails on `ERROR_ALREADY_EXISTS` (which also stops name
-squatting). A later protocol v2 can then require `SYSTEM_MANDATORY_LABEL_NO_READ_UP` in the
-section's label in `SectionSecurityOk`; v1 cannot, since it would refuse today's Glint. The restore is an explicit write because an unpaused tick only writes on change. Only the
+creates its section owned by Administrators and is refused; Glint runs unelevated. The pid is only
+a claim, so a Low IL process can name a running Glint's pid; what keeps it from reading the frame is
+the section's label. Wind writes only into a section labelled Medium or above with the no-read-up
+policy (`SYSTEM_MANDATORY_LABEL_NO_READ_UP`), which Glint 0.3.3 sets by creating it with
+`D:P(A;;GA;;;OW)S:(ML;;NWNR;;;ME)` (and failing on `ERROR_ALREADY_EXISTS`, which also stops name
+squatting). A Low IL process cannot open such a section for reading. Glint 0.3.2 and older make the
+section with the default descriptor (no label: an implicit Medium label with no-write-up only), so
+Wind refuses them and they keep their normal capture (the blink is only Glint's fallback when
+Windows.Graphics.Capture fails). The restore is an explicit write because an unpaused tick only writes on change. Only the
 transform engine needs this: the render overlay is capture-excluded. `glint.exe` is also in
 `kOverlayExes`, so its overlay freezes the engine pick like the Snipping Tool's ([03](03-engines.md)).
 
