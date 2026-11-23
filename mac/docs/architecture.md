@@ -1245,19 +1245,26 @@ counterpart of Windows' tray flyout (`src/tray_app/flyout_*`), built without an 
   windows out of the menu bar). The `WKWebView` (`drawsBackground` off) is built on the first open and kept,
   hidden, afterwards. The first open waits for the page's height (`panelSize`) before it shows (1.5 s fallback).
 - **Placement** (`WindCore/MenuPanel.swift`, wind-checks): the card's right edge under the icon's right edge, its
-  top 3 pt under the menu bar, clamped to the screen's visible frame; the page reports its height (more while the
+  top 3 pt under the menu bar and the icon (with an auto-hiding menu bar or in a full-screen Space `visibleFrame`
+  reaches the screen top, so the icon is what keeps the card out from under the revealed bar), clamped to the
+  screen's visible frame; the page reports its height (more while the
   engine list hangs below the card) and the window is resized and placed again.
 - **Focus and hover:** an accessory app is not activated by a status item click, and without activation WebKit
   gets no mouse-moved events, so nothing shows hover (Universal Clipboard 7ed027a). Opening calls `NSApp.activate()`
   and makes the panel key; the activation policy stays `.accessory`.
 - **Closing:** focus loss (`windowDidResignKey`), Esc, a second icon click, Settings, Quit. A click on the icon
   within 300 ms of a close is the click that closed it and does not reopen (`MenuPanel.ignoreClick`, Windows'
-  kReopenGuardMs).
+  kReopenGuardMs). A close Wind caused (Esc, the icon, the page's close, the icon hidden) gives activation back
+  to the app that was frontmost when the panel opened (`giveBackFocus`), so the text field Wind follows keeps its
+  keystrokes; not on focus loss, Settings or Quit, nor when Wind was active already.
 - **Writes:** the page posts `setConfig` (sliders, already throttled to one per 50 ms with a flush on release by
   the shared Slider), `setConfigs` (a toggle, both alignment keys at once) and `panelAction setEngine`. The host
-  types each with `SettingsWindowController.setting` and coalesces them: at most one `saveConfig` per 50 ms, the
-  latest flushed by a timer and at close (the page drops focus on close, so a held slider sends its last value).
-  A config change made elsewhere is pushed to the page (`config`), except while a panel write is pending.
+  types each with `SettingsWindowController.setting` and coalesces them: at most one `saveConfig` per 50 ms,
+  flushed by a timer and at close (the page drops focus on close, so a held slider sends its last value). Only the
+  changed keys wait (in arrival order, Windows' WriteThrottle); the flush applies them to the config Wind runs on
+  at that moment, so a change made elsewhere meanwhile is kept. A config change made elsewhere is pushed to the
+  page (`config`), held while a panel write is pending and pushed after its save if it differs. A refused key
+  answers `configWriteFailed`, and the page asks for the config again to undo its optimistic value.
 - **Performance:** `Magnifier.beginTick` pushes every tick interval that is not a wake into a 256-sample ring
   (`WindCore` `TickRing`, Windows' TickStats). While the panel is open and `menuPerf` is on, the host sends the ring
   and the level about 10 times a second (`perf`). At 1x the display link pauses, so the ring keeps the last

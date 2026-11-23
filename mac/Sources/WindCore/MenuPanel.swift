@@ -7,7 +7,8 @@ import Foundation
 /// the status item, when a click on the icon is the same click that just closed it, and the frame-time ring
 /// the Performance header reads. Mirrors Windows' flyout_model.h (placement, IgnoreIconClick) and
 /// tick_stats.h (the 256-sample ring), with Universal Clipboard's Mac panel lessons (2026-11-17): the card's
-/// right edge under the icon's right edge, its top 3 pt under the menu bar, clamped to the visible frame.
+/// right edge under the icon's right edge, its top 3 pt under the menu bar (or the icon, when the menu bar
+/// hides itself), clamped to the visible frame.
 public enum MenuPanel {
     /// The card, as wide as Windows' flyout (kWidth).
     public static let cardWidth: CGFloat = 300
@@ -23,13 +24,15 @@ public enum MenuPanel {
     /// The window frame in AppKit screen coordinates (y up). `icon` is the status item button's frame,
     /// `visible` the screen's visibleFrame (below the menu bar, beside the Dock), `height` the page's
     /// reported height (card plus the bottom margin). The card's right edge sits under the icon's right
-    /// edge and never leaves the visible frame; a page taller than the screen is cut at the bottom.
+    /// edge and never leaves the visible frame; a page taller than the screen is cut at the bottom. The top
+    /// is under the icon too: with an auto-hiding menu bar (or in a full-screen Space) visibleFrame reaches
+    /// the screen top, and the revealed menu bar would cover the card's top.
     public static func frame(icon: CGRect, visible: CGRect, height: CGFloat) -> CGRect {
         let w = windowWidth
         let lo = visible.minX - edge, hi = visible.maxX - cardWidth - edge
         let x = hi < lo ? lo : min(max(icon.maxX - cardWidth - edge, lo), hi)
-        let top = visible.maxY - gap
-        let h = max(1, min(height, visible.height - gap + edge))
+        let top = min(visible.maxY, icon.minY) - gap
+        let h = max(1, min(height, top - visible.minY + edge))
         return CGRect(x: x, y: top - h, width: w, height: h)
     }
 

@@ -46,6 +46,8 @@
     if (m.type === 'config') values = { ...m.values };
     else if (m.type === 'perf') perf = { level: m.level, ms: m.ms || [] };
     else if (m.type === 'panel') setOpen(!!m.open);
+    // A refused write: the page set the value first, so ask the host for what Wind runs on (its config reply redraws).
+    else if (m.type === 'configWriteFailed') post({ type: 'getConfig' });
   });
 
   // ---- writes

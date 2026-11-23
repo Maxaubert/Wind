@@ -86,9 +86,11 @@ time.sleep(0.4)
 p = panel()
 card, icon, vis = p["card"], p["statusItem"], p["visible"]     # [x, y, w, h], top-left origin
 check("the card is 300 wide", abs(card[2] - 300) < 0.5, str(card))
+# A status item never sits past the visible frame's right edge, so the clamp only counts if it did.
 check("its right edge is under the icon's right edge", abs((card[0] + card[2]) - (icon[0] + icon[2])) <= 1
-      or abs((card[0] + card[2]) - (vis[0] + vis[2])) <= 1, f"card {card} icon {icon}")
-check("its top is 3 pt under the menu bar", abs(card[1] - (vis[1] + 3)) <= 1, f"card {card} visible {vis}")
+      or (icon[0] + icon[2] > vis[0] + vis[2] and abs((card[0] + card[2]) - (vis[0] + vis[2])) <= 1), f"card {card} icon {icon}")
+check("its top is 3 pt under the menu bar and the icon", abs(card[1] - (max(vis[1], icon[1] + icon[3]) + 3)) <= 1,
+      f"card {card} visible {vis} icon {icon}")
 check("it is inside the visible frame", card[0] >= vis[0] - 0.5 and card[0] + card[2] <= vis[0] + vis[2] + 0.5
       and card[1] + card[3] <= vis[1] + vis[3] + 0.5, f"card {card} visible {vis}")
 check("Wind is active and the panel is key (hover needs it)", p["active"] and p["key"], f"active {p['active']} key {p['key']}")

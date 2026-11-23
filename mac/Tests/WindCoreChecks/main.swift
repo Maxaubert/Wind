@@ -85,6 +85,7 @@ run("menuLayoutSharedCases", ml.sharedCases)
 let mp = MenuPanelTests()
 run("menuPanelCardUnderTheIcon", mp.cardRightEdgeUnderTheIcon)
 run("menuPanelClamped", mp.clampedToTheVisibleFrame)
+run("menuPanelHiddenMenuBar", mp.underAHiddenMenuBar)
 run("menuPanelReopenGuard", mp.reopenGuard)
 run("menuPanelTickRing", mp.tickRing)
 

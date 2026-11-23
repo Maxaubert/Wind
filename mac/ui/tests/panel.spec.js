@@ -96,6 +96,15 @@ test('toggles write their keys; Keep cursor centred writes both alignments', asy
   await expect(page.getByRole('button', { name: 'Keep cursor centred' })).toHaveAttribute('aria-pressed', 'false');
 });
 
+test('a refused write puts back the value Wind runs on', async ({ page }) => {
+  await openPanel(page, { values: { warmthPct: '40' }, refuse: ['warmthPct'] });
+  const warm = page.getByRole('slider', { name: 'Warmth' });
+  await warm.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await sent(page, 'getConfig')).length).toBeGreaterThan(0);
+  await expect(page.locator('[data-key="warmthPct"] .val')).toHaveText('40%');
+});
+
 test('a config pushed from elsewhere redraws the panel', async ({ page }) => {
   await openPanel(page);
   await page.evaluate(() => window.__hostSend({ type: 'config', push: true, values: { ...window.__live, warmthPct: '70', trackCaret: '0', engine: 'backdrop' } }));

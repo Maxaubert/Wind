@@ -12,7 +12,9 @@ import WindCore
 // open and then kept, hidden, so later opens show at once. Placement and the re-open guard are pure
 // (WindCore/MenuPanel.swift). Lessons from Universal Clipboard's Mac panel (7ed027a, 3bb6252): activate
 // the app on open or WebKit gets no mouse-moved events (no hover, no tooltips); no native shadow, the
-// page draws it; close on focus loss, Esc, a second icon click, Settings and Quit.
+// page draws it; close on focus loss, Esc, a second icon click, Settings and Quit. A close Wind itself
+// caused (Esc, the icon, the page's close) hands activation back to the app that had it, so the text
+// field Wind follows keeps its keystrokes.
 //
 // Page -> host (webkit.messageHandlers.wind): panelSize {h}; getConfig; setConfig {key, value};
 // setConfigs {values}; getMacStatus; panelAction {action: close | openSettings | quit | openPrivacy |
@@ -50,14 +52,19 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
     private var perfTimer: Timer?
     private var lastStatus = ""
     private var pushed: Config?                   // the config the page shows
-    /// Writes are coalesced: at most one per 50 ms, the latest pending one flushed by a timer and at close
-    /// (Windows' WriteThrottle). The page's sliders throttle the same way and flush on release.
-    private var pending: Config?
+    /// Writes are coalesced: at most one per 50 ms, flushed by a timer and at close (Windows' WriteThrottle).
+    /// Only the keys the page changed wait here, in arrival order, and the flush applies them to the config
+    /// Wind runs on at that moment, so a change made elsewhere meanwhile (Settings, config.json, a hotkey)
+    /// is kept. The page's sliders throttle the same way and flush on release.
+    private var pending: [(key: String, value: String)] = []
     private var lastWrite: Double = 0
     private var flushTimer: Timer?
     static let writeGap = 0.05
     /// The control under the pointer (the page reports it), for the test state.
     private(set) var hovered = ""
+    /// The app that was frontmost when the panel opened (nil when it was Wind), and whether Wind was active.
+    private var previousApp: NSRunningApplication?
+    private var wasActive = false
 
     // MARK: open and close
 
@@ -82,7 +89,10 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         startPerf()
         // An accessory app is not activated by a status item click; without this WebKit gets no
         // mouse-moved events, so nothing on the page shows hover (Universal Clipboard 7ed027a). The
-        // activation policy stays .accessory: no Dock icon.
+        // activation policy stays .accessory: no Dock icon. close() gives activation back.
+        wasActive = NSApp.isActive
+        let front = NSWorkspace.shared.frontmostApplication
+        previousApp = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
         NSApp.activate()
         if pageHeight > 0 {
             show(p)
@@ -113,9 +123,25 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         perfTimer?.invalidate(); perfTimer = nil
         send(["type": "panel", "open": false])    // the page drops focus, so a slider's last value arrives
         panel?.orderOut(nil)
+        giveBackFocus(why)
         flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.flush() }
         Log.verbose("menu bar panel: closed (\(why))")
+    }
+
+    /// After a close Wind caused, the app that was frontmost before the panel opened gets activation back.
+    /// Not on focus loss (another app already took it), Settings (it comes forward) or Quit, and not when
+    /// Wind was active already (its Settings window was in front).
+    private func giveBackFocus(_ why: String) {
+        let app = previousApp
+        previousApp = nil
+        guard !["focus", "openSettings", "quit"].contains(why), !wasActive, NSApp.isActive else { return }
+        if let app, !app.isTerminated {
+            NSApp.yieldActivation(to: app)
+            app.activate()
+        } else {
+            NSApp.deactivate()
+        }
     }
 
     /// Size and place the window from the page's height, under the status item.
@@ -180,7 +206,7 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
 
     /// Keep the page in step with config changes made elsewhere (Settings, a text editor, the hotkeys).
     func update(_ c: Config) {
-        guard web != nil, pending == nil, c != pushed else { return }
+        guard web != nil, pending.isEmpty, c != pushed else { return }
         pushed = c
         send(["type": "config", "values": SettingsWindowController.values(c), "push": true])
     }
@@ -227,7 +253,7 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
             pageHeight = CGFloat(h.rounded(.up))
             if pendingShow, let p = panel { show(p) } else if isOpen { place() }
         case "getConfig":
-            let c = pending ?? currentConfig()
+            let c = applied(pending, to: currentConfig()).config
             pushed = c
             send(["type": "config", "values": SettingsWindowController.values(c)])
         case "setConfig":
@@ -254,19 +280,29 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         }
     }
 
-    /// Applies page writes to the latest config (a pending one first) and queues the result.
-    private func write(_ kv: [String: String], now: Bool = false) {
-        var c = pending ?? currentConfig()
-        for (k, v) in kv.sorted(by: { $0.key < $1.key }) {
-            guard let next = SettingsWindowController.setting(c, k, v) else {
-                Log.error("menu bar panel: refused \(k)=\(v)")
-                send(["type": "configWriteFailed", "key": k])
-                return
-            }
-            c = next
+    /// `kv` applied in order to `c` through the Settings typing; the keys it refused are left out.
+    private func applied(_ kv: [(key: String, value: String)], to c: Config) -> (config: Config, refused: [String]) {
+        var c = c, refused: [String] = []
+        for (k, v) in kv {
+            if let next = SettingsWindowController.setting(c, k, v) { c = next } else { refused.append(k) }
         }
-        pending = c
-        pushed = c
+        return (c, refused)
+    }
+
+    /// Checks page writes against the latest config (pending keys first) and queues the keys.
+    private func write(_ kv: [String: String], now: Bool = false) {
+        let keys = kv.sorted(by: { $0.key < $1.key }).map { (key: $0.key, value: $0.value) }
+        let r = applied(pending + keys, to: currentConfig())
+        if let k = r.refused.first(where: { k in keys.contains { $0.key == k } }) {
+            Log.error("menu bar panel: refused \(k)=\(kv[k] ?? "")")
+            send(["type": "configWriteFailed", "key": k])
+            return
+        }
+        for (k, v) in keys {
+            pending.removeAll { $0.key == k }
+            pending.append((k, v))
+        }
+        pushed = r.config                              // what the page shows now
         let t = CACurrentMediaTime()
         if now || t - lastWrite >= MenuBarPanelController.writeGap { flush(); return }
         if flushTimer == nil {
@@ -281,10 +317,18 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
 
     func flush() {
         flushTimer?.invalidate(); flushTimer = nil
-        guard let c = pending else { return }
-        pending = nil
+        guard !pending.isEmpty else { return }
+        let kv = pending
+        pending = []
         lastWrite = CACurrentMediaTime()
-        save?(c)
+        // Applied to the config Wind runs on now, so only these keys change. Saving reloads and calls
+        // update(), which pushes the result to the page if it differs from what the page showed.
+        let r = applied(kv, to: currentConfig())
+        for k in r.refused {
+            Log.error("menu bar panel: refused \(k) at flush")
+            send(["type": "configWriteFailed", "key": k])
+        }
+        save?(r.config)
     }
 
     // MARK: window and navigation

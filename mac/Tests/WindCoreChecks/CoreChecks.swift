@@ -547,6 +547,18 @@ struct MenuPanelTests {
         expect(tall.maxY == 872 && tall.minY == -14)
     }
 
+    func underAHiddenMenuBar() {
+        // An auto-hiding menu bar (or a full-screen Space): visibleFrame reaches the screen top and the
+        // revealed bar holds the icon, so the card hangs under the icon, not behind the bar.
+        let full = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let icon = CGRect(x: 1100, y: 876, width: 30, height: 24)
+        let f = MenuPanel.frame(icon: icon, visible: full, height: 400)
+        expect(f.maxY == 873 && MenuPanel.card(in: f).maxX == icon.maxX && f.height == 400)
+        // Taller than the screen: cut at the bottom, the top still under the icon.
+        let tall = MenuPanel.frame(icon: icon, visible: full, height: 5000)
+        expect(tall.maxY == 873 && tall.minY == -14)
+    }
+
     func reopenGuard() {
         expect(!MenuPanel.ignoreClick(now: 10, closedAt: 0))          // never closed
         expect(MenuPanel.ignoreClick(now: 10.1, closedAt: 10))        // the closing click itself
