@@ -7,13 +7,16 @@ far away, type, and check after every key that the view follows the caret (space
 Never types unless the focused window is the test's own. Needs sudo and an unlocked screen."""
 import os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from windtest import ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
+from windtest import screen_size, ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
 
 if screen_locked(): sys.exit("screen is locked: no app can come to the front")
 SCRATCH = os.path.join(ROOT, ".build/e2e")
 os.makedirs(SCRATCH, exist_ok=True)
 
 relaunch_with_channel()
+W, H = screen_size()
+HW, HH = W / 8, H / 8          # half the 4x view, in points
+CORNER = f"{W - 20} {H - 20}"   # where the pointer is parked, away from every caret
 saved = set_config(logLevel=2, trackCaret=True, trackAlign=0,
                    hidePointerWhileTracking=os.environ.get("HIDE", "1") == "1")
 import atexit
@@ -71,7 +74,7 @@ def run_follow(name, marker, open_app, close_app, settle):
         return
     type_keys("loremipsumdolorsitametconsect", 40)   # move the caret clear of the left edge
     # Zoom in with the pointer parked in a far corner, away from the caret.
-    ctl("level 1"); time.sleep(0.3); ctl("warp 1900 1060"); time.sleep(0.2); ctl("level 4"); time.sleep(0.5)
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {CORNER}"); time.sleep(0.2); ctl("level 4"); time.sleep(0.5)
     far = ctl("state")["center"]
     misses = []
     shown = []
@@ -82,12 +85,14 @@ def run_follow(name, marker, open_app, close_app, settle):
         s = ctl("state"); xs.append(s["center"][0])
         c = s["caret"]
         # A letter must publish a new caret further right (a space may legitimately not, in a TUI).
-        if ch != "_" and (c["kind"] != "caret" or c["seq"] == prev["seq"] or c["rect"][0] <= prev["rect"][0]):
+        # Before the first key the last caret may be the previous test app's (this app sent none at 1x):
+        # the first letter must publish a new caret, the later ones one further right.
+        if ch != "_" and (c["kind"] != "caret" or c["seq"] == prev["seq"] or (i > 0 and c["rect"][0] <= prev["rect"][0])):
             misses.append(f"{i}:{ch} caret did not advance ({prev['rect'][0]:.0f} -> {c['rect'][0]:.0f}, seq {prev['seq']} -> {c['seq']})")
         if ch != "_": prev = c
         r = s["caret"]["rect"]; cx, cy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
-        # The view must show the caret: inside the 4x view (240 x 135 pt either side of its centre).
-        off = max(abs(s["center"][0] - cx) - 240, abs(s["center"][1] - cy) - 135)
+        # The view must show the caret: inside the 4x view (HW x HH pt either side of its centre).
+        off = max(abs(s["center"][0] - cx) - HW, abs(s["center"][1] - cy) - HH)
         if s["owner"] == "caret" and s["cursorVisible"] and os.environ.get("HIDE", "1") == "1":
             shown.append(f"{i}:{ch}")
         if s["owner"] != "caret" or off > -10:
@@ -102,12 +107,12 @@ def run_follow(name, marker, open_app, close_app, settle):
     if marker not in ctl("state")["focusedWindow"]: raise FocusLost(ctl("state")["focusedWindow"])
     vm.stdin.write("button 1 down\n"); vm.stdin.flush(); vm.stdout.readline()
     vm.stdin.write("button 1 up\n"); vm.stdin.flush(); vm.stdout.readline()
-    ctl("level 1"); time.sleep(0.3); ctl("warp 1900 1060"); time.sleep(0.2); ctl("level 4"); time.sleep(0.3)
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {CORNER}"); time.sleep(0.2); ctl("level 4"); time.sleep(0.3)
     late = []
     for i, ch in enumerate("xy_z"):
         type_keys(ch, 50); time.sleep(0.45)
         s = ctl("state"); r = s["caret"]["rect"]
-        off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - 240, abs(s["center"][1] - (r[1] + r[3]) / 2) - 135)
+        off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - HW, abs(s["center"][1] - (r[1] + r[3]) / 2) - HH)
         if s["owner"] != "caret" or off > -10: late.append(f"{i}:{ch} owner={s['owner']} off={off:.0f}")
     check(f"{name}: tracking starts right after a click", not late, "; ".join(late))
     # Owner report 2026-10-30: after typing, moving the mouse put Wind in game mode (macOS kept
@@ -120,7 +125,7 @@ def run_follow(name, marker, open_app, close_app, settle):
         locks += ctl("state")["locked"]
     time.sleep(0.4); s = ctl("state")
     off = max(abs(s["pointer"][0] - s["center"][0]), abs(s["pointer"][1] - s["center"][1])) * s["level"]
-    clamped = s["center"][0] in (240, 1680) or s["center"][1] in (135, 945)
+    clamped = any(abs(s["center"][0] - x) < 0.5 for x in (HW, W - HW)) or any(abs(s["center"][1] - y) < 0.5 for y in (HH, H - HH))
     check(f"{name}: moving the mouse after typing never locks", locks == 0, f"locked on {locks} of 8 probes")
     check(f"{name}: pointer shown again once the mouse moves", s["cursorVisible"], f"visible {s['cursorVisible']}")
     check(f"{name}: pointer centred again after typing", off < 10 or clamped, f"pointer {s['pointer']} view {s['center']} off {off:.0f} screen pt")
@@ -157,7 +162,7 @@ def spotlight_test():
         close_doc(); cleanups.remove(close_doc); return
     type_keys("loremipsumdolorsit", 40)
     cleanups.append(close)
-    ctl("level 1"); time.sleep(0.3); ctl("warp 1900 1060"); time.sleep(0.2)
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {CORNER}"); time.sleep(0.2)
     vcmd("mod cmd down"); vcmd("type _ 50"); vcmd("mod cmd up"); time.sleep(1.0)
     st = ctl("state")
     if st["keyFocusApp"] != SPOTLIGHT:
@@ -174,10 +179,10 @@ def spotlight_test():
         for i, ch in enumerate("ab_cd_ef"):
             keys(ch); time.sleep(0.45)
             s = ctl("state"); c = s["caret"]; r = c["rect"]
-            if ch != "_" and (c["kind"] != "caret" or c["seq"] == prev["seq"] or r[0] <= prev["rect"][0]):
+            if ch != "_" and (c["kind"] != "caret" or c["seq"] == prev["seq"] or (i > 0 and r[0] <= prev["rect"][0])):
                 misses.append(f"{i}:{ch} caret did not advance ({prev['rect'][0]:.0f} -> {r[0]:.0f}, kind {c['kind']})")
             if ch != "_": prev = c
-            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - 240, abs(s["center"][1] - (r[1] + r[3]) / 2) - 135)
+            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - HW, abs(s["center"][1] - (r[1] + r[3]) / 2) - HH)
             if s["owner"] != "caret" or off > -10:
                 misses.append(f"{i}:{'space' if ch == '_' else ch} owner={s['owner']} off={off:.0f}")
         print(f"Spotlight caret rect {prev['rect']}")
@@ -194,9 +199,9 @@ def spotlight_test():
         for i, ch in enumerate("xyz"):
             type_keys(ch, 50); time.sleep(0.45)
             s = ctl("state"); c = s["caret"]; r = c["rect"]
-            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - 240, abs(s["center"][1] - (r[1] + r[3]) / 2) - 135)
+            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - HW, abs(s["center"][1] - (r[1] + r[3]) / 2) - HH)
             # Still attached to Spotlight, its caret would not move: each key must publish a new caret.
-            if c["kind"] != "caret" or c["seq"] == prev["seq"] or r[0] <= prev["rect"][0]:
+            if c["kind"] != "caret" or c["seq"] == prev["seq"] or (i > 0 and r[0] <= prev["rect"][0]):
                 back.append(f"{i}:{ch} caret {c['kind']} {[round(v) for v in r]}")
             elif s["owner"] != "caret" or off > -10: back.append(f"{i}:{ch} owner={s['owner']} off={off:.0f}")
             prev = c

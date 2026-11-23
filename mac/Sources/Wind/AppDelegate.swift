@@ -442,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "owner": "\(mag.viewOwner)", "locked": mag.isLocked, "inspect": mag.inspect,
             "pointer": [p.x, p.y],
             "focusedWindow": focusedWindowTitle(), "keyFocusApp": keyFocusApp(),
+            "screen": [CGDisplayBounds(CGMainDisplayID()).width, CGDisplayBounds(CGMainDisplayID()).height],
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
             "drawn": DrawZoom.shared.visible, "aboveOverlay": DrawZoom.ownersAboveOverlay(),
             // Visible = what the owner sees: shown by the hide count and the system cursor not Wind's

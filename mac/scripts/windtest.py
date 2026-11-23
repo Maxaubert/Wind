@@ -151,3 +151,10 @@ def assert_zoom_live():
     else:
         sys.exit("the zoom is not running (display asleep?): run with `caffeinate -d` and the display on")
     ctl("level 1"); time.sleep(0.3)
+
+
+def screen_size():
+    """The main display in points (W, H), from Wind's test state. Tests derive every place and view
+    size from it: the owner's screens are not all 1920 x 1080 (a MacBook is 1736 x 1133)."""
+    w, h = ctl("state")["screen"]
+    return w, h
