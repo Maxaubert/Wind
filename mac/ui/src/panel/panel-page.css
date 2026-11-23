@@ -1,0 +1,15 @@
+/* Copyright (c) 2026 Max Aubert. All rights reserved.
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+/* The panel page: clear (the window is transparent), no scrolling, no selection, the Mac system fonts. */
+html.panel-page, html.panel-page body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+html.panel-page { color-scheme: dark; }
+*, *::before, *::after { -webkit-user-select: none; user-select: none; }
+img, svg { -webkit-user-drag: none; }
+body { cursor: default; font-family: -apple-system, system-ui, "Helvetica Neue", sans-serif; }
+button { font: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+           clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+                           transition-duration: .01ms !important; }
+}

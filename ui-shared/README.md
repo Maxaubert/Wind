@@ -11,6 +11,8 @@ unchanged: design files, themes, generic controls and shell pieces. Each app imp
   write rules, given each app's items and five config key names), `ItemListsPage.svelte` (props `model`,
   `where`) and `DragList.svelte`. Windows passes `ui/src/tray/trayModel.js`, the Mac
   `mac/ui/src/menubar/menuModel.js`.
+- `controls/Slider.svelte` is also the Mac menu bar panel's slider (`mac/ui/src/panel/Panel.svelte` restyles it to
+  Windows' flyout geometry from outside and relies on its 50 ms write throttle and its flush on release and blur).
 
 - Only platform-neutral files belong here. Anything that reads the schema, the bridge or a platform
   setting stays in its app.

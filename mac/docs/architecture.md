@@ -14,7 +14,8 @@ feasibility research behind it is in `~/Documents/Claude/research/wind-mac/2026-
 | `Sources/Wind/CaretTracker.swift` | Caret and focus following through the Accessibility API. |
 | `Sources/Wind/SystemZoom.swift`, `SettingsToggle.swift` | macOS Zoom clash detection and fixing by pressing System Settings switches. |
 | `Sources/Wind/CommandChannel.swift` | Test-only command file, compiled only into `scripts/build.sh test` builds, used by `scripts/e2e*.py`. |
-| `Sources/Wind/SettingsWindow.swift` | SwiftUI Settings window; edits the same `config.json`. |
+| `Sources/Wind/SettingsWeb.swift` | The Settings window: the `ui/` Svelte page (`index.html`) in a `WKWebView`; edits the same `config.json`. |
+| `Sources/Wind/MenuBarPanel.swift` | The menu bar panel: `ui/panel.html` in a borderless `NSPanel`, opened by a left click on the icon. |
 | `tools/vmouse` | Real HID mouse motion through Karabiner's virtual HID device, for `scripts/e2e_mouse.py`. |
 | `tools/fakegame` | A foreground app that hides and disassociates the pointer like a game's mouse-look. |
 
@@ -1042,7 +1043,7 @@ through) and macOS zoom itself are not involved (research/wind-mac/re/2026-11-02
 ### Render scaling (`renderScaling`, 0.4.0, 2026-11-03)
 
 Render has its own Scaling row (Settings, Zoom, Engine card, only on Render; Transform's row is macOS's
-two) and a Scaling submenu in the menu bar. It offers **Nearest and xBR only** (owner 2026-11-03, after
+two). It offers **Nearest and xBR only** (owner 2026-11-03, after
 trying NIS, Smooth (bilinear) and Sharp (bicubic) by eye: they were built and removed). Values keep
 Windows' meaning (`config.h renderScaling`): 0 Nearest (default, as on Windows), 1 xBR. Anything else,
 Windows' 2 (NVIDIA Image Scaling) included, loads as Nearest. `smoothImages` is Transform's alone and
@@ -1172,7 +1173,7 @@ caret following off. Each Tab must move the view onto the focused button; passes
 Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
 - **Opening Wind again** while it runs (Spotlight, Finder, `open -a Wind`) opens this window, or the
   setup when `needsSetup` holds (`applicationShouldHandleReopen`, 0.5.8).
-- **Menu bar icon** (0.6.0): `showMenuBarIcon` (menu item "Show in menu bar", and a row on the Menu bar page) hides the status
+- **Menu bar icon** (0.6.0): `showMenuBarIcon` (the right-click menu's "Hide menu bar icon…", and a row on the Menu bar page) hides the status
   item; Wind keeps running and opening it again shows Settings. It always shows while Accessibility is missing.
 - **Menu bar page** (0.9.0): Settings > Menu bar holds `showMenuBarIcon`, the panel's Performance header
   (`menuPerf`) and its Sliders and Toggles lists (`menuSliders`, `menuSliderOrder`, `menuToggles`,
@@ -1213,6 +1214,57 @@ Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-sp
   the same files). Rows tagged `all` come from the Windows code and must match here; deliberate
   differences (wheel glide spring, key pan speed, `setLevel` stopping the ease-out, the still view) are
   `win`/`mac` rows.
+
+## Menu bar panel (0.9.0, 2026-11-23)
+Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-23-menu-bar-and-blink-plan.md` (Part 1). The Mac
+counterpart of Windows' tray flyout (`src/tray_app/flyout_*`), built without an on-screen run yet
+(`scripts/e2e_menubar.py` is the check).
+- **Icon:** the status item shows the glyph only (owner 2026-11-23: no zoom level, no warning sign; the panel
+  shows both), plus " needs access" while Accessibility is missing. The glyph comes from one function,
+  `AppDelegate.statusIcon()` (still the SF Symbol `plus.magnifyingglass`; Wind's own glyph replaces it there).
+  The button has no `menu`: its action runs on mouse up and picks by the event. A left click toggles the panel;
+  a right click or Ctrl click shows a small native menu (Open at login, Edit settings file…, Show log, Hide menu
+  bar icon…, Quit Wind), set as the item's menu only while it tracks (`showContextMenu`). The test command
+  `menu <secs>` opens that native menu.
+- **Page:** `ui/panel.html` (`ui/src/panel/Panel.svelte`), a second Vite entry of the Settings build, served from
+  the same `wind://ui/` scheme (`UIFiles`). Windows' layout, order and sizes (`flyout_model.h` ComputeGeometry):
+  a 300 pt card; the Performance header (96 pt: the level "7.4x" or "Idle", fps, the frame-time trace and the mean
+  in ms) when `menuPerf` is on; up to four slider rows (40 pt) in `menuSliders`/`menuSliderOrder` order, ranges and
+  steps taken from the Settings rows; the toggle group (one 32 pt bar, a segment per toggle) and the engine field
+  (Transform, Render, Backdrop) in `menuToggles` order; Settings and Quit at the bottom (no profiles on the Mac).
+  Mac-only banners sit on top only while needed: Accessibility missing (Open Privacy) and macOS Zoom shortcuts on
+  (Turn off). "Keep cursor centred" is one segment for `mouseAlign` and `trackAlign` together, on only when both
+  are 0, as on Windows. The engine field opens Wind's own list below it (never macOS's menu over it, as Settings'
+  selects). Colours are the flyout's four palettes (`ui/src/panel/palettes.css`, the values of
+  `flyout_palettes.h`) picked by `uiPalette`; hover 120 ms, press 80 ms, toggle 150 ms, fade in 120 ms, none with
+  reduced motion. The view model is pure (`ui/src/panel/panelModel.js`, ports of BuildView, ToggleOn,
+  ToggleChanges, BuildPerf, SparkNorm, FormatZoom), checked by `tests/panel-model.nodetest.mjs`; the page by
+  `tests/panel.spec.js` (mock host).
+- **Window:** `MenuPanelWindow`, a borderless `NSPanel` that can become key, floating level, clear background, no
+  native shadow (the page draws it in a 14 pt clear margin left, right and below the card; none above, macOS keeps
+  windows out of the menu bar). The `WKWebView` (`drawsBackground` off) is built on the first open and kept,
+  hidden, afterwards. The first open waits for the page's height (`panelSize`) before it shows (1.5 s fallback).
+- **Placement** (`WindCore/MenuPanel.swift`, wind-checks): the card's right edge under the icon's right edge, its
+  top 3 pt under the menu bar, clamped to the screen's visible frame; the page reports its height (more while the
+  engine list hangs below the card) and the window is resized and placed again.
+- **Focus and hover:** an accessory app is not activated by a status item click, and without activation WebKit
+  gets no mouse-moved events, so nothing shows hover (Universal Clipboard 7ed027a). Opening calls `NSApp.activate()`
+  and makes the panel key; the activation policy stays `.accessory`.
+- **Closing:** focus loss (`windowDidResignKey`), Esc, a second icon click, Settings, Quit. A click on the icon
+  within 300 ms of a close is the click that closed it and does not reopen (`MenuPanel.ignoreClick`, Windows'
+  kReopenGuardMs).
+- **Writes:** the page posts `setConfig` (sliders, already throttled to one per 50 ms with a flush on release by
+  the shared Slider), `setConfigs` (a toggle, both alignment keys at once) and `panelAction setEngine`. The host
+  types each with `SettingsWindowController.setting` and coalesces them: at most one `saveConfig` per 50 ms, the
+  latest flushed by a timer and at close (the page drops focus on close, so a held slider sends its last value).
+  A config change made elsewhere is pushed to the page (`config`), except while a panel write is pending.
+- **Performance:** `Magnifier.beginTick` pushes every tick interval that is not a wake into a 256-sample ring
+  (`WindCore` `TickRing`, Windows' TickStats). While the panel is open and `menuPerf` is on, the host sends the ring
+  and the level about 10 times a second (`perf`). At 1x the display link pauses, so the ring keeps the last
+  session's ticks, as on Windows.
+- **Test build:** `panel open|close|js <base64>` on the command channel; `state.json` has `panel` (open, key,
+  active, frame, card, status item and visible frame in CG top-left coordinates, the hovered control the page
+  reports).
 
 ## Hitches as apps open (owner 2026-11-04)
 "As if it's getting scheduled out", when a prompt appears or an app opens: a brief freeze on Render. The OS was

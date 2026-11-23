@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
     private var polls = 0
     private let settingsWindow = SettingsWindowController()
+    /// The panel a left click on the icon opens (MenuBarPanel.swift); a right or Ctrl click shows `contextMenu`.
+    private let panel = MenuBarPanelController()
+    private let contextMenu = NSMenu()
     /// When Wind last asked for a permission (a Privacy & Security pane opened, or a permission it needs
     /// missing at launch, so macOS asks): a quit soon after is likely macOS's "Quit & Reopen" after the
     /// grant, which keeps the screen colour (SessionColour, #601).
@@ -35,11 +38,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HIDGain.restoreSaved()
         Watchdog.spawn()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "plus.magnifyingglass", accessibilityDescription: "Wind")
+        statusItem.button?.image = AppDelegate.statusIcon()
         statusItem.button?.imagePosition = .imageLeading
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.toolTip = "Wind"
+        // No statusItem.menu: the button's action decides between the panel (left click) and the small
+        // native menu (right or Ctrl click), on mouse up like any status item.
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusClicked(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        contextMenu.delegate = self
+        setUpPanel()
 
         guard SkyLight.available else {
             alert("Wind cannot zoom on this macOS version", "The system zoom functions Wind uses were not found.")
@@ -48,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         resetSessionColour()
         loadConfig(force: true)
-        mag.onLevelChange = { [weak self] lv in self?.showLevel(lv) }
         mag.onQuitRequested = { NSApp.terminate(nil) }
         mag.onSessionStart = { [weak self] in self?.releaseSystemZoomOnZoomIn() }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
@@ -105,15 +112,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
         guard AXIsProcessTrustedWithOptions(opts) else {
             if prompt { Log.info("waiting for Accessibility permission") }
-            statusItem.button?.title = " needs access"
+            refreshTitle()
             return
         }
         guard mag.start() else {
-            statusItem.button?.title = " needs access"
+            refreshTitle()
             return
         }
         started = true
-        statusItem.button?.title = ""
+        refreshTitle()
         applyMenuBarIcon()
         checkSystemZoom()
         Log.info("started; binds: " + Action.allCases.map { a in
@@ -124,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !started { tryStart(prompt: false) }
         if polls % 8 == 0 { checkSystemZoom() }
         if polls % 4 == 0 && settingsWindow.isOpen { settingsWindow.pushMacStatusIfChanged() }   // live permission status
+        if polls % 4 == 0 { panel.pushMacStatusIfChanged() }
         polls += 1
         loadConfig(force: false)
         #if WIND_TEST_CHANNEL
@@ -140,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             zoomShortcuts = on
             if on.isEmpty { Log.info("macOS Zoom shortcuts: all off") }
             else { Log.info("macOS Zoom shortcuts on (they clash with Wind): \(on.joined(separator: ", "))") }
-            showLevel(mag.level)
+            panel.pushMacStatusIfChanged()
         }
     }
 
@@ -209,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             mag.apply(c)
             applyMenuBarIcon()
             settingsWindow.update(c)
+            panel.update(c)
             Log.info("config loaded")
         } catch {
             Log.error("config.json unreadable, keeping the previous settings: \(error.localizedDescription)")
@@ -234,73 +243,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         configMTime = (try? FileManager.default.attributesOfItem(atPath: Paths.config.path))?[.modificationDate] as? Date
     }
 
-    // MARK: menu
+    // MARK: menu bar icon, panel and menu
 
-    private func showLevel(_ lv: Double) {
-        guard started else { return }
-        let warn = zoomShortcuts.isEmpty ? "" : " ⚠︎"
-        statusItem.button?.title = (lv > 1.01 ? String(format: " %.1fx", lv) : "") + warn
+    /// The menu bar glyph, in one place so swapping it is one line. A template image: macOS tints it.
+    static func statusIcon() -> NSImage? {
+        let i = NSImage(systemSymbolName: "plus.magnifyingglass", accessibilityDescription: "Wind")
+        i?.isTemplate = true
+        return i
     }
 
+    /// The icon only (owner 2026-11-23: no zoom level, no warning sign); the panel shows both. While
+    /// Accessibility is missing the title says so, as before.
+    private func refreshTitle() {
+        statusItem.button?.title = started ? "" : " needs access"
+    }
+
+    private func setUpPanel() {
+        panel.currentConfig = { [weak self] in self?.mag.config ?? Config() }
+        panel.save = { [weak self] c in self?.saveConfig { $0 = c } }
+        panel.macStatus = { [weak self] in self?.macStatusDict() ?? [:] }
+        panel.perf = { [weak self] in (self?.mag.level ?? 1, self?.mag.tickRing.samples ?? []) }
+        panel.anchor = { [weak self] in
+            guard let b = self?.statusItem.button, let w = b.window, self?.statusItem.isVisible == true else { return nil }
+            return w.convertToScreen(b.convert(b.bounds, to: nil))
+        }
+        panel.action = { [weak self] a in
+            switch a {
+            case "openSettings": self?.showSettings(onboard: false)
+            case "quit": NSApp.terminate(nil)
+            case "openPrivacy": self?.openPrivacy()
+            case "fixZoomShortcuts": self?.turnOffSystemZoom()
+            default: break
+            }
+        }
+    }
+
+    /// Left click: the panel. Right click or Ctrl click: the native menu with the rest.
+    @objc private func statusClicked(_ sender: Any?) {
+        let e = NSApp.currentEvent
+        if e?.type == .rightMouseUp || e?.modifierFlags.contains(.control) == true { showContextMenu() }
+        else { panel.toggle() }
+    }
+
+    private func showContextMenu() {
+        panel.close("menu")
+        statusItem.menu = contextMenu
+        statusItem.button?.performClick(nil)                 // tracks the menu under the icon, highlighted
+        statusItem.menu = nil
+    }
+
+    func menuDidClose(_ menu: NSMenu) { statusItem.menu = nil }
+
+    /// The native menu (right or Ctrl click): what the panel does not show. Rebuilt on every open.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let c = mag.config
-        func item(_ title: String, _ action: Selector?, on: Bool = false, tag: Int = 0) -> NSMenuItem {
+        func item(_ title: String, _ action: Selector?, on: Bool = false) -> NSMenuItem {
             let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            i.target = self; i.state = on ? .on : .off; i.tag = tag
+            i.target = self; i.state = on ? .on : .off
             return i
         }
-        if !started {
-            menu.addItem(item("Wind needs the Accessibility permission", nil))
-            menu.addItem(item("Open Privacy & Security…", #selector(openPrivacy)))
-            menu.addItem(.separator())
-        }
-        if !zoomShortcuts.isEmpty {
-            menu.addItem(item("⚠︎ macOS Zoom shortcuts are on and clash with Wind", nil))
-            menu.addItem(item("Turn off macOS Zoom shortcuts", #selector(turnOffSystemZoom)))
-            menu.addItem(.separator())
-        }
-        // A short menu (owner 2026-11-03: too many items, bad order): the engine, what the view follows,
-        // then the app. Everything else is in Settings; the two items Settings has no row for sit in More.
-        let engines = NSMenu()
-        for (id, label) in [("draw", "Render"), ("backdrop", "Backdrop"), ("zoom", "Transform")] {
-            let e = item(label, #selector(setEngine(_:)), on: c.engine == id); e.representedObject = id
-            engines.addItem(e)
-        }
-        let ei = item("Engine", nil); ei.submenu = engines
-        menu.addItem(ei)
-        menu.addItem(.separator())
-        menu.addItem(item("Follow text caret", #selector(toggleCaret), on: c.trackCaret))
-        menu.addItem(item("Follow keyboard focus", #selector(toggleFocus), on: c.trackFocus))
-        menu.addItem(item("Mouse within edges", #selector(toggleEdge), on: c.mouseAlign == 1))
-        menu.addItem(.separator())
         menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
-        menu.addItem(item("Show in menu bar", #selector(hideMenuBarIcon), on: true))
-        menu.addItem(item("Settings…", #selector(openSettings)))
-        let more = NSMenu()
-        more.addItem(item("Edit settings file…", #selector(openConfig)))
-        more.addItem(item("Show log", #selector(openLog)))
-        let mi = item("More", nil); mi.submenu = more
-        menu.addItem(mi)
+        menu.addItem(item("Edit settings file…", #selector(openConfig)))
+        menu.addItem(item("Show log", #selector(openLog)))
+        menu.addItem(item("Hide menu bar icon…", #selector(hideMenuBarIcon)))
         menu.addItem(.separator())
-        let q = item("Quit Wind", #selector(quit))
-        menu.addItem(q)
+        menu.addItem(item("Quit Wind", #selector(quit)))
     }
 
-    @objc private func toggleCaret() { saveConfig { $0.trackCaret.toggle() } }
-    @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
-    @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
-    @objc private func setEngine(_ i: NSMenuItem) { if let e = i.representedObject as? String { saveConfig { $0.engine = e } } }
+    /// Permissions, macOS Zoom shortcuts, login item and log level, for Settings and the panel.
+    private func macStatusDict() -> [String: Any] {
+        ["accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(),
+         "zoomShortcuts": zoomShortcuts, "loginItem": SMAppService.mainApp.status == .enabled,
+         "logLevel": mag.config.logLevel]
+    }
+
     @objc private func openSettings() { showSettings(onboard: false) }
 
     func showSettings(onboard: Bool) {
         settingsWindow.onCapture = { [weak self] on in self?.mag.bindsSuspended = on }
         settingsWindow.runningEngine = { DrawZoom.enabled ? (DrawZoom.backdrop ? "backdrop" : "draw") : "zoom" }
-        settingsWindow.macStatus = { [weak self] in
-            ["accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(),
-             "zoomShortcuts": self?.zoomShortcuts ?? [], "loginItem": SMAppService.mainApp.status == .enabled,
-             "logLevel": self?.mag.config.logLevel ?? 1]
-        }
+        settingsWindow.macStatus = { [weak self] in self?.macStatusDict() ?? [:] }
         settingsWindow.macAction = { [weak self] action, value in
             switch action {
             case "openAccessibility":
@@ -332,6 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The icon shows while Wind lacks Accessibility whatever the setting: it is where Wind says so.
     private func applyMenuBarIcon() {
         statusItem?.isVisible = mag.config.showMenuBarIcon || !started
+        if statusItem?.isVisible == false { panel.close("icon hidden") }
     }
 
     @objc private func hideMenuBarIcon() {
@@ -379,15 +402,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         writeState()
     }
 
-    /// Open Wind's own menu-bar menu for `secs` (it closes itself: the command file is not read while a
-    /// menu tracks). scripts/blink_truth.py moves the pointer through it while zoomed.
+    /// Open Wind's own native menu (the right-click menu) for `secs` (it closes itself: the command file
+    /// is not read while a menu tracks). scripts/blink_truth.py moves the pointer through it while zoomed.
     func testMenu(_ secs: Double) {
         if let f = statusItem.button?.window?.frame { Log.info(String(format: "status item at %.0f,%.0f %.0fx%.0f", f.minX, f.minY, f.width, f.height)) }
         DispatchQueue.main.async {
-            let menu = self.statusItem.menu
-            let t = Timer(timeInterval: secs, repeats: false) { _ in Log.info("test menu: closing (run loop mode \(RunLoop.current.currentMode?.rawValue ?? "?"))"); menu?.cancelTracking() }
+            let menu = self.contextMenu
+            let t = Timer(timeInterval: secs, repeats: false) { _ in Log.info("test menu: closing (run loop mode \(RunLoop.current.currentMode?.rawValue ?? "?"))"); menu.cancelTracking() }
             RunLoop.main.add(t, forMode: .common)
-            self.statusItem.button?.performClick(nil)
+            self.showContextMenu()
+        }
+    }
+
+    /// Menu bar panel commands for scripts/e2e_menubar.py: open, close, js <base64 body>.
+    func testPanel(_ w: [String]) {
+        switch w.first ?? "" {
+        case "open": panel.open()
+        case "close": panel.close("test")
+        case "js":
+            guard w.count > 1, let d = Data(base64Encoded: w[1]), let body = String(data: d, encoding: .utf8) else { return }
+            panel.testEval(body)
+        default: break
         }
     }
 
@@ -462,6 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "config": (try? JSONSerialization.jsonObject(with: mag.config.encoded())) ?? NSNull(),   // what Wind runs on now
             "settings": ["open": settingsWindow.isOpen, "windowId": settingsWindow.testWindowId, "url": settingsWindow.testLoadedURL],
+            "panel": panel.testState(),
             "caret": ["kind": "\(mag.caret.snapshot.kind)", "seq": mag.caret.snapshot.seq,
                       "rect": [mag.caret.snapshot.rect.l, mag.caret.snapshot.rect.t, mag.caret.snapshot.rect.r, mag.caret.snapshot.rect.b]],
         ]

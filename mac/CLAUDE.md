@@ -22,6 +22,7 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `python3 scripts/e2e_settings.py`: the settings window in the test build (page writes, keybinds, setup).
 - `python3 scripts/e2e_settings_mouse.py`: the settings window ON SCREEN with real clicks and keys (select list, slider arrows),
   and no real cursor over it zoomed on render (Wind's own cursor sets, `ClearCursor.hookOwnSets`).
+- `python3 scripts/e2e_menubar.py`: the menu bar panel ON SCREEN with real input (vmouse, sudo): placement under the icon, hover, slider and toggle writes, Esc, outside click, icon clicks, the right-click menu.
 - `python3 scripts/e2e.py`: e2e checks; builds and runs the test app in place of the installed one, restores it after.
 - `python3 scripts/e2e_mouse.py`: real-HID pointer e2e via `tools/vmouse` (Karabiner, sudo).
 - `python3 scripts/e2e_caret.py`: real typing in TextEdit, Terminal, Safari, Chrome, Claude Code

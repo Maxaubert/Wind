@@ -89,7 +89,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     func update(_ c: Config) {
         guard c != config else { return }
         config = c
-        send(["type": "config", "values": values(c), "saved": values(c), "runningModel": runningEngine(), "push": true])
+        send(["type": "config", "values": Self.values(c), "saved": Self.values(c), "runningModel": runningEngine(), "push": true])
     }
 
     /// Push the macOS status (a permission granted, the login item changed...).
@@ -123,7 +123,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
             }
         }
         let resume = onboard && resumeSetup
-        let initJSON = json(["values": values(config), "saved": values(config), "runningModel": runningEngine(),
+        let initJSON = json(["values": Self.values(config), "saved": Self.values(config), "runningModel": runningEngine(),
                              "mac": macStatus(), "resume": resume])
         let ucc = web.configuration.userContentController
         ucc.removeAllUserScripts()
@@ -139,10 +139,10 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         switch type {
         case "ready": break
         case "getConfig":
-            send(["type": "config", "values": values(config), "saved": values(config), "runningModel": runningEngine()])
+            send(["type": "config", "values": Self.values(config), "saved": Self.values(config), "runningModel": runningEngine()])
         case "setConfig", "setConfigPersist":
             let key = s("key")
-            if let c = setting(config, key, s("value")) {
+            if let c = Self.setting(config, key, s("value")) {
                 config = c
                 save?(c)
                 if key == "onboarded" && c.onboarded { UserDefaults.standard.removeObject(forKey: SettingsWindowController.setupInProgressKey) }
@@ -177,7 +177,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
 
     /// The config as the page sees it: every value a string (as Windows' ini), bools "1"/"0", bind
     /// lists comma-joined.
-    func values(_ c: Config) -> [String: String] {
+    static func values(_ c: Config) -> [String: String] {
         guard let d = try? JSONSerialization.jsonObject(with: c.encoded()) as? [String: Any] else { return [:] }
         var out: [String: String] = [:]
         for (k, v) in d {
@@ -192,7 +192,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
 
     /// A config with `key` set from the page's string, by the key's type in Config; nil if the key is
     /// unknown or the value does not parse.
-    func setting(_ c: Config, _ key: String, _ value: String) -> Config? {
+    static func setting(_ c: Config, _ key: String, _ value: String) -> Config? {
         guard var d = try? JSONSerialization.jsonObject(with: c.encoded()) as? [String: Any], let old = d[key] else { return nil }
         if let n = old as? NSNumber {
             if CFGetTypeID(n) == CFBooleanGetTypeID() {
@@ -282,7 +282,10 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         NSApp.mainMenu = main
     }
 
-    private func json(_ o: Any) -> String {
+    private func json(_ o: Any) -> String { Self.jsonText(o) }
+
+    /// JSON text for evaluateJavaScript (shared with the menu bar panel).
+    static func jsonText(_ o: Any) -> String {
         guard let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]), let s = String(data: d, encoding: .utf8) else { return "{}" }
         // U+2028/2029 are valid JSON but end a line in older JavaScript; escape them for evaluateJavaScript.
         return s.replacingOccurrences(of: "\u{2028}", with: "\\u2028").replacingOccurrences(of: "\u{2029}", with: "\\u2029")
@@ -290,7 +293,7 @@ final class SettingsWindowController: NSObject, WKScriptMessageHandler, WKNaviga
 }
 
 /// WKUserContentController retains its handlers; this breaks the cycle with the controller.
-private final class WeakHandler: NSObject, WKScriptMessageHandler {
+final class WeakHandler: NSObject, WKScriptMessageHandler {
     weak var target: WKScriptMessageHandler?
     init(_ t: WKScriptMessageHandler) { target = t }
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -299,7 +302,8 @@ private final class WeakHandler: NSObject, WKScriptMessageHandler {
 }
 
 /// Serves the built UI (Resources/ui) at wind://ui/... : ES modules do not load from file URLs.
-private final class UIFiles: NSObject, WKURLSchemeHandler {
+/// The Settings window and the menu bar panel (panel.html) both load from it.
+final class UIFiles: NSObject, WKURLSchemeHandler {
     static var root: URL? {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("ui"), FileManager.default.fileExists(atPath: r.path) { return r }
         return nil
