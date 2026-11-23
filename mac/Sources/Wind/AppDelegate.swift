@@ -415,6 +415,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return (app.localizedName ?? "") + ": " + ((t as? String) ?? "")
     }
 
+    /// Bundle id of the app that has keyboard focus, which need not be the frontmost one (Spotlight).
+    private func keyFocusApp() -> String {
+        let sys = AXUIElementCreateSystemWide()
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &v) == .success, let v else { return "" }
+        var p: pid_t = 0
+        AXUIElementGetPid(v as! AXUIElement, &p)
+        return NSRunningApplication(processIdentifier: p)?.bundleIdentifier ?? ""
+    }
+
     /// Wind's own screenshot selection (its own function: inline, the state literal outgrew the type checker).
     private func shotState() -> [String: Any] {
         let sh = mag.shot
@@ -431,7 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "level": mag.level, "center": [mag.currentCenter.x, mag.currentCenter.y],
             "owner": "\(mag.viewOwner)", "locked": mag.isLocked, "inspect": mag.inspect,
             "pointer": [p.x, p.y],
-            "focusedWindow": focusedWindowTitle(),
+            "focusedWindow": focusedWindowTitle(), "keyFocusApp": keyFocusApp(),
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
             "drawn": DrawZoom.shared.visible, "aboveOverlay": DrawZoom.ownersAboveOverlay(),
             // Visible = what the owner sees: shown by the hide count and the system cursor not Wind's

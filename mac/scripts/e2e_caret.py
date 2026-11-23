@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
 # Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """Caret-following end-to-end checks with REAL key presses (tools/vmouse, Karabiner's virtual
-keyboard) in several apps. For each app: open a dedicated window, zoom in with the pointer parked
+keyboard) in several apps, and in Spotlight. For each app: open a dedicated window, zoom in with the pointer parked
 far away, type, and check after every key that the view follows the caret (spaces included).
 Never types unless the focused window is the test's own. Needs sudo and an unlocked screen."""
 import os, subprocess, sys, time
@@ -134,6 +134,79 @@ def run_follow(name, marker, open_app, close_app, settle):
     back = [round(b - a) for a, b in zip(xs, xs[1:]) if b - a < -30]
     check(f"{name}: the view never jumps back while typing forward", not back, f"view x per key {[round(x) for x in xs]}")
     ctl("level 1")
+
+SPOTLIGHT = "com.apple.campo"     # Spotlight's panel (macOS 27): takes keyboard focus, never the frontmost app
+def spotlight_test():
+    """Spotlight never becomes the frontmost app, so Wind must find it from the keyboard focus
+    (owner 2026-11-23: the view stayed put while typing in Spotlight). Types only while Spotlight
+    has keyboard focus; never presses Enter, closes it with Escape."""
+    if os.environ.get("CARET_ONLY") and os.environ["CARET_ONLY"] != "Spotlight": return
+    def vcmd(c): vm.stdin.write(c + "\n"); vm.stdin.flush(); vm.stdout.readline()
+    def close():
+        for _ in range(2):
+            if ctl("state")["keyFocusApp"] == SPOTLIGHT: vcmd("type ^ 50"); time.sleep(0.3)
+    # A TextEdit window of the test's own behind Spotlight: after Escape the keys go back to it with no
+    # app switch, and Wind must follow its caret again.
+    doc = os.path.join(SCRATCH, "windtest-spot.txt"); open(doc, "w").close()
+    close_doc = lambda: osa('tell application "TextEdit" to close (every window whose name contains "windtest-spot") saving no')
+    cleanups.append(close_doc)
+    subprocess.run(["open", "-a", "TextEdit", doc]); time.sleep(2.5)
+    MARKER[0] = "windtest-spot"
+    if MARKER[0] not in ctl("state")["focusedWindow"]:
+        check("Spotlight: TextEdit window behind it focused", False, f"focused {ctl('state')['focusedWindow']!r}")
+        close_doc(); cleanups.remove(close_doc); return
+    type_keys("loremipsumdolorsit", 40)
+    cleanups.append(close)
+    ctl("level 1"); time.sleep(0.3); ctl("warp 1900 1060"); time.sleep(0.2)
+    vcmd("mod cmd down"); vcmd("type _ 50"); vcmd("mod cmd up"); time.sleep(1.0)
+    st = ctl("state")
+    if st["keyFocusApp"] != SPOTLIGHT:
+        check("Spotlight: opened with Cmd+Space", False, f"keyboard focus in {st['keyFocusApp']!r}")
+        cleanups.remove(close); return
+    def keys(text):
+        if ctl("state")["keyFocusApp"] != SPOTLIGHT: raise FocusLost(ctl("state")["keyFocusApp"])
+        vcmd(f"type {text} 50")
+    try:
+        keys("loremipsum"); time.sleep(0.3)
+        ctl("level 4"); time.sleep(0.5)
+        far = ctl("state")["center"]
+        prev = ctl("state")["caret"]; misses = []
+        for i, ch in enumerate("ab_cd_ef"):
+            keys(ch); time.sleep(0.45)
+            s = ctl("state"); c = s["caret"]; r = c["rect"]
+            if ch != "_" and (c["kind"] != "caret" or c["seq"] == prev["seq"] or r[0] <= prev["rect"][0]):
+                misses.append(f"{i}:{ch} caret did not advance ({prev['rect'][0]:.0f} -> {r[0]:.0f}, kind {c['kind']})")
+            if ch != "_": prev = c
+            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - 240, abs(s["center"][1] - (r[1] + r[3]) / 2) - 135)
+            if s["owner"] != "caret" or off > -10:
+                misses.append(f"{i}:{'space' if ch == '_' else ch} owner={s['owner']} off={off:.0f}")
+        print(f"Spotlight caret rect {prev['rect']}")
+        check("Spotlight: view leaves the parked pointer for the caret", abs(far[0] - ctl("state")["center"][0]) > 100,
+              f"view {far} -> {ctl('state')['center']}")
+        check("Spotlight: every key keeps the caret in view", not misses, "; ".join(misses))
+    except FocusLost as e:
+        check("Spotlight: kept keyboard focus", False, f"focus moved to {e}; stopped typing")
+    close(); cleanups.remove(close); time.sleep(0.5)
+    check("Spotlight: closed again", ctl("state")["keyFocusApp"] != SPOTLIGHT, f"keyboard focus in {ctl('state')['keyFocusApp']!r}")
+    # Back in TextEdit (no app switch): the caret there owns the view again.
+    try:
+        back = []; prev = ctl("state")["caret"]
+        for i, ch in enumerate("xyz"):
+            type_keys(ch, 50); time.sleep(0.45)
+            s = ctl("state"); c = s["caret"]; r = c["rect"]
+            off = max(abs(s["center"][0] - (r[0] + r[2]) / 2) - 240, abs(s["center"][1] - (r[1] + r[3]) / 2) - 135)
+            # Still attached to Spotlight, its caret would not move: each key must publish a new caret.
+            if c["kind"] != "caret" or c["seq"] == prev["seq"] or r[0] <= prev["rect"][0]:
+                back.append(f"{i}:{ch} caret {c['kind']} {[round(v) for v in r]}")
+            elif s["owner"] != "caret" or off > -10: back.append(f"{i}:{ch} owner={s['owner']} off={off:.0f}")
+            prev = c
+        check("Spotlight: after Escape the caret in the app behind it is followed", not back, "; ".join(back))
+    except FocusLost as e:
+        check("Spotlight: TextEdit window kept focus after Escape", False, f"focus moved to {e}")
+    ctl("level 1"); time.sleep(0.3)
+    close_doc(); cleanups.remove(close_doc)
+
+spotlight_test()
 
 # TextEdit with its own file.
 te = os.path.join(SCRATCH, "windtest-caret.txt"); open(te, "w").close()
