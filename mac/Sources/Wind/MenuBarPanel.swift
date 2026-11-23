@@ -10,17 +10,39 @@ import WindCore
 // order Settings > Menu bar sets (menu* keys, MenuLayout). The page is ui/panel.html (Svelte, the same
 // wind://ui/ files and bridge as Settings) in a WKWebView inside a borderless panel. Built on the first
 // open and then kept, hidden, so later opens show at once. Placement and the re-open guard are pure
-// (WindCore/MenuPanel.swift). Lessons from Universal Clipboard's Mac panel (7ed027a, 3bb6252): activate
-// the app on open or WebKit gets no mouse-moved events (no hover, no tooltips); no native shadow, the
-// page draws it; close on focus loss, Esc, a second icon click, Settings and Quit. A close Wind itself
-// caused (Esc, the icon, the page's close) hands activation back to the app that had it, so the text
-// field Wind follows keeps its keystrokes.
+// (WindCore/MenuPanel.swift). Opening asks macOS to activate Wind (the page then has the keyboard) and a close
+// Wind caused hands activation back; macOS may refuse, so the panel is non-activating and key anyway, Wind's
+// own pointer tracking (PanelPointerView) draws hover and tooltips, and Esc also reaches Wind's event tap.
+// No native shadow, the page draws it; close on focus loss, Esc, a second icon click, Settings and Quit.
 //
 // Page -> host (webkit.messageHandlers.wind): panelSize {h}; getConfig; setConfig {key, value};
 // setConfigs {values}; getMacStatus; panelAction {action: close | openSettings | quit | openPrivacy |
 // fixZoomShortcuts | setEngine, value}; hover {id}.
 // Host -> page (window.__windReceive): config {values, push}; macStatus {...}; perf {level, ms[]};
 // panel {open}. First paint: window.__windInit {values, mac, perf}.
+
+/// Tracks the pointer over the panel whether or not Wind is the active app, and hands its place to the
+/// page (`window.__windPointer`), which draws hover and tooltips from it. WebKit sends hover and shows
+/// `title` tooltips only while its window is key in the active app; a status item click does not always
+/// leave Wind active, so the owner saw no hover on Settings/Quit and no tooltips (2026-11-23).
+final class PanelPointerView: NSView {
+    var onPointer: ((CGPoint?) -> Void)?
+    private var area: NSTrackingArea?
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area { removeTrackingArea(area) }
+        let a = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                               owner: self, userInfo: nil)
+        addTrackingArea(a); area = a
+    }
+    private func report(_ e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        onPointer?(CGPoint(x: p.x, y: bounds.height - p.y))        // page coordinates: top-left origin
+    }
+    override func mouseMoved(with e: NSEvent) { report(e) }
+    override func mouseEntered(with e: NSEvent) { report(e) }
+    override func mouseExited(with e: NSEvent) { onPointer?(nil) }
+}
 
 /// Borderless, so it must say it can take key focus itself (the sliders want the arrow keys).
 final class MenuPanelWindow: NSPanel {
@@ -62,6 +84,7 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
     static let writeGap = 0.05
     /// The control under the pointer (the page reports it), for the test state.
     private(set) var hovered = ""
+
     /// The app that was frontmost when the panel opened (nil when it was Wind), and whether Wind was active.
     private var previousApp: NSRunningApplication?
     private var wasActive = false
@@ -87,9 +110,10 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         sendPerf()
         send(["type": "panel", "open": true])
         startPerf()
-        // An accessory app is not activated by a status item click; without this WebKit gets no
-        // mouse-moved events, so nothing on the page shows hover (Universal Clipboard 7ed027a). The
-        // activation policy stays .accessory: no Dock icon. close() gives activation back.
+        // Ask to activate Wind so the page gets the keyboard (Tab, arrows on a slider); close() gives it back.
+        // macOS may refuse (measured 2026-11-23: keys went on to the frontmost app), so nothing else depends
+        // on it: the panel is non-activating and key either way (clicks land at once), PanelPointerView draws
+        // hover and tooltips, and Esc reaches Wind's event tap (escapeFromTap).
         wasActive = NSApp.isActive
         let front = NSWorkspace.shared.frontmostApplication
         previousApp = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
@@ -127,6 +151,15 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.flush() }
         Log.verbose("menu bar panel: closed (\(why))")
+    }
+
+    /// Esc seen by Wind's event tap (main thread) while the panel is open: it closes the panel and the key is
+    /// swallowed. Not left to the page: whether keys reach it cannot be told from here (2026-11-23: Wind read
+    /// as active and frontmost while macOS sent the keys on to the app behind, so Esc did nothing).
+    func escapeFromTap() -> Bool {
+        guard isOpen else { return false }
+        close("esc")
+        return true
     }
 
     /// After a close Wind caused, the app that was frontmost before the panel opened gets activation back.
@@ -170,7 +203,7 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         web.underPageBackgroundColor = .clear
         web.navigationDelegate = self
         web.autoresizingMask = [.width, .height]
-        let p = MenuPanelWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        let p = MenuPanelWindow(contentRect: rect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.title = "Wind Menu Bar"
         p.isFloatingPanel = true
         p.level = .floating
@@ -182,7 +215,16 @@ final class MenuBarPanelController: NSObject, WKScriptMessageHandler, WKNavigati
         p.becomesKeyOnlyIfNeeded = false
         p.appearance = NSAppearance(named: .darkAqua)
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        p.contentView = web
+        let host = PanelPointerView(frame: rect)
+        host.autoresizesSubviews = true
+        web.frame = host.bounds
+        host.addSubview(web)
+        host.onPointer = { [weak self] pt in
+            let arg = pt.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "-1,-1"
+            self?.web?.evaluateJavaScript("window.__windPointer && window.__windPointer(\(arg))")
+        }
+        p.acceptsMouseMovedEvents = true
+        p.contentView = host
         p.delegate = self
         p.onEscape = { [weak self] in self?.close("esc") }
         panel = p; self.web = web

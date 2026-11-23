@@ -230,3 +230,47 @@ test('reduced motion: no transitions', async ({ page }) => {
   const d = await page.locator('.seg button').first().evaluate((el) => getComputedStyle(el).transitionDuration);
   expect(d.split(',').every((x) => parseFloat(x) < 0.001)).toBe(true);
 });
+
+// Owner 2026-11-23: no hover on Settings/Quit and no tooltips, because WebKit gets no hover while Wind is
+// not the active app. The host feeds the pointer through window.__windPointer, which must work alone.
+const hostPointer = (page, x, y) => page.evaluate(([px, py]) => window.__windPointer(px, py), [x, y]);
+const centre = async (loc) => { const b = await loc.boundingBox(); return [b.x + b.width / 2, b.y + b.height / 2]; };
+
+test('the host pointer alone hovers Settings and Quit and shows their tooltips', async ({ page }) => {
+  await openPanel(page);
+  for (const [name, tipText] of [['Settings', 'Settings'], ['Quit Wind', 'Quit Wind']]) {
+    const b = page.getByRole('button', { name, exact: true });
+    const before = await bg(b);
+    await hostPointer(page, ...(await centre(b)));
+    await expect(b).toHaveClass(/\bhov\b/);
+    await expect.poll(() => bg(b)).not.toBe(before);              // a 120 ms fade, as Windows
+    await expect(page.getByRole('tooltip')).toHaveText(tipText);
+    const tb = await page.getByRole('tooltip').boundingBox(), cb = await page.locator('.card').boundingBox();
+    expect(tb.x).toBeGreaterThanOrEqual(cb.x);
+    expect(tb.x + tb.width).toBeLessThanOrEqual(cb.x + cb.width + 0.5);
+  }
+  await hostPointer(page, -1, -1);
+  await expect(page.locator('.hov')).toHaveCount(0);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+});
+
+test('tooltips name every icon-only control, after a short wait, and a press hides them', async ({ page }) => {
+  await openPanel(page);
+  const seg = page.getByRole('button', { name: 'Follow the text cursor' });
+  await hostPointer(page, ...(await centre(seg)));
+  await page.waitForTimeout(200);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);           // not at once
+  await expect(page.getByRole('tooltip')).toHaveText('Follow the text cursor');
+  await hostPointer(page, ...(await centre(page.locator('[data-key="warmthPct"] .sic'))));
+  await expect(page.getByRole('tooltip')).toHaveText('Warmth');
+  await hostPointer(page, ...(await centre(page.locator('.engine'))));
+  await expect(page.getByRole('tooltip')).toHaveText('Engine');
+  await page.mouse.move(...(await centre(page.locator('.engine'))));
+  await page.mouse.down(); await page.mouse.up();
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+});
+
+test('no native title tooltips remain (they would double the drawn ones)', async ({ page }) => {
+  await openPanel(page);
+  await expect(page.locator('.card [title]')).toHaveCount(0);
+});

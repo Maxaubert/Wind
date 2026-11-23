@@ -4,7 +4,7 @@
 """The menu bar panel ON SCREEN in the test build, with REAL input (tools/vmouse, Karabiner, sudo).
 Opens the panel through the command channel (`panel open`), then checks: the card sits under the menu
 bar icon (its right edge under the icon's right edge, its top 3 pt under the menu bar) and inside the
-screen's visible frame; Wind is active and the panel is key (or WebKit gets no hover); the real pointer
+screen's visible frame; the panel is key (activated or not); the real pointer
 over a toggle segment changes its background and the page reports the hovered control; a real slider drag
 and a real toggle click write config.json; Esc closes it; a real click outside closes it; a real click
 on the icon opens it and a second one closes it; a real right-click on the icon opens the native menu
@@ -93,7 +93,8 @@ check("its top is 3 pt under the menu bar and the icon", abs(card[1] - (max(vis[
       f"card {card} visible {vis} icon {icon}")
 check("it is inside the visible frame", card[0] >= vis[0] - 0.5 and card[0] + card[2] <= vis[0] + vis[2] + 0.5
       and card[1] + card[3] <= vis[1] + vis[3] + 0.5, f"card {card} visible {vis}")
-check("Wind is active and the panel is key (hover needs it)", p["active"] and p["key"], f"active {p['active']} key {p['key']}")
+# Key whether or not macOS let Wind activate (the panel is non-activating; 2026-11-23).
+check("the panel is key", p["key"], f"active {p['active']} key {p['key']}")
 loaded = until(lambda: js("return !!document.querySelector('.card .bar')"))
 check("the page loaded", bool(loaded))
 inner = js("const r = document.querySelector('.card').getBoundingClientRect(); return [r.x, r.y]")
@@ -133,6 +134,21 @@ icon = panel()["statusItem"]
 warp(icon[0] + icon[2] / 2, icon[1] + icon[3] / 2); click()
 check("a click on the icon opens the panel", until(lambda: panel()["open"]))
 time.sleep(0.5)
+# Owner 2026-11-23: opened from the icon, Settings and Quit showed no hover and nothing said what the
+# icons were. Hover and tooltips come from Wind's own pointer tracking, so they work active or not.
+p = panel(); card = p["card"]
+inner = js("const r = document.querySelector('.card').getBoundingClientRect(); return [r.x, r.y]")
+ox, oy = card[0] - inner[0], card[1] - inner[1]
+for sel, text in (('.ib[data-id="settings"]', "Settings"), ('.ib[data-id="quit"]', "Quit Wind")):
+    at(js(RECT % sel)); vmc("move 1 0 2 16"); time.sleep(0.3)
+    hov = until(lambda: js(f"return document.querySelector('{sel}').classList.contains('hov')"))
+    bgc = js(f"return getComputedStyle(document.querySelector('{sel}')).backgroundColor")
+    check(f"{text}: hover from a real pointer after an icon click", bool(hov) and bgc != "rgba(0, 0, 0, 0)",
+          f"hov {hov} background {bgc}")
+    tip = until(lambda: js("const t = document.querySelector('[role=tooltip]'); return t && t.textContent"), timeout=2)
+    check(f"{text}: its tooltip names it", tip == text, f"tooltip {tip!r}")
+warp(icon[0] + icon[2] / 2, icon[1] + icon[3] / 2)
+time.sleep(0.3)
 warp(icon[0] + icon[2] / 2, icon[1] + icon[3] / 2); click()
 check("a second click on the icon closes it", until(lambda: not panel()["open"]))
 time.sleep(0.5)

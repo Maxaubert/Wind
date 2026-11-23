@@ -272,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setUpPanel() {
         panel.currentConfig = { [weak self] in self?.mag.config ?? Config() }
+        mag.panelEscape = { [weak self] in self?.panel.escapeFromTap() ?? false }
         panel.save = { [weak self] c in self?.saveConfig { $0 = c } }
         panel.macStatus = { [weak self] in self?.macStatusDict() ?? [:] }
         panel.perf = { [weak self] in (self?.mag.level ?? 1, self?.mag.tickRing.samples ?? []) }

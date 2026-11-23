@@ -35,6 +35,10 @@ final class Magnifier {
     private var lastButtonAt: CFTimeInterval = -1e9
     private var lastKeyAt: CFTimeInterval = -1e9
     private var keyAfterButton = false
+    /// Esc while the menu bar panel is open: returns true when the panel took it (closed). The panel
+    /// does not always get keys itself (macOS may refuse to activate Wind), so Wind's tap closes it.
+    var panelEscape: (() -> Bool)?
+    private var swallowEscUp = false
     private var mouseDx = 0.0, mouseDy = 0.0        // movement since the last tick (for the owner)
     private var lastMoveAt: CFTimeInterval = 0
     private var pendingLockDx = 0.0, pendingLockDy = 0.0
@@ -319,6 +323,11 @@ final class Magnifier {
         case .keyDown, .keyUp:
             let code = UInt16(e.getIntegerValueField(.keyboardEventKeycode))
             lastKeyAt = now
+            if code == 0x35 {                                       // Esc: the menu bar panel's, when open
+                if type == .keyDown, mods.isEmpty, e.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+                   panelEscape?() == true { swallowEscUp = true; return nil }
+                if type == .keyUp, swallowEscUp { swallowEscUp = false; return nil }
+            }
             if type == .keyDown {
                 if !mods.contains(.cmd) && !mods.contains(.ctrl) { keyAfterButton = true }
                 let (sw, ed) = router.triggerDown(.key(code), mods: mods,
