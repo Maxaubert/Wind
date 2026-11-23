@@ -38,9 +38,12 @@ inline bool BlinkEqualsNoCase(std::wstring_view a, std::wstring_view b) {
 }
 
 // Sender rule: the claimed pid runs at Medium integrity or above, outside an AppContainer, in
-// Wind's session, from an image named glint.exe. A Low IL or sandboxed caller cannot borrow Wind
-// (which runs with UIAccess) to read the unmagnified screen. A Medium same-user process is not a
-// boundary: it could read Glint's memory or the screen anyway.
+// Wind's session, from an image named glint.exe. The pid is only a claim, so this alone does not
+// stop a Low IL or sandboxed caller: it can name a running Glint's pid, and while Glint's section
+// has no Medium no-read-up label (today's default descriptor) a same-user Low IL process can open
+// that section for reading and take the frame Wind wrote. That path closes only on Glint's side
+// (see docs/architecture/05-transform-engine.md, "Capture blink"). A Medium same-user process is
+// not a boundary: it could read Glint's memory or the screen anyway.
 inline bool BlinkSenderOk(uint32_t ilRid, bool appContainer, bool sameSession, std::wstring_view exeBase) {
     return ilRid >= kBlinkMediumRid && !appContainer && sameSession && BlinkEqualsNoCase(exeBase, L"glint.exe");
 }

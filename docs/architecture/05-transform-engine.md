@@ -364,37 +364,46 @@ visible happens (rules in the pure `src/transform/blink_policy.h`, tested by
 - sender (`BlinkSenderAllowed` in `blink_capture.cpp`): the claimed pid opens with
   `PROCESS_QUERY_LIMITED_INFORMATION`, its token integrity is Medium (0x2000) or above, it is not an
   AppContainer, it is in Wind's session (`ProcessIdToSessionId`) and its image
-  (`QueryFullProcessImageNameW`) is named `glint.exe`, case-insensitive. A Low IL or sandboxed
-  caller cannot borrow Wind to read the unmagnified screen. A Medium same-user process is not a
-  boundary (it can read Glint's memory or the screen anyway), so the exe name is a sanity check,
-  not a signature check. A refusal logs one Warn line with the failed check.
+  (`QueryFullProcessImageNameW`) is named `glint.exe`, case-insensitive. The pid is only a claim,
+  so a Low IL or sandboxed caller can still name a running Glint's pid and pass. A Medium same-user
+  process is not a boundary (it can read Glint's memory or the screen anyway), so the exe name is
+  a sanity check, not a signature check. A refusal logs one Warn line with the failed check;
+- section (`BlinkCapture::openSection`, `src/transform/blink_capture.*`): it opens
+  `Local\Glint.CaptureFrame.<pid>` with `FILE_MAP_WRITE | READ_CONTROL` and checks it:
+  `GetSecurityInfo` shows this process's user as owner and a mandatory label of Medium or above (no
+  label counts as Medium, so a section a Low IL process created is refused); `VirtualQuery` on the
+  view shows `MEM_COMMIT`, `MEM_MAPPED` and a region with room for a BGRA8 frame of the monitor
+  (`BlinkSectionOk`; a `SEC_RESERVE` section with nothing committed used to pass the size check and
+  crash the tick thread). The handle and view are kept for step 5. A sender whose pid has no
+  section, or a bad one, is refused here, with no blink and no tick stall.
 
 Then:
 
-1. `BlinkCapture::prepare` (`src/transform/blink_capture.*`): a D3D11 device on the target
-   monitor's output, created on first use (~150 ms) and kept warm. Done before the blink, so it never
-   lengthens it.
+1. `BlinkCapture::prepare`: a D3D11 device on the target monitor's output, created on first use
+   (~150 ms) and kept warm. Done before the blink, so it never lengthens it.
 2. `TransformModel::captureBlink(true)` writes identity on the session's channel; one `DwmFlush`.
 3. `grab`: a fresh `DuplicateOutput1` (FP16 first), whose first frame is the 1x desktop, and a GPU
    copy into a staging texture.
 4. `captureBlink(false)` writes the last applied transform back. The visible blink is steps 2 to 4,
    about one frame (an earlier version kept 1x while Glint copied the screen with GDI, ~60 ms, which
    the owner found too visible).
-5. `publish` opens the section with `FILE_MAP_WRITE | READ_CONTROL` and checks it before writing:
-   `GetSecurityInfo` shows this process's user as owner and a mandatory label of Medium or above (no
-   label counts as Medium, so a section a Low IL process created is refused); `VirtualQuery` on the
-   view shows `MEM_COMMIT`, `MEM_MAPPED` and a region that holds the frame (`BlinkSectionOk`; a
-   `SEC_RESERVE` section with nothing committed used to pass the size check and crash the tick
-   thread). It then writes a 32-byte `BlinkFrameHeader` (magic `GLBF`, version 1, size, stride,
+5. `publish` checks that the kept view's region holds the grabbed frame (RGBA16F needs twice the
+   BGRA8 room), writes a 32-byte `BlinkFrameHeader` (magic `GLBF`, version 1, size, stride,
    format 1 = BGRA8 or 2 = RGBA16F scRGB, monitor origin) plus the rows, inside a small
    `__try/__except` helper with no C++ objects (`/EHsc`), so an access violation or in-page error
    (a file-backed section) fails the reply instead of crashing Wind.
 
 Reply 1 means the frame is in the section; 0 means not zoomed, refused or a step failed, and Glint
 captures as usual. These checks need no Glint change (the protocol stays v1). An elevated Glint
-creates its section owned by Administrators and is refused; Glint runs unelevated. Glint making
-its section with an explicit owner-only, no-read-up descriptor and failing on
-`ERROR_ALREADY_EXISTS` closes the name-squatting and Low IL read paths on its side. The restore is an explicit write because an unpaused tick only writes on change. Only the
+creates its section owned by Administrators and is refused; Glint runs unelevated. Wind does not
+stop a Low IL process from reading the frame: it can name a running Glint's pid, Glint's section
+with today's default descriptor (owner the user, no label, so an implicit Medium label with
+no-write-up only) passes every check, and the same-user Low IL process can then open that section
+with `FILE_MAP_READ` and read what Wind wrote. That path closes only when Glint makes its section
+with an explicit owner-only descriptor carrying a Medium no-read-up label
+(`D:P(A;;GA;;;OW)S:(ML;;NWNR;;;ME)`) and fails on `ERROR_ALREADY_EXISTS` (which also stops name
+squatting). A later protocol v2 can then require `SYSTEM_MANDATORY_LABEL_NO_READ_UP` in the
+section's label in `SectionSecurityOk`; v1 cannot, since it would refuse today's Glint. The restore is an explicit write because an unpaused tick only writes on change. Only the
 transform engine needs this: the render overlay is capture-excluded. `glint.exe` is also in
 `kOverlayExes`, so its overlay freezes the engine pick like the Snipping Tool's ([03](03-engines.md)).
 

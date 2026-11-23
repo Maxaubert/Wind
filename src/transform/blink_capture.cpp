@@ -131,7 +131,9 @@ bool BlinkSenderAllowed(DWORD pid, const char** why) {
 }
 
 // Owner is this process's user and the mandatory label (none = Medium) is Medium or above. A
-// section created by a Low IL or sandboxed process, or by another user, is never written.
+// section created by a Low IL or sandboxed process, or by another user, is never written. This does
+// not check for no-read-up: a section with the default descriptor passes, and a same-user Low IL
+// process can still open it for reading (closed by Glint labelling it Medium with no-read-up).
 static bool SectionSecurityOk(HANDLE section) {
     alignas(TOKEN_USER) BYTE userBuf[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE] = {};
     HANDLE tok = nullptr;
@@ -182,43 +184,72 @@ static bool CopyFrameGuarded(unsigned char* dst, const BlinkFrameHeader* hdr, co
     }
 }
 
-bool BlinkCapture::publish(const MonitorTarget& mon, DWORD toolPid) {
-    if (!staging_) return false;
+bool BlinkCapture::openSection(const MonitorTarget& mon, DWORD toolPid) {
+    closeSection();
+    if (mon.w <= 0 || mon.h <= 0) return false;
     wchar_t name[64];
     swprintf_s(name, L"Local\\Glint.CaptureFrame.%lu", (unsigned long)toolPid);
     // READ_CONTROL so the owner and label can be checked before anything is written.
     HANDLE section = OpenFileMappingW(FILE_MAP_WRITE | READ_CONTROL, FALSE, name);
-    if (!section) return false;
+    if (!section) {
+        Log(LogLevel::Warn, "blink", "no section for pid %lu", (unsigned long)toolPid);
+        return false;
+    }
     if (!SectionSecurityOk(section)) {
         Log(LogLevel::Warn, "blink", "section for pid %lu refused: not this user's or labelled below Medium",
             (unsigned long)toolPid);
         CloseHandle(section);
         return false;
     }
+    void* view = MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0);
+    MEMORY_BASIC_INFORMATION mbi{};
+    const bool queried = view && VirtualQuery(view, &mbi, sizeof(mbi)) != 0;
+    // The grab format is not known yet: require room for the smallest frame (BGRA8) now, and
+    // publish checks the exact size once the frame is in hand.
+    const size_t minNeed = sizeof(BlinkFrameHeader) + size_t(mon.w) * size_t(mon.h) * 4u;
+    if (!queried || !BlinkSectionOk(mbi.RegionSize, mbi.State == MEM_COMMIT, mbi.Type == MEM_MAPPED, minNeed)) {
+        Log(LogLevel::Warn, "blink", "section for pid %lu refused: not mapped, not committed or too small",
+            (unsigned long)toolPid);
+        if (view) UnmapViewOfFile(view);
+        CloseHandle(section);
+        return false;
+    }
+    section_ = section;
+    view_ = view;
+    region_ = mbi.RegionSize;
+    toolPid_ = toolPid;
+    return true;
+}
+
+void BlinkCapture::closeSection() {
+    if (view_) UnmapViewOfFile(view_);
+    if (section_) CloseHandle(section_);
+    view_ = nullptr;
+    section_ = nullptr;
+    region_ = 0;
+    toolPid_ = 0;
+}
+
+bool BlinkCapture::publish(const MonitorTarget& mon) {
+    if (!staging_ || !view_) { closeSection(); return false; }
     const bool fp16 = stagingDesc_.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
     const unsigned bpp = fp16 ? 8u : 4u;
     const unsigned w = stagingDesc_.Width, h = stagingDesc_.Height, row = w * bpp;
     const size_t need = sizeof(BlinkFrameHeader) + size_t(row) * h;
     bool ok = false;
-    if (void* view = MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0)) {
-        MEMORY_BASIC_INFORMATION mbi{};
-        const bool queried = VirtualQuery(view, &mbi, sizeof(mbi)) != 0;
-        const bool sectionOk = queried && BlinkSectionOk(mbi.RegionSize, mbi.State == MEM_COMMIT,
-                                                         mbi.Type == MEM_MAPPED, need);
-        if (!sectionOk)
-            Log(LogLevel::Warn, "blink", "section for pid %lu refused: not committed, not mapped or too small",
-                (unsigned long)toolPid);
+    if (!BlinkSectionOk(region_, true, true, need)) {
+        Log(LogLevel::Warn, "blink", "section for pid %lu too small for the frame", (unsigned long)toolPid_);
+    } else {
         D3D11_MAPPED_SUBRESOURCE m{};
-        if (sectionOk && SUCCEEDED(ctx_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+        if (SUCCEEDED(ctx_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) {
             const BlinkFrameHeader hdr{ 0x46424C47u, 1u, w, h, row, fp16 ? 2u : 1u, mon.x, mon.y };
-            ok = CopyFrameGuarded(static_cast<unsigned char*>(view), &hdr,
+            ok = CopyFrameGuarded(static_cast<unsigned char*>(view_), &hdr,
                                   static_cast<const unsigned char*>(m.pData), m.RowPitch, row, h);
             ctx_->Unmap(staging_.Get(), 0);
-            if (!ok) Log(LogLevel::Warn, "blink", "copy into the section for pid %lu faulted", (unsigned long)toolPid);
+            if (!ok) Log(LogLevel::Warn, "blink", "copy into the section for pid %lu faulted", (unsigned long)toolPid_);
         }
-        UnmapViewOfFile(view);
     }
-    CloseHandle(section);
+    closeSection();
     return ok;
 }
 

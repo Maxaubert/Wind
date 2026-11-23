@@ -2893,11 +2893,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // Reply 1 = the frame is in the section; 0 = not zoomed, refused or it failed (Glint captures
     // as usual). Runs on the tick thread (this window's thread), as the thread-affine Magnification
     // API needs.
-    // The message is let through UIPI and carries no sender identity, so lParam is only a claim.
-    // Before anything visible happens: wParam must be 2, at most one attempt per 250 ms (a flood
-    // cannot flicker the view or stall the tick), and the claimed pid must be glint.exe at Medium
-    // or above, not sandboxed, in this session (blink_policy.h). publish() then checks the section
-    // itself (owner, label, committed and mapped, size) and copies under an SEH guard.
+    // The message is let through UIPI and carries no sender identity, so lParam is only a claim:
+    // a Low IL sender can name the real Glint's pid. Before anything visible happens: wParam must
+    // be 2, at most one attempt per 250 ms (a flood cannot flicker the view or stall the tick), the
+    // claimed pid must be glint.exe at Medium or above, not sandboxed, in this session
+    // (blink_policy.h), and openSection() must find that pid's section and accept it (owner, label,
+    // committed and mapped, size). publish() then only copies, under an SEH guard. This does not
+    // stop a Low IL process that names a running Glint from reading the frame out of Glint's
+    // section: that needs Glint to label its section Medium with no-read-up (docs 05, Capture blink).
     static const UINT kCaptureBlinkMsg = RegisterWindowMessageW(L"Wind.CaptureBlink.v1");
     if (kCaptureBlinkMsg && msg == kCaptureBlinkMsg) {
         static wind::BlinkCapture s_blink;
@@ -2914,12 +2917,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                       static_cast<unsigned long>(pid), why ? why : "?");
             return 0;
         }
-        if (!s_blink.prepare(g_tick->mon)) return 0;
+        // The section is opened and checked before the blink, so a sender with no valid section
+        // (only the pid is claimed) is refused with nothing visible and no tick stall.
+        if (!s_blink.openSection(g_tick->mon, pid)) return 0;
+        if (!s_blink.prepare(g_tick->mon)) { s_blink.closeSection(); return 0; }
         tm->captureBlink(true);
         DwmFlush();                      // the identity frame is composited and on screen
         const bool grabbed = s_blink.grab();
         tm->captureBlink(false);         // zoom back before the slow part (reading the copy)
-        const bool ok = grabbed && s_blink.publish(g_tick->mon, pid);
+        const bool ok = grabbed && s_blink.publish(g_tick->mon);
+        s_blink.closeSection();          // publish closes it too; this covers a failed grab
         wind::Log(wind::LogLevel::Info, "blink", "capture blink for pid %lu: %s",
                   static_cast<unsigned long>(pid), ok ? "ok" : "failed");
         return ok ? 1 : 0;

@@ -21,12 +21,24 @@ public:
     bool prepare(const MonitorTarget& mon);
     // After the 1x write and a DwmFlush: duplicate, take the frame and queue a GPU copy. Fast.
     bool grab();
-    // After the zoom is back: read the copy and write it into the tool's section
-    // `Local\Glint.CaptureFrame.<pid>`. Returns false if the section is missing, too small, not
-    // committed, not owned by this user, labelled below Medium, or faults during the copy.
-    bool publish(const MonitorTarget& mon, DWORD toolPid);
+    // BEFORE the 1x write: open the tool's section `Local\Glint.CaptureFrame.<pid>`, check it
+    // (owner is this user, label Medium or above, view committed and mapped, room for a BGRA8 frame
+    // of `mon`) and keep the handle and view for publish. Returns false, with nothing kept, if any
+    // check fails, so a sender with no section never makes anything visible happen.
+    bool openSection(const MonitorTarget& mon, DWORD toolPid);
+    // After the zoom is back: read the copy and write it into the section openSection kept (the
+    // region must also hold the grabbed format, e.g. RGBA16F). False if there is no open section,
+    // it is too small or the copy faults. Always closes the section.
+    bool publish(const MonitorTarget& mon);
+    // Unmap and close the section openSection kept (no-op when none is open).
+    void closeSection();
+    ~BlinkCapture() { closeSection(); }
 
 private:
+    HANDLE section_ = nullptr;
+    void* view_ = nullptr;
+    SIZE_T region_ = 0;
+    DWORD toolPid_ = 0;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx_;
     Microsoft::WRL::ComPtr<IDXGIOutput5> output_;
