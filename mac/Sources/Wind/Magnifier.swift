@@ -27,6 +27,8 @@ final class Magnifier {
     private var tap: CFMachPort?
     private var link: CADisplayLink?
     private var lastTick: CFTimeInterval = 0
+    /// The last 256 tick intervals (ms), read by the menu bar panel's Performance header while it is open.
+    private(set) var tickRing = TickRing()
 
     // Input state, written by the tap.
     private var mods: Mods = []
@@ -725,6 +727,8 @@ final class Magnifier {
     private func beginTick(_ l: CADisplayLink) -> Double? {
         let now = l.timestamp
         let dt = lastTick == 0 ? l.duration : min(0.1, now - lastTick)
+        // The menu bar panel's Performance header (Windows' TickStats): every tick that was not a wake.
+        if lastTick != 0 { tickRing.push(Float((now - lastTick) * 1000)) }
         lastTick = now
 
         zoom.direction = resolveDirection(inHeld: held(.zoomIn), outHeld: held(.zoomOut))

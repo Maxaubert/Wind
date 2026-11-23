@@ -37,7 +37,7 @@ for (const pal of ['grey']) {
     await page.addInitScript(MEASURE);
     await mockHost(page, { init: true, values: { uiPalette: pal, showAdvanced: true }, mac: { ...MAC_OK, screenRecording: false, zoomShortcuts: ['Use keyboard shortcuts to zoom'] } });
     await open(page);
-    for (const g of ['hotkeys', 'zoom', 'view', 'prefs', 'about']) { await go(page, g); await page.waitForTimeout(300); await sweep(page, pal + '/' + g, out); }
+    for (const g of ['hotkeys', 'zoom', 'view', 'prefs', 'menubar', 'about']) { await go(page, g); await page.waitForTimeout(300); await sweep(page, pal + '/' + g, out); }
     await page.goto('/?mode=onboard'); await page.waitForTimeout(500);
     for (let s = 0; s < 6; s++) {
       await sweep(page, pal + '/onboard' + s, out);

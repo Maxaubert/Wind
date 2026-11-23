@@ -105,11 +105,11 @@ test('Screen light: warmth, brightness and saturation (#599), neutral by default
   await expect(sat).toHaveAttribute('step', '5');
 });
 
-test('General holds the theme, the screenshot and advanced switches; the macOS card is last', async ({ page }) => {
+test('General holds the theme, the screenshot and advanced switches; the macOS card is last, without the menu bar switch', async ({ page }) => {
   await mockHost(page);
   await open(page);
   await go(page, 'prefs');
   const keys = await page.locator('main .row').evaluateAll((rs) => rs.map((r) => r.getAttribute('data-key')));
   expect(keys).toEqual(['uiPalette', 'ownScreenshot', 'showAdvanced', 'warmthPct', 'dimPct', 'satPct', '__accessibility', '__screenRecording',
-    '__zoomShortcuts', '__loginItem', 'showMenuBarIcon', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
+    '__zoomShortcuts', '__loginItem', 'logLevel', '__showLog', '__openIni', '__diagnostics', '__rerunSetup']);
 });

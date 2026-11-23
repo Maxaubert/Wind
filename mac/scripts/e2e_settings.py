@@ -6,7 +6,8 @@ Drives the real page through the test-only channel command `settings js <base64>
 the page, result in js.json), then checks config.json and the config Wind runs on (state.json).
 Covers: the page loads, a slider, a toggle and a select write config.json and Wind reloads them, a
 keybind recorded on the page works as a real hotkey, an edit made elsewhere reaches the page, the
-macOS status shows, the first-run setup opens with ?mode=onboard and writes onboarded.
+macOS status shows, the Menu bar page writes its switches and lists, the first-run setup opens with
+?mode=onboard and writes onboarded.
 Screenshots of every page go to build/settings-shots/ (checked by eye).
 
 The window opens off every display and never takes focus (`settings offscreen on`), unless
@@ -95,7 +96,7 @@ check("page loaded", bool(loaded))
 s = ctl("state")["settings"]
 check("served from wind://", s["url"].startswith("wind://ui/index.html"), s["url"])
 groups = js("return [...document.querySelectorAll('.side .it')].map((e) => e.dataset.g)")
-check("sidebar has the five pages", groups == ["hotkeys", "zoom", "view", "prefs", "about"], str(groups))
+check("sidebar has the six pages", groups == ["hotkeys", "zoom", "view", "prefs", "menubar", "about"], str(groups))
 fonts = js("return getComputedStyle(document.querySelector('.row .label')).fontFamily")
 check("Mac system font", "apple-system" in fonts or "system-ui" in fonts, fonts)
 if not VISIBLE:
@@ -174,11 +175,31 @@ go("prefs")
 st = until(lambda: js("return [...document.querySelectorAll('[data-key^=\"__\"] .st')].map((e) => e.textContent.trim())"))
 check("macOS card shows the permissions", bool(st) and st[0] == "Allowed" and st[1] in ("Allowed", "Not allowed"), str(st))
 check("the login item is a switch", js("return !!document.querySelector('[data-key=\"__loginItem\"] input[role=switch]')"))
+check("the menu bar switch moved off the macOS card", not js("return !!document.querySelector('[data-key=\"showMenuBarIcon\"]')"))
 banner = js("return !!document.querySelector('main .pb')")
 check("no permission banner while Accessibility is allowed", not banner or (st and st[1] == "Not allowed"))
 
+# ---- Menu bar page ------------------------------------------------------------------------------------
+go("menubar")
+keys = js("return [...document.querySelectorAll('main .row')].map((r) => r.dataset.key)")
+check("Menu bar page: the icon and Performance switches", keys == ["showMenuBarIcon", "menuPerf"], str(keys))
+names = js("return [...document.querySelectorAll('main .tlist')].map((l) => [...l.querySelectorAll('.trow')].map((r) => r.dataset.id))")
+check("Menu bar page: the Sliders and Toggles lists", bool(names) and len(names) == 2 and len(names[0]) == 9 and len(names[1]) == 4, str(names))
+before = cfg().get("menuPerf", True)
+js("document.querySelector('[data-key=\"menuPerf\"] input[role=switch]').click(); return true")
+check("Performance switch writes menuPerf", bool(until(lambda: cfg().get("menuPerf", True) == (not before))), f"menuPerf {cfg().get('menuPerf')}")
+js("document.querySelector('[data-key=\"menuPerf\"] input[role=switch]').click(); return true")
+on = cfg().get("menuSliders", ["warmthPct", "dimPct"])
+js("document.querySelector('.trow[data-id=\"panSmoothMs\"] .chk').click(); return true")
+want = on + ["panSmoothMs"] if "panSmoothMs" not in on else [k for k in on if k != "panSmoothMs"]
+v = until(lambda: cfg().get("menuSliders") == want and len(cfg().get("menuSliderOrder", [])) == 9)
+check("a slider check writes menuSliders and menuSliderOrder as lists", bool(v), f"{cfg().get('menuSliders')} {cfg().get('menuSliderOrder')}")
+check("Wind reloads the menu bar lists", bool(until(lambda: running("menuSliders") == want)), f"running {running('menuSliders')}")
+js("document.querySelector('.trow[data-id=\"panSmoothMs\"] .chk').click(); return true")
+check("and unchecking writes it back", bool(until(lambda: cfg().get("menuSliders") == on)), str(cfg().get("menuSliders")))
+
 # ---- screenshots ------------------------------------------------------------------------------------------
-for page in ["hotkeys", "zoom", "view", "prefs", "about"]:
+for page in ["hotkeys", "zoom", "view", "prefs", "menubar", "about"]:
     go(page); time.sleep(0.5)
     check(f"screenshot {page}", shot(page))
 js("const i = document.querySelector('.side .search input'); i.value = 'zoom'; i.dispatchEvent(new Event('input', { bubbles: true })); return true")

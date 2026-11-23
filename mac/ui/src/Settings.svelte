@@ -23,6 +23,8 @@
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from '$shared/prompts/Prompt.svelte';
   import Results from '$shared/search/Results.svelte';
+  import ItemListsPage from '$shared/tray/ItemListsPage.svelte';
+  import * as menuModel from './menubar/menuModel.js';
   import { search } from '$shared/search/search.js';
 
   // Replaced at build time with ../VERSION (vite.config.js); empty in tests.
@@ -192,6 +194,9 @@
         </Card>
         {/if}
       {/each}
+      {#if group.custom === 'menubar'}
+        <ItemListsPage {values} onChange={change} {announce} model={menuModel} where="in the menu bar" />
+      {/if}
       {/if}
       </div>
       {/key}
@@ -230,6 +235,7 @@
   .page.fade { animation: pagein var(--dur-fast) var(--ease); }
   @keyframes pagein { from { opacity: 0; } }
   .tail { height: 48px; padding: 0; }
+  .main[data-page='menubar'] :global(.banner + .card) { margin-top: 20px; }   /* as Windows' Tray menu: a caption-less first card sits 20px under the band */
   /* About: its one card sits centred in the space under the banner, not right up against it (owner 2026-11-03). */
   .main[data-page='about'] .page { min-height: calc(100% - 48px); display: flex; flex-direction: column; }
   .main[data-page='about'] .page > :global(.card) { margin-block: auto; }

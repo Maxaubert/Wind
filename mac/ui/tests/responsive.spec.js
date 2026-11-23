@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test';
 import { mockHost, open, go } from './mock.js';
 
-const GROUPS = ['hotkeys', 'zoom', 'view', 'prefs', 'about'];
+const GROUPS = ['hotkeys', 'zoom', 'view', 'prefs', 'menubar', 'about'];
 const SIZES = [[700, 480], [820, 560], [1040, 720], [1440, 900], [2560, 1440]];
 
 test.beforeEach(async ({ page }) => {

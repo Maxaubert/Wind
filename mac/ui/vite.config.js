@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 // About shows the real version: read from ../VERSION (Wind for Mac's single source) at build time.
 const version = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 export default defineConfig({
-  plugins: [svelte()], base: './', build: { outDir: 'dist' },
+  plugins: [svelte()], base: './',
+  // Two pages: Settings (index.html) and the menu bar panel (panel.html, Sources/Wind/MenuBarPanel.swift).
+  build: { outDir: 'dist', rollupOptions: { input: { index: fileURLToPath(new URL('./index.html', import.meta.url)), panel: fileURLToPath(new URL('./panel.html', import.meta.url)) } } },
   // Components and design files both settings apps (Windows ui/, Mac mac/ui/) use are kept once, in
   // ui-shared/src, and imported as '$shared/...'. They live outside this root, so 'svelte' is
   // deduped to this app's copy and the dev server may read them.

@@ -466,3 +466,115 @@ struct SaturationTests {
         expect(Config().satPct == 100)
     }
 }
+
+/// Config's menu bar keys and MenuLayout, the parser the menu bar panel uses. The parse cases are shared
+/// with the settings page (mac/ui/tests/menu-layout.nodetest.mjs).
+struct MenuLayoutTests {
+    func defaults() {
+        let c = Config()
+        expect(c.menuPerf)
+        expect(MenuLayout.shown(MenuLayout.sliders(c)) == ["warmthPct", "dimPct"])
+        expect(MenuLayout.sliders(c).map(\.key) == MenuLayout.sliders)
+        expect(MenuLayout.shown(MenuLayout.toggles(c)) == MenuLayout.toggles)
+    }
+
+    func loadsFromTheFile() throws {
+        let c = try Config.load(from: Data(#"{"menuPerf": false, "menuSliders": "maxLevel,panSpeed", "menuToggles": [], "menuSliderOrder": ["panSpeed", "bogus"]}"#.utf8))
+        expect(!c.menuPerf)
+        expect(MenuLayout.shown(MenuLayout.sliders(c)) == ["panSpeed", "maxLevel"])
+        expect(MenuLayout.shown(MenuLayout.toggles(c)).isEmpty)
+        var dropped: [String] = []
+        let bad = try Config.load(from: Data(#"{"menuSliders": 3}"#.utf8), dropped: &dropped)
+        expect(dropped == ["menuSliders"] && bad.menuSliders == MenuLayout.defaultSliders)
+    }
+
+    func serialiseRoundTrips() {
+        let items = MenuLayout.parse(.sliders, enabled: ["satPct", "warmthPct"], order: ["maxLevel", "satPct"])
+        let w = MenuLayout.serialise(items)
+        expect(w.enabled == ["satPct", "warmthPct"])
+        expect(MenuLayout.parse(.sliders, enabled: w.enabled, order: w.order) == items)
+    }
+
+    func sharedCases() throws {
+        let url = DefaultsFixture.url.deletingLastPathComponent().appendingPathComponent("menu_layout_cases.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        let cases = root["cases"] as! [[String: Any]]
+        expect(cases.count >= 10)
+        let d = Config()
+        for t in cases {
+            let kind = MenuLayout.Kind(rawValue: t["kind"] as! String)!
+            // null = the key is absent: Config's default. A string is what the page writes (one item, split).
+            let enabled = (t["enabled"] as? String).map { [$0] } ?? (kind == .sliders ? d.menuSliders : d.menuToggles)
+            let order = (t["order"] as? String).map { [$0] } ?? (kind == .sliders ? d.menuSliderOrder : d.menuToggleOrder)
+            let items = MenuLayout.parse(kind, enabled: enabled, order: order)
+            let gotOrder = items.map(\.key).joined(separator: ","), gotOn = MenuLayout.shown(items).joined(separator: ",")
+            if gotOrder != t["wantOrder"] as! String || gotOn != t["wantOn"] as! String {
+                print("  \(t["name"]!): got \(gotOrder) on \(gotOn)")
+                expect(false)
+            }
+        }
+    }
+}
+
+/// The menu bar panel's placement, its re-open guard and the Performance header's tick ring (MenuPanel.swift).
+struct MenuPanelTests {
+    // A 1440x900 screen, menu bar 25 pt: visibleFrame 0,0 1440x875 (no Dock).
+    let vis = CGRect(x: 0, y: 0, width: 1440, height: 875)
+
+    func cardRightEdgeUnderTheIcon() {
+        let icon = CGRect(x: 1100, y: 875, width: 30, height: 25)
+        let f = MenuPanel.frame(icon: icon, visible: vis, height: 400)
+        let card = MenuPanel.card(in: f)
+        expect(card.maxX == icon.maxX)
+        expect(f.width == 328 && card.width == 300)
+        expect(f.maxY == 872)                                  // 3 pt under the menu bar
+        expect(f.height == 400 && card.minY == f.minY + 14)
+    }
+
+    func clampedToTheVisibleFrame() {
+        // An icon at the far right: the card stops at the screen's right edge (only the clear margin outside).
+        let right = MenuPanel.frame(icon: CGRect(x: 1430, y: 875, width: 30, height: 25), visible: vis, height: 300)
+        expect(MenuPanel.card(in: right).maxX == 1440)
+        // An icon near the left (a crowded menu bar, a notch): the card starts at the screen's left edge.
+        let left = MenuPanel.frame(icon: CGRect(x: 20, y: 875, width: 30, height: 25), visible: vis, height: 300)
+        expect(MenuPanel.card(in: left).minX == 0)
+        // A second screen to the left of the main one (negative x), with its own menu bar.
+        let v2 = CGRect(x: -1920, y: 0, width: 1920, height: 1055)
+        let s2 = MenuPanel.frame(icon: CGRect(x: -400, y: 1055, width: 30, height: 25), visible: v2, height: 300)
+        expect(MenuPanel.card(in: s2).maxX == -370 && s2.maxY == 1052)
+        // Taller than the screen: cut at the bottom, the top stays under the menu bar.
+        let tall = MenuPanel.frame(icon: CGRect(x: 1100, y: 875, width: 30, height: 25), visible: vis, height: 5000)
+        expect(tall.maxY == 872 && tall.minY == -14)
+    }
+
+    func underAHiddenMenuBar() {
+        // An auto-hiding menu bar (or a full-screen Space): visibleFrame reaches the screen top and the
+        // revealed bar holds the icon, so the card hangs under the icon, not behind the bar.
+        let full = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let icon = CGRect(x: 1100, y: 876, width: 30, height: 24)
+        let f = MenuPanel.frame(icon: icon, visible: full, height: 400)
+        expect(f.maxY == 873 && MenuPanel.card(in: f).maxX == icon.maxX && f.height == 400)
+        // Taller than the screen: cut at the bottom, the top still under the icon.
+        let tall = MenuPanel.frame(icon: icon, visible: full, height: 5000)
+        expect(tall.maxY == 873 && tall.minY == -14)
+    }
+
+    func reopenGuard() {
+        expect(!MenuPanel.ignoreClick(now: 10, closedAt: 0))          // never closed
+        expect(MenuPanel.ignoreClick(now: 10.1, closedAt: 10))        // the closing click itself
+        expect(!MenuPanel.ignoreClick(now: 10.31, closedAt: 10))      // a new click
+        expect(!MenuPanel.ignoreClick(now: 9, closedAt: 10))          // clock went back
+    }
+
+    func tickRing() {
+        var r = TickRing()
+        expect(r.samples.isEmpty)
+        for i in 1...3 { r.push(Float(i)) }
+        r.push(0); r.push(.nan)                                       // not a tick
+        expect(r.samples == [1, 2, 3])
+        for i in 4...300 { r.push(Float(i)) }
+        expect(r.count == 256 && r.samples.first == 45 && r.samples.last == 300)
+        r.clear()
+        expect(r.samples.isEmpty)
+    }
+}

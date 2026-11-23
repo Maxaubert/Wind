@@ -1,0 +1,38 @@
+/* Copyright (c) 2026 Max Aubert. All rights reserved.
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+/* The menu bar panel's 4 themes: the values of Windows' tray flyout (src/tray_app/flyout_palettes.h,
+   generated from the same mockup palettes as Settings' themes.css), as --f-* tokens so they never clash
+   with the Settings tokens the shared controls read. Dark only, like the flyout. Keep in step with
+   flyout_palettes.h; the radii are its rc (window), rk (control) and rs (small). */
+.panel[data-palette="grey"] {
+  --rc: 10px; --rk: 8px; --rs: 6px; --rl: 8px;
+  --f-menu: #000; --f-card: #121212; --f-menub: #191919; --f-fg: #f2f2f2; --f-fg2: #d0d0d0; --f-fg3: #b4b6ba;
+  --f-rule: #18191a; --f-hl: #2d2d2d; --f-glyph: #b0b0b0; --f-spark: #2fbfa5; --f-fill: #2fbfa5; --f-lift: #0b0b0b;
+  --f-scrim: rgba(0, 0, 0, .55); --f-band: #0a0a0a; --f-track: #3d3d3d; --f-off: #0e0e0e; --f-offh: #1c1c1c;
+  --f-offic: #c8cad0; --f-onic: #04201b; --f-on: #2fbfa5; --f-onh: #45cbb3; --f-onb: rgba(47, 191, 165, .4);
+  --f-segline: #222; --f-focus: #f2f2f2; --f-ring: #222; --f-aurora: .62; --f-tint: #000; --f-tinta: 0;
+}
+.panel[data-palette="ember"] {
+  --rc: 10px; --rk: 8px; --rs: 6px; --rl: 8px;
+  --f-menu: #0c0908; --f-card: #130e0b; --f-menub: #261d17; --f-fg: #f5eee7; --f-fg2: #d8cbbf; --f-fg3: #a39382;
+  --f-rule: #1f1611; --f-hl: #1d1612; --f-glyph: #b9a898; --f-spark: #e48a45; --f-fill: #e48a45; --f-lift: #130e0b;
+  --f-scrim: rgba(12, 9, 8, .62); --f-band: #130e0b; --f-track: #3a2e25; --f-off: #18120e; --f-offh: #251f1b;
+  --f-offic: #b9a898; --f-onic: #1c0f06; --f-on: #e48a45; --f-onh: #e69658; --f-onb: rgba(228, 138, 69, .4);
+  --f-segline: #3a2c23; --f-focus: #e48a45; --f-ring: #3a2c23; --f-aurora: .68; --f-tint: #ff8a3d; --f-tinta: .8;
+}
+.panel[data-palette="ocean"] {
+  --rc: 10px; --rk: 8px; --rs: 6px; --rl: 8px;
+  --f-menu: #0c1117; --f-card: #121821; --f-menub: #1f2938; --f-fg: #f1f2f4; --f-fg2: #c6cbd2; --f-fg3: #9aa2ac;
+  --f-rule: #19212e; --f-hl: #19222e; --f-glyph: #b0b6bf; --f-spark: #5aaaf5; --f-fill: #5aaaf5; --f-lift: #121821;
+  --f-scrim: rgba(12, 17, 23, .62); --f-band: #121821; --f-track: #2d3a4e; --f-off: #161e29; --f-offh: #232b35;
+  --f-offic: #b0b6bf; --f-onic: #061018; --f-on: #5aaaf5; --f-onh: #6cb3f5; --f-onb: rgba(90, 170, 245, .4);
+  --f-segline: #263345; --f-focus: #5aaaf5; --f-ring: #263345; --f-aurora: .68; --f-tint: #5aaaf5; --f-tinta: .7;
+}
+.panel[data-palette="hicon"] {
+  --rc: 4px; --rk: 3px; --rs: 2px; --rl: 4px;
+  --f-menu: #000; --f-card: #000; --f-menub: #bdbdbd; --f-fg: #fff; --f-fg2: #fff; --f-fg3: #e0e0e0;
+  --f-rule: #9a9a9a; --f-hl: #262626; --f-glyph: #fff; --f-spark: #fff; --f-fill: #fff; --f-lift: #000;
+  --f-scrim: rgba(0, 0, 0, .62); --f-band: #000; --f-track: #4a4a4a; --f-off: #000; --f-offh: #0f0f0f;
+  --f-offic: #fff; --f-onic: #000; --f-on: #fff; --f-onh: #fff; --f-onb: rgba(255, 255, 255, .4);
+  --f-segline: #bdbdbd; --f-focus: #fff; --f-ring: #bdbdbd; --f-aurora: .408; --f-tint: #000; --f-tinta: 0;
+}

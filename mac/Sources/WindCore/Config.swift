@@ -74,6 +74,14 @@ public struct Config: Codable, Equatable {
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
     /// The menu bar icon. Hidden, opening Wind again (Spotlight, Finder) shows Settings, where it comes back.
     public var showMenuBarIcon = true
+    // The menu bar panel (Settings > Menu bar; Windows' tray* keys): the Performance header and the
+    // Sliders and Toggles lists, read through MenuLayout (enabled keys and saved order, item names kept
+    // as written; MenuLayout drops unknown ones). An empty order is the default order.
+    public var menuPerf = true
+    public var menuSliders = MenuLayout.defaultSliders
+    public var menuSliderOrder: [String] = []
+    public var menuToggles = MenuLayout.defaultToggles
+    public var menuToggleOrder: [String] = []
 
     // Settings window (ui/). Read by the page only, except onboarded (AppDelegate.needsSetup).
     public var uiPalette = "grey"                 // the built-in theme: grey, ember, ocean or hicon

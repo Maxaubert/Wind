@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
-// Settings page layout, Wind for Mac. Five groups: Hotkeys (Settings opens here), Zoom, View, then
-// below a divider Preferences and About. Each group has a label, a sidebar icon (src/design/icons.js),
+// Settings page layout, Wind for Mac. Six groups: Hotkeys (Settings opens here), Zoom, View, then
+// below a divider Preferences, Menu bar and About. Each group has a label, a sidebar icon (src/design/icons.js),
 // a one-line description for its banner and cards of rows. Every row key is a real key of the Mac's
 // config.json (Sources/WindCore/Config.swift), except the `__` rows, which are actions or Mac status.
 // Ranges and defaults follow Config.swift (defaults and clamp()); a slider never offers a value
@@ -31,6 +31,8 @@
 //
 // Copy rules: one short plain line, no punctuation or symbols, no references, no toggle labels starting with "Enable",
 // no description that restates its label, no product names.
+
+import { defaults as menuDefaults } from './menubar/menuModel.js';
 
 // The macOS-zoom-only rows (the render engine ignores them).
 const ZOOM_ENGINE = { key: 'engine', eq: 'zoom' };
@@ -176,8 +178,6 @@ export const groups = [
           desc: 'They fight Wind for the zoom when they are on', on: 'Off', off: 'On', btn: 'Turn off', action: 'fixZoomShortcuts' },
         { key: '__loginItem', type: 'macstatus', status: 'loginItem', toggle: true, label: 'Open at login', keywords: ['startup', 'start up', 'launch', 'boot', 'login items', 'autostart', 'automatically', 'sign in', 'background'],
           desc: 'Starts Wind when you log in', action: 'setLogin' },
-        { key: 'showMenuBarIcon', type: 'toggle', label: 'Show in menu bar', keywords: ['menu bar', 'menubar', 'status bar', 'status item', 'icon', 'tray', 'hide', 'show', 'top bar', 'magnifying glass'],
-          desc: 'When hidden, open Wind again from Spotlight or Finder to get here', def: 1 },
         { key: 'logLevel', type: 'select', label: 'Log detail', keywords: ['log', 'logging', 'verbose', 'debug', 'diagnostics', 'trace', 'quiet', 'file', 'troubleshoot'],
           desc: 'How much Wind writes to its log', options: ['0', '1', '2', '3'], optionLabels: { '0': 'Quiet', '1': 'Sessions', '2': 'Verbose', '3': 'Every zoom step' }, def: '1' },
         { key: '__showLog', type: 'button', label: 'Show log', keywords: ['log', 'logs', 'console', 'debug', 'troubleshoot', 'problem', 'file', 'history'],
@@ -188,6 +188,19 @@ export const groups = [
           desc: 'Saves a report to share when asking for help', btn: 'Export', action: 'exportDiagnostics' },
         { key: '__rerunSetup', type: 'button', label: 'Run setup again', keywords: ['onboarding', 'welcome', 'first run', 'wizard', 'setup', 'permissions', 'start over', 'tour'],
           desc: 'Walks through the first start steps', btn: 'Start', action: 'rerunSetup' },
+      ] },
+    ] },
+
+  // Menu bar (the panel a click on the menu bar icon opens; Windows' Tray menu page): the icon and the
+  // Performance switch are ordinary rows; the two item lists are drawn by
+  // ui-shared/src/tray/ItemListsPage.svelte (custom: 'menubar') from src/menubar/menuModel.js.
+  { id: 'menubar', label: 'Menu bar', icon: 'tray', custom: 'menubar', bottom: true,
+    desc: 'What the menu bar panel shows and in what order',
+    cards: [
+      { caption: '', rows: [
+        { key: 'showMenuBarIcon', type: 'toggle', label: 'Show menu bar icon', keywords: ['menu bar', 'menubar', 'status bar', 'status item', 'icon', 'tray', 'hide', 'show', 'top bar', 'magnifying glass'],
+          desc: 'When hidden, open Wind again from Spotlight or Finder to get here', def: 1 },
+        { key: 'menuPerf', type: 'toggle', label: 'Performance in the panel', keywords: ['menu bar', 'menubar', 'panel', 'menu', 'fps', 'frame time', 'graph', 'stats', 'statistics', 'zoom level', 'monitor', 'status bar', 'show', 'hide'], desc: 'Shows live zoom and frame stats', def: 1 },
       ] },
     ] },
 
@@ -205,9 +218,13 @@ export const allRows = groups.flatMap(groupRows);
 export const rowKeys = (r) => (r.panKeys ? r.panKeys : r.key.startsWith('__') ? [] : [r.key]);
 
 // Defaults of every config key the page shows (as the strings the host sends). The pan keys default
-// to ctrl+opt plus their arrow (Config.swift).
+// to ctrl+opt plus their arrow (Config.swift); the four menu bar lists to the menu model's defaults.
 export function schemaDefaults() {
-  const d = { panLeft: 'ctrl+opt+left', panUp: 'ctrl+opt+up', panRight: 'ctrl+opt+right', panDown: 'ctrl+opt+down' };
+  // The menu bar lists as a config without them reads (MenuLayout.swift), drawn by the custom page, not rows.
+  // An empty order is the default order (Config.swift ships them empty).
+  const { menuSliders, menuToggles } = menuDefaults();
+  const lists = { menuSliders, menuToggles, menuSliderOrder: '', menuToggleOrder: '' };
+  const d = { panLeft: 'ctrl+opt+left', panUp: 'ctrl+opt+up', panRight: 'ctrl+opt+right', panDown: 'ctrl+opt+down', ...lists };
   for (const r of allRows) if (!r.key.startsWith('__') && r.def !== undefined) d[r.key] = String(r.def);
   return d;
 }

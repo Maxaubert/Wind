@@ -24,6 +24,10 @@ const NO_ROW = {
   keepPointerSpeed: 'off: Transform runs at macOS\'s own pointer speed, no setting (owner 2026-11-01)',
 };
 
+// Config keys written by a custom page instead of rows: the Menu bar page's two drag lists
+// (ui-shared/src/tray/ItemListsPage.svelte; checked in menu-layout.nodetest.mjs).
+const CUSTOM = ['menuSliders', 'menuSliderOrder', 'menuToggles', 'menuToggleOrder'];
+
 function fixture() {
   const here = dirname(fileURLToPath(import.meta.url));
   // Tests/ (capital T); the same folder on the Mac's case-insensitive disk, and right on a case-sensitive one.
@@ -39,7 +43,8 @@ test('every row writes real Config keys', () => {
 
 test('every Config key has a row, or is listed as left out on purpose', () => {
   const shown = new Set(configRows.flatMap(rowKeys));
-  for (const k of Object.keys(core)) assert.ok(shown.has(k) || NO_ROW[k], `${k} has no row and is not in NO_ROW`);
+  for (const k of Object.keys(core)) assert.ok(shown.has(k) || NO_ROW[k] || CUSTOM.includes(k), `${k} has no row and is not in NO_ROW or CUSTOM`);
+  for (const k of CUSTOM) assert.ok(core[k] && !shown.has(k), `${k} is in CUSTOM but is not a Config key or has a row`);
   for (const k of Object.keys(NO_ROW)) assert.ok(!shown.has(k), `${k} is in NO_ROW but has a row`);
 });
 
@@ -106,4 +111,12 @@ test('toggles are bool keys; keybind rows are bind lists, the wheel row a string
 test('the theme picker offers exactly Config.palettes', () => {
   assert.deepEqual(themes.map((t) => t.id), fixture().palettes);
   assert.equal(core.uiPalette.fallback, 'grey');
+});
+
+test('the Menu bar lists default and fill like Config()', () => {
+  const d = schemaDefaults(), v = fill({ values: {} });
+  for (const k of CUSTOM) {
+    assert.equal(d[k], core[k].def, `${k} default`);
+    assert.equal(v[k], core[k].def, `${k} fill`);
+  }
 });

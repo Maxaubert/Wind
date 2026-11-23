@@ -1,20 +1,23 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
      Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
-  // The two item lists of the "Tray menu" tab: Sliders (at most four on) and Toggles. The
-  // Performance switch above them is an ordinary schema row. Each change writes that list's two ini
-  // keys through onChange(key, value); the page owns nothing else. Spec 2026-10-01-tray-flyout.
-  import { iconSvg } from '$shared/design/icons.js';
+  // The two item lists of a quick-control panel's settings page (Windows "Tray menu", Mac "Menu bar"):
+  // Sliders (at most four on) and Toggles. The Performance switch above them is an ordinary schema row.
+  // Each change writes that list's two config keys through onChange(key, value); the page owns nothing
+  // else. `model` is the app's makeListModel() result (tray/listModel.js), `where` ends each check
+  // box's spoken name ("in the tray", "in the menu bar"). Spec 2026-10-01-tray-flyout.
+  import { iconSvg } from '../design/icons.js';
   import DragList from './DragList.svelte';
-  import { parseList, serialiseList, onCount, MAX_SLIDERS } from './trayModel.js';
-  let { values = {}, onChange = () => {}, announce = () => {} } = $props();
+  import { onCount } from './listModel.js';
+  let { values = {}, onChange = () => {}, announce = () => {}, model, where = 'in the tray' } = $props();
 
-  const sliders = $derived(parseList(values, 'sliders'));
-  const toggles = $derived(parseList(values, 'toggles'));
+  const sliders = $derived(model.parseList(values, 'sliders'));
+  const toggles = $derived(model.parseList(values, 'toggles'));
+  const MAX_SLIDERS = $derived(model.MAX_SLIDERS);
   const sliderCount = $derived(onCount(sliders));
   const full = $derived(sliderCount >= MAX_SLIDERS);
 
-  const write = (kind, items) => { const w = serialiseList(kind, items); for (const k of Object.keys(w)) onChange(k, w[k]); };
+  const write = (kind, items) => { const w = model.serialiseList(kind, items); for (const k of Object.keys(w)) onChange(k, w[k]); };
   function flip(kind, items, it) {
     if (!it) return;
     if (kind === 'sliders' && !it.on && full) return;   // at the cap: unchecked rows stay off
@@ -36,7 +39,7 @@
     <div class="d">{it.desc}</div>
   </div>
   <button type="button" class="chk" role="checkbox" aria-checked={it.on} disabled={blocked(kind, it)}
-          aria-label={'Show ' + it.name + ' in the tray'}>
+          aria-label={'Show ' + it.name + ' ' + where}>
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.25 3.25L13 4.5"/></svg>
   </button>
 {/snippet}

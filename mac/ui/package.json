@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "playwright test",
-    "test:rules": "node --test tests/keybind-rules.nodetest.mjs tests/config-defaults.nodetest.mjs",
+    "test:rules": "node --test tests/keybind-rules.nodetest.mjs tests/config-defaults.nodetest.mjs tests/menu-layout.nodetest.mjs tests/panel-model.nodetest.mjs",
     "test:webkit": "playwright test --project=webkit"
   },
   "devDependencies": {

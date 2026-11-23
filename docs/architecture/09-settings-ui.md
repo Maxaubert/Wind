@@ -175,7 +175,9 @@ sequenceDiagram
 
 ## Tray menu page
 
-`ui/src/tray/TrayMenuPage.svelte` (list logic in `trayModel.js`, mirroring `src/tray/tray_items.*`). A
+`ui-shared/src/tray/ItemListsPage.svelte` with `DragList.svelte` (shared with the Mac's Menu bar page); the
+parse and write rules are `ui-shared/src/tray/listModel.js`, and `ui/src/tray/trayModel.js` gives it the
+Windows items and `tray*` keys, mirroring `src/tray/tray_items.*`. A
 toggle turns the Performance header on; two cards, Sliders (up to 4) and Toggles, list the eligible
 items with a drag handle, icon, name, description and a check button. Rows reorder inside their
 card by pointer drag, or with the keyboard: Space to pick up and drop, arrows to move. The keys are

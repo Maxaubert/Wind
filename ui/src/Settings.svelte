@@ -28,7 +28,8 @@
   import Prompt from '$shared/prompts/Prompt.svelte';
   import Results from '$shared/search/Results.svelte';
   import NewProfileDialog from './prefs/NewProfileDialog.svelte';
-  import TrayMenuPage from './tray/TrayMenuPage.svelte';
+  import ItemListsPage from '$shared/tray/ItemListsPage.svelte';
+  import * as trayModel from './tray/trayModel.js';
   import { search } from '$shared/search/search.js';
 
   // Replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests.
@@ -322,7 +323,7 @@
         {/if}
       {/each}
       {#if group.custom === 'tray'}
-        <TrayMenuPage {values} onChange={change} {announce} />
+        <ItemListsPage {values} onChange={change} {announce} model={trayModel} where="in the tray" />
       {/if}
       {/if}
       </div>

@@ -12,7 +12,7 @@ import { mockHost, open, go, css } from './mock.js';
 test.beforeEach(async ({ page }) => { await mockHost(page); });
 
 test('icon set covers the pages and renders static svg', () => {
-  for (const n of ['hotkeys', 'zoom', 'view', 'general', 'about', 'search'])
+  for (const n of ['hotkeys', 'zoom', 'view', 'general', 'tray', 'about', 'search'])
     expect(iconNames).toContain(n);
   expect(iconSvg('zoom')).toMatch(/^<svg /);
   expect(iconSvg('nope')).toBe('');
