@@ -7,7 +7,7 @@ The screen visibly zooms while this runs. Exit 0 = every check passed."""
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import subprocess
-from windtest import D, ROOT, ctl, check, finish, kill_all_wind, relaunch_with_channel, set_config
+from windtest import screen_size, D, ROOT, ctl, check, finish, kill_all_wind, relaunch_with_channel, set_config
 
 relaunch_with_channel()
 
@@ -24,10 +24,12 @@ check("view centred on pointer", abs(s["center"][0] - 700) < 2 and abs(s["center
 check("pointer stays put while zooming", abs(s["pointer"][0] - 700) < 1 and abs(s["pointer"][1] - 400) < 1, f"pointer {s['pointer']}")
 lv = s["level"]
 
+W, H = screen_size()
 ctl("level 1"); time.sleep(0.2); ctl("warp 5 5"); s = ctl("level 3", wait=0.3)
-check("view clamps at the corner", abs(s["center"][0] - 320) < 1 and abs(s["center"][1] - 180) < 1, f"center {s['center']}")
-check("sky centre matches", abs(s["sky"]["center"][0] - 320) <= 1 and abs(s["sky"]["center"][1] - 180) <= 1, f"sky {s['sky']['center']}")
-ctl("level 1"); time.sleep(0.2); ctl("warp 960 540"); s = ctl("level 3.42", wait=0.3)
+# At 3x the view is a third of the screen, so its centre in the corner is a sixth of each side.
+check("view clamps at the corner", abs(s["center"][0] - W / 6) < 1 and abs(s["center"][1] - H / 6) < 1, f"center {s['center']} want {W / 6:.1f},{H / 6:.1f}")
+check("sky centre matches", abs(s["sky"]["center"][0] - W / 6) <= 1 and abs(s["sky"]["center"][1] - H / 6) <= 1, f"sky {s['sky']['center']}")
+ctl("level 1"); time.sleep(0.2); ctl(f"warp {W / 2} {H / 2}"); s = ctl("level 3.42", wait=0.3)
 lv = s["level"]
 
 # Real tap path: a synthetic key bind.
@@ -48,7 +50,7 @@ check("a big wheel delta is still one notch", abs(three - one) < 0.01, f"x{one:.
 # Game lock: deltas pan the view while the pointer stays put. (Off by default until games are tested
 # on the Mac; switched on here.)
 saved_lock = set_config(lockTracking=True)
-ctl("level 1"); time.sleep(0.2); ctl("warp 960 540"); ctl("level 4"); time.sleep(0.2)
+ctl("level 1"); time.sleep(0.2); ctl(f"warp {W / 2} {H / 2}"); ctl("level 4"); time.sleep(0.2)
 ctl("lock on")
 c0 = ctl("state", wait=0.2)["center"]
 for _ in range(10): ctl("post move 20 0"); time.sleep(0.02)
