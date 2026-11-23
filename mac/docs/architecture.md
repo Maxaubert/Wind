@@ -1249,14 +1249,22 @@ counterpart of Windows' tray flyout (`src/tray_app/flyout_*`), built without an 
   reaches the screen top, so the icon is what keeps the card out from under the revealed bar), clamped to the
   screen's visible frame; the page reports its height (more while the
   engine list hangs below the card) and the window is resized and placed again.
-- **Focus and hover:** an accessory app is not activated by a status item click, and without activation WebKit
-  gets no mouse-moved events, so nothing shows hover (Universal Clipboard 7ed027a). Opening calls `NSApp.activate()`
-  and makes the panel key; the activation policy stays `.accessory`.
+- **Focus and hover:** opening asks macOS to activate Wind (`NSApp.activate()`), so the page has the keyboard
+  (Tab, a slider's arrows); a close Wind caused (Esc, the icon, the page's close, the icon hidden) hands
+  activation back to the app that was frontmost (`giveBackFocus`), so the text field Wind follows keeps its
+  keystrokes. macOS refuses that activation now and then (2026-11-23, e2e_menubar: active false, key false; Esc
+  and the first slider drag went elsewhere, no hover on Settings/Quit and no tooltips for the owner), so nothing
+  else depends on it:
+  - the panel is a non-activating `NSPanel` (`.nonactivatingPanel`), key either way, so clicks land at once;
+  - WebKit draws hover and shows `title` tooltips only while its app is active, so `PanelPointerView` tracks the
+    pointer with an `.activeAlways` tracking area and calls `window.__windPointer(x, y)`; the page sets a `hov`
+    class (rules marked `:global`, or Svelte strips them) and draws its own tooltips from `data-tip` after 500 ms;
+  - keys may still go on to the app behind (Wind can read as active and frontmost meanwhile), so Esc is taken
+    by Wind's event tap while the panel is open (`Magnifier.panelEscape`, `escapeFromTap`): it closes the panel,
+    engine list and all, and is swallowed.
 - **Closing:** focus loss (`windowDidResignKey`), Esc, a second icon click, Settings, Quit. A click on the icon
   within 300 ms of a close is the click that closed it and does not reopen (`MenuPanel.ignoreClick`, Windows'
-  kReopenGuardMs). A close Wind caused (Esc, the icon, the page's close, the icon hidden) gives activation back
-  to the app that was frontmost when the panel opened (`giveBackFocus`), so the text field Wind follows keeps its
-  keystrokes; not on focus loss, Settings or Quit, nor when Wind was active already.
+  kReopenGuardMs). Not on focus loss, Settings or Quit, nor when Wind was active already, is activation handed back.
 - **Writes:** the page posts `setConfig` (sliders, already throttled to one per 50 ms with a flush on release by
   the shared Slider), `setConfigs` (a toggle, both alignment keys at once) and `panelAction setEngine`. The host
   types each with `SettingsWindowController.setting` and coalesces them: at most one `saveConfig` per 50 ms,

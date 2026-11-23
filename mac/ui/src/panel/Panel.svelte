@@ -100,13 +100,42 @@
     return () => ro.disconnect();
   });
 
-  // ---- hover, for the e2e state (which control is under the real pointer)
-  let hovered = '';
-  function onOver(e) {
-    const el = e.target instanceof Element ? e.target.closest('[data-id]') : null;
-    const id = el ? el.dataset.id : '';
+  // ---- hover and tooltips. WebKit sends hover and shows `title` tooltips only while the panel is key
+  // in the active app, and a status item click does not always leave Wind active (owner 2026-11-23: no
+  // hover on Settings/Quit, no tooltips). So the host tracks the pointer itself and calls
+  // window.__windPointer(x, y) (page points, -1 when it leaves); the page's own pointer events feed the
+  // same function while it is active. Hover is the `hov` class, tooltips are drawn here from data-tip.
+  const HOVERABLE = '.seg button, .engine, .ib, .bfix, .elist li';
+  const TIP_DELAY = 500;
+  let hovered = '';                 // data-id under the pointer, for the e2e state
+  let hovEl = null, tipFor = null, tipTimer = 0;
+  let tip = $state(null);           // {text, x, y, below}
+  let tipEl = $state();
+  function pointerAt(x, y) {
+    const el = x < 0 ? null : document.elementFromPoint(x, y);
+    const h = el ? el.closest(HOVERABLE) : null;
+    if (h !== hovEl) { hovEl?.classList.remove('hov'); h?.classList.add('hov'); hovEl = h; }
+    const t = el ? el.closest('[data-tip]') : null;
+    if (t !== tipFor) {
+      tipFor = t; clearTimeout(tipTimer); tip = null;
+      if (t) tipTimer = setTimeout(() => showTip(t), TIP_DELAY);
+    }
+    const idEl = el ? el.closest('[data-id]') : null;
+    const id = idEl ? idEl.dataset.id : '';
     if (id !== hovered) { hovered = id; post({ type: 'hover', id }); }
   }
+  async function showTip(t) {
+    if (!card || !t.isConnected) return;
+    const r = t.getBoundingClientRect(), c = card.getBoundingClientRect();
+    const below = r.bottom + 34 <= c.bottom;
+    tip = { text: t.dataset.tip, x: r.left + r.width / 2, y: below ? r.bottom + 6 : r.top - 6, below };
+    await tick();
+    if (!tipEl || !tip) return;
+    const w = tipEl.offsetWidth, lo = c.left + 6 + w / 2, hi = c.right - 6 - w / 2;
+    tip = { ...tip, x: Math.min(Math.max(tip.x, lo), hi) };
+  }
+  function hideTip() { clearTimeout(tipTimer); tip = null; tipFor = null; }
+  window.__windPointer = pointerAt;
 
   // ---- keys: Esc closes (the engine list first); Left/Right walk the toggle group
   function onKey(e) {
@@ -190,8 +219,9 @@
 <svelte:window onkeydown={onKey} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="wnd panel" class:closed={!open} data-palette={palette} bind:this={root} onpointerover={onOver}
-     onpointerleave={() => { if (hovered) { hovered = ''; post({ type: 'hover', id: '' }); } }}>
+<div class="wnd panel" class:closed={!open} data-palette={palette} bind:this={root}
+     onpointermove={(e) => pointerAt(e.clientX, e.clientY)} onpointerleave={() => pointerAt(-1, -1)}
+     onpointerdown={hideTip}>
   <div class="card" bind:this={card} role="dialog" aria-label="Wind">
     {#each shownBanners as b (b)}
       <section class="banner" data-banner={b} data-id={'banner:' + b} role="alert">
@@ -231,8 +261,8 @@
     {#if view.sliders.length || view.toggles.length || view.engine}
       <section class="qs" class:ctl={view.toggles.length || view.engine}>
         {#each view.sliders as s (s.key)}
-          <div class="srow" data-id={'slider:' + s.key} data-key={s.key} title={s.name}>
-            <span class="sic">{@html icon(s.icon)}</span>
+          <div class="srow" data-id={'slider:' + s.key} data-key={s.key}>
+            <span class="sic" data-tip={s.name}>{@html icon(s.icon)}</span>
             <span class="sr-only" id={'lbl-' + s.key}>{s.name}</span>
             <Slider value={s.value} min={s.min} max={s.max} step={s.step} unit={s.unit} labelledby={'lbl-' + s.key}
                     onChange={(v) => write(s.key, v)} />
@@ -241,14 +271,14 @@
         {#if view.toggles.length}
           <div class="seg" role="group" aria-label="Quick toggles">
             {#each view.toggles as t (t.key)}
-              <button type="button" class:on={t.on} aria-pressed={t.on} aria-label={t.name} title={t.name}
+              <button type="button" class:on={t.on} aria-pressed={t.on} aria-label={t.name} data-tip={t.name}
                       data-id={'toggle:' + t.key} data-key={t.key} onclick={() => flip(t)}>{@html icon(t.icon)}</button>
             {/each}
           </div>
         {/if}
         {#if view.engine}
           <button type="button" class="engine" class:open={listOpen} bind:this={field} data-id="engine" data-key="engine"
-                  aria-haspopup="listbox" aria-expanded={listOpen} aria-label={'Engine: ' + engineLabel(engine)} title="Engine"
+                  aria-haspopup="listbox" aria-expanded={listOpen} aria-label={'Engine: ' + engineLabel(engine)} data-tip="Engine"
                   onclick={() => (listOpen ? closeList() : openList())} onkeydown={onFieldKey}>
             <span class="eic">{@html icon('engine')}</span>
             <span class="ev">{engineLabel(engine)}</span>
@@ -260,10 +290,15 @@
 
     <section class="bar">
       <span class="brand" aria-hidden="true">{@html icon('logo')}<span>Wind</span></span>
-      <button type="button" class="ib" data-id="settings" aria-label="Settings" title="Settings" onclick={() => act('openSettings')}>{@html icon('settings')}</button>
-      <button type="button" class="ib" data-id="quit" aria-label="Quit Wind" title="Quit Wind" onclick={() => act('quit')}>{@html icon('quit')}</button>
+      <button type="button" class="ib" data-id="settings" aria-label="Settings" data-tip="Settings" onclick={() => act('openSettings')}>{@html icon('settings')}</button>
+      <button type="button" class="ib" data-id="quit" aria-label="Quit Wind" data-tip="Quit Wind" onclick={() => act('quit')}>{@html icon('quit')}</button>
     </section>
   </div>
+
+  {#if tip && open && !listOpen}
+    <div class="tip" class:below={tip.below} bind:this={tipEl} role="tooltip"
+         style:left={tip.x + 'px'} style:top={tip.y + 'px'}>{tip.text}</div>
+  {/if}
 
   {#if listOpen}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -308,7 +343,7 @@
   .bfix { height: 26px; padding: 0 10px; border: 0; border-radius: var(--rs); background: var(--dangerbtn);
           color: var(--dangerbtnfg); font: 600 12px var(--s); cursor: pointer; white-space: nowrap;
           transition: filter 120ms var(--ease), transform 80ms var(--ease); }
-  .bfix:hover { filter: brightness(1.1); }
+  .bfix:hover, .bfix:global(.hov) { filter: brightness(1.1); }
   .bfix:active { transform: scale(.97); }
 
   /* ---- Performance header (96 px): the aurora image faded in from the right, two scrims, the level and
@@ -353,8 +388,8 @@
                 transition: background-color 150ms var(--ease), color 150ms var(--ease); }
   .seg button::before { content: ''; position: absolute; inset: 0; background: var(--f-offh); opacity: 0; transition: opacity 120ms var(--ease); }
   .seg button :global(svg) { position: relative; stroke-width: 1.75; }
-  .seg button:hover::before { opacity: 1; }
-  .seg button:hover { color: var(--f-fg); }
+  .seg button:hover::before, .seg button:global(.hov)::before { opacity: 1; }
+  .seg button:hover, .seg button:global(.hov) { color: var(--f-fg); }
   .seg button.on { background: var(--f-on); color: var(--f-onic); }
   .seg button.on::before { background: var(--f-onh); }
   .seg button:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--f-focus); }
@@ -366,7 +401,7 @@
             transition: background-color 120ms var(--ease), box-shadow 120ms var(--ease); }
   .seg + .engine { margin-top: 8px; }
   .qs > .engine:first-child, .srow + .engine { margin-top: 6px; }
-  .engine:hover { background: var(--f-offh); }
+  .engine:hover, .engine:global(.hov) { background: var(--f-offh); }
   .engine.open { box-shadow: inset 0 0 0 1px var(--f-onb); }
   .engine:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--f-focus); }
   .eic { color: var(--f-glyph); margin-right: 10px; }
@@ -381,9 +416,18 @@
   .ib { width: 32px; height: 32px; display: grid; place-items: center; border: 0; padding: 0; border-radius: var(--rk);
         background: transparent; color: var(--f-glyph); cursor: pointer;
         transition: background-color 120ms var(--ease), color 120ms var(--ease), transform 80ms var(--ease); }
-  .ib:hover { background: var(--f-hl); color: var(--f-fg); }
+  .ib:hover, .ib:global(.hov) { background: var(--f-hl); color: var(--f-fg); }
   .ib:active { transform: scale(.97); }
   .ib:focus-visible { outline: 2px solid var(--f-focus); outline-offset: -2px; }
+
+  /* ---- tooltips (drawn here, see pointerAt): above the control, or below when there is no room */
+  .tip { position: fixed; z-index: 20; transform: translate(-50%, -100%); padding: 4px 8px; white-space: nowrap;
+         border: 1px solid var(--f-ring, var(--f-menub)); border-radius: var(--rs); background: var(--f-card); color: var(--f-fg);
+         font: 12px/16px var(--m); box-shadow: 0 4px 10px rgba(0, 0, 0, .45);
+         pointer-events: none; animation: tipin 120ms var(--ease); }
+  .tip.below { transform: translate(-50%, 0); }
+  @keyframes tipin { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .tip { animation: none; } }
 
   /* ---- the engine list (flyout_model.h ComputeList: 4 px padding, a 28 px caption, 30 px rows) */
   .elist { position: absolute; z-index: 10; margin: 0; padding: 4px; list-style: none; box-sizing: border-box;
@@ -393,7 +437,7 @@
               color: var(--f-fg2); cursor: pointer; }
   .elist li.cap { height: 28px; color: var(--f-fg3); cursor: default; }
   .elist li span:first-child { flex: 1; }
-  .elist li.active { background: var(--f-hl); color: var(--f-fg); }
+  .elist li.active, .elist li:global(.hov) { background: var(--f-hl); color: var(--f-fg); }
   .elist li.cur { color: var(--f-fg); }
   .ck { color: var(--f-spark); }
   .ck :global(svg) { stroke-width: 1.75; }
