@@ -2,8 +2,8 @@
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // vmouse: real HID pointer motion through Karabiner's virtual HID device (test harness for Wind).
 // Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "wheel <notches> <count> <interval_ms>",
-// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab), "button <n> down|up", "ctrl down|up",
-// "mod opt|shift down|up", "quit".
+// "type <text> [ms]" (a-z, 0-9, _ = space, < = backspace, > = tab, ^ = escape), "button <n> down|up", "ctrl down|up",
+// "mod opt|shift|cmd down|up", "quit".
 #include <atomic>
 #include <iostream>
 #include <sstream>
@@ -31,6 +31,8 @@ int main() {
   for (int i = 0; i < 100 && (!ready || !kbReady); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(50));
   if (!ready) { std::cerr << "not ready" << std::endl; return 1; }
   kd::virtual_hid_device_driver::hid_report::pointing_input report;
+  // Modifiers held by "mod": every key report carries them (Cmd+Space), until "mod ... up".
+  kd::virtual_hid_device_driver::hid_report::keyboard_input held;
   std::string line;
   while (std::getline(std::cin, line)) {
     std::istringstream in(line);
@@ -57,12 +59,13 @@ int main() {
         else if (ch == '_') u = 0x2C;   // space
         else if (ch == '<') u = 0x2A;   // backspace
         else if (ch == '>') u = 0x2B;   // tab
+        else if (ch == '^') u = 0x29;   // escape
         if (!u) continue;
-        kd::virtual_hid_device_driver::hid_report::keyboard_input kr;
+        auto kr = held;
         kr.keys.insert(u);
         client->async_post_report(kr);
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
-        client->async_post_report(kd::virtual_hid_device_driver::hid_report::keyboard_input());
+        client->async_post_report(held);
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
       }
     } else if (cmd == "circle") {
@@ -89,12 +92,13 @@ int main() {
       if (st == "down") kr.modifiers.insert(kd::virtual_hid_device_driver::hid_report::modifier::left_control);
       client->async_post_report(kr);
     } else if (cmd == "mod") {
-      // mod opt|shift down|up: hold a modifier on the virtual keyboard (screenshot selection tests)
+      // mod opt|shift|cmd down|up: hold a modifier on the virtual keyboard (screenshot selection tests,
+      // Cmd+Space for Spotlight)
       std::string m, st; in >> m >> st;
-      kd::virtual_hid_device_driver::hid_report::keyboard_input kr;
-      if (st == "down") kr.modifiers.insert(m == "shift" ? kd::virtual_hid_device_driver::hid_report::modifier::left_shift
-                                                         : kd::virtual_hid_device_driver::hid_report::modifier::left_option);
-      client->async_post_report(kr);
+      using mod = kd::virtual_hid_device_driver::hid_report::modifier;
+      auto which = m == "shift" ? mod::left_shift : m == "cmd" ? mod::left_command : mod::left_option;
+      if (st == "down") held.modifiers.insert(which); else held.modifiers.erase(which);
+      client->async_post_report(held);
     } else if (cmd == "wheel") {
       // wheel <notches> <count> <interval_ms>: one report per notch step
       int w = 1, n = 1, ms = 50; in >> w >> n >> ms;

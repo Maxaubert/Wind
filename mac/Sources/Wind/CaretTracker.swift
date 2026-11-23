@@ -268,6 +268,7 @@ final class CaretTracker {
         if isShell, let app = appElement { wakeTree(app) }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: false) { [weak self] _ in
             guard let self else { return }
+            self.followKeyFocus()
             guard let el = self.focusedElement() else {
                 // A Chromium browser launched just before Wind attached took the accessibility switch
                 // too early and reports no focused element (Tab moved the focus, the view stayed put;
@@ -296,6 +297,24 @@ final class CaretTracker {
             if Date().timeIntervalSince(started) > 0.2 { self.pollPausedUntil = Date().addingTimeInterval(1) }
         }
     }
+    /// Keys can go to an app that is not the frontmost one: Spotlight (Cmd+Space) is a panel of
+    /// `com.apple.campo` that takes keyboard focus without ever activating, so the frontmost app (and
+    /// `didActivateApplication`) stays the one behind it and Wind asked that app for its caret while the
+    /// owner typed in Spotlight (owner 2026-11-23; measured on macOS 27: the system-wide focused element
+    /// is campo's AXSearchField with a caret per key, frontmost stays the app behind). Before each poll
+    /// Wind asks which app has keyboard focus and moves to it; when the panel closes, focus is back in
+    /// the frontmost app and the next key moves Wind back. One extra call per key, on this thread.
+    private func followKeyFocus() {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &v) == .success,
+              let v, CFGetTypeID(v) == AXUIElementGetTypeID() else { return }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(v as! AXUIElement, &owner) == .success, owner != 0, owner != pid, owner != getpid(),
+              let app = NSRunningApplication(processIdentifier: owner) else { return }
+        Log.verbose("caret: keys go to \(app.bundleIdentifier ?? app.localizedName ?? "?") (\(owner)), not the attached app")
+        attach(app, enabled: live)
+    }
+
     private var pollPausedUntil = Date.distantPast
     private var isShell = false                 // a Chromium shell outside chromiumBundles (wakeTree)
     private var reEnhanced = false              // the Chromium switch was re-applied once for this app
@@ -352,12 +371,21 @@ final class CaretTracker {
               let rangeVal, CFGetTypeID(rangeVal) == AXValueGetTypeID() else { return nil }
         var range = CFRange()
         guard AXValueGetValue(rangeVal as! AXValue, .cfRange, &range) else { return nil }
-        if let r = bounds(el, range), r.height > 0 { return (r, range.length == 0) }
         // An empty range often has no bounds: measure the character before the caret instead.
-        if range.length == 0 && range.location > 0,
-           let r = bounds(el, CFRange(location: range.location - 1, length: 1)), r.height > 0 {
-            return (Rc(l: r.r, t: r.t, r: r.r + 1, b: r.b), true)
+        func afterPrevious() -> Rc? {
+            guard range.length == 0 && range.location > 0,
+                  let r = bounds(el, CFRange(location: range.location - 1, length: 1)), r.height > 0 else { return nil }
+            return Rc(l: r.r, t: r.t, r: r.r + 1, b: r.b)
         }
+        if let r = bounds(el, range), r.height > 0 {
+            // Spotlight's search field answers an empty range one line above the field (y 260 for a field
+            // at 290-348, measured 2026-11-23) while its characters are where they are drawn: an insertion
+            // point outside its field is measured from the character before it.
+            if range.length == 0, r.width == 0, let f = frame(of: el, anySize: true), !caretInsideElement(r, f),
+               let p = afterPrevious() { return (p, true) }
+            return (r, range.length == 0)
+        }
+        if let p = afterPrevious() { return (p, true) }
         if range.length == 0, let r = textRunCaret(el, range.location) { return (r, true) }
         return nil
     }

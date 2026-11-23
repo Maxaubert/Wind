@@ -574,6 +574,15 @@ rest it trailed by 9 pt and carried it in one frame). Explorer, zooming scenario
   it is not. A port of Windows #561 (an Electron dialog's fixed caret below its input) and #278; preventive, no
   Mac repro is known (2026-11-22). Pure rule `caretInsideElement` in `WindCore/CaretFilter.swift`, cases shared
   with Windows in `tests/fixtures/shared/caret_cases.txt`.
+- **Keys that go to a background panel (Spotlight, 2026-11-23).** Spotlight (Cmd+Space) is a panel of
+  `com.apple.campo` (shown as "Siri", layer 23) that takes keyboard focus without activating: the frontmost
+  app and `didActivateApplication` stay on the app behind it, so Wind kept asking that app for its caret.
+  Before each key poll Wind reads the system-wide `AXFocusedApplication` and attaches to it when it is not
+  the attached app (`followKeyFocus`); after Escape the next key attaches back. Its search field answers
+  an empty range one line above the field (y 260 for a field at 290-348) while its characters are where
+  they are drawn, so a zero-width insertion point outside its field is measured from the character before
+  it. `e2e_caret.py` types into Spotlight (Cmd+Space on the virtual keyboard, Escape to close) and into the
+  TextEdit window behind it after closing.
 - **Parked TUI cursors.** In terminals, a caret in the last two columns of the text area is a TUI's
   parked cursor and is ignored. Claude Code parks it at the right edge on every space.
 - **Chromium.** Chromium browsers get `AXEnhancedUserInterface` while they are frontmost (switched
