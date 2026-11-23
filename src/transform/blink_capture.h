@@ -22,7 +22,8 @@ public:
     // After the 1x write and a DwmFlush: duplicate, take the frame and queue a GPU copy. Fast.
     bool grab();
     // After the zoom is back: read the copy and write it into the tool's section
-    // `Local\Glint.CaptureFrame.<pid>`. Returns false if the section is missing or too small.
+    // `Local\Glint.CaptureFrame.<pid>`. Returns false if the section is missing, too small, not
+    // committed, not owned by this user, labelled below Medium, or faults during the copy.
     bool publish(const MonitorTarget& mon, DWORD toolPid);
 
 private:
@@ -33,6 +34,11 @@ private:
     D3D11_TEXTURE2D_DESC stagingDesc_{};
     wchar_t device_name_[32] = {};
 };
+
+// Sender check for a blink request (lParam is only a claim: a window message carries no sender
+// identity). True when `pid` runs at Medium integrity or above, outside an AppContainer, in this
+// session, from an image named glint.exe (blink_policy.h). On false, `why` names the failed check.
+bool BlinkSenderAllowed(DWORD pid, const char** why);
 
 // Section header the tool reads (little-endian, 32 bytes, pixels follow).
 struct BlinkFrameHeader {

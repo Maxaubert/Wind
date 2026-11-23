@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "blink_capture.h"
+#include "blink_policy.h"   // pure sender/section rules (tested)
 #include "logging.h"
+#include <aclapi.h>         // GetSecurityInfo
 #include <cstring>
 #include <cwchar>
+#pragma comment(lib, "advapi32.lib")
 
 using Microsoft::WRL::ComPtr;
 
@@ -84,12 +87,114 @@ bool BlinkCapture::grab() {
     return ok;
 }
 
+// The last sub-authority of a SID: the RID, which for a mandatory label SID is the integrity level.
+static DWORD SidLastRid(PSID sid) {
+    if (!sid || !IsValidSid(sid)) return 0;
+    const UCHAR n = *GetSidSubAuthorityCount(sid);
+    return n ? *GetSidSubAuthority(sid, n - 1u) : 0;
+}
+
+bool BlinkSenderAllowed(DWORD pid, const char** why) {
+    const char* unused = nullptr;
+    if (!why) why = &unused;
+    *why = "ok";
+    if (pid == 0 || pid == GetCurrentProcessId()) { *why = "bad pid"; return false; }
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) { *why = "cannot open the process"; return false; }
+    // Fail closed: anything that cannot be read counts against the sender.
+    DWORD rid = 0;
+    bool appContainer = true;
+    HANDLE tok = nullptr;
+    if (OpenProcessToken(p, TOKEN_QUERY, &tok)) {
+        alignas(TOKEN_MANDATORY_LABEL) BYTE il[sizeof(TOKEN_MANDATORY_LABEL) + SECURITY_MAX_SID_SIZE] = {};
+        DWORD len = 0;
+        if (GetTokenInformation(tok, TokenIntegrityLevel, il, sizeof(il), &len))
+            rid = SidLastRid(reinterpret_cast<TOKEN_MANDATORY_LABEL*>(il)->Label.Sid);
+        DWORD isAc = 1;
+        if (GetTokenInformation(tok, TokenIsAppContainer, &isAc, sizeof(isAc), &len)) appContainer = isAc != 0;
+        CloseHandle(tok);
+    }
+    DWORD mine = 0, theirs = 0;
+    const bool sameSession = ProcessIdToSessionId(GetCurrentProcessId(), &mine) &&
+                             ProcessIdToSessionId(pid, &theirs) && mine == theirs;
+    wchar_t image[MAX_PATH * 2] = {};
+    DWORD n = MAX_PATH * 2;
+    const bool haveImage = QueryFullProcessImageNameW(p, 0, image, &n) != 0;
+    CloseHandle(p);
+    const std::wstring_view base = haveImage ? BlinkExeBase(std::wstring_view(image, n)) : std::wstring_view();
+    if (BlinkSenderOk(rid, appContainer, sameSession, base)) return true;
+    if (rid < kBlinkMediumRid) *why = "integrity below Medium";
+    else if (appContainer) *why = "AppContainer";
+    else if (!sameSession) *why = "another session";
+    else *why = "not glint.exe";
+    return false;
+}
+
+// Owner is this process's user and the mandatory label (none = Medium) is Medium or above. A
+// section created by a Low IL or sandboxed process, or by another user, is never written.
+static bool SectionSecurityOk(HANDLE section) {
+    alignas(TOKEN_USER) BYTE userBuf[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE] = {};
+    HANDLE tok = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) return false;
+    DWORD len = 0;
+    const bool haveUser = GetTokenInformation(tok, TokenUser, userBuf, sizeof(userBuf), &len) != 0;
+    CloseHandle(tok);
+    if (!haveUser) return false;
+    PSID me = reinterpret_cast<TOKEN_USER*>(userBuf)->User.Sid;
+
+    PSID owner = nullptr;
+    PACL sacl = nullptr;
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    if (GetSecurityInfo(section, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+                        &owner, nullptr, nullptr, &sacl, &sd) != ERROR_SUCCESS)
+        return false;
+    bool ok = owner && IsValidSid(owner) && EqualSid(owner, me);
+    bool hasLabel = false;
+    DWORD labelRid = 0;
+    if (ok && sacl) {
+        for (DWORD i = 0; i < sacl->AceCount; ++i) {
+            void* ace = nullptr;
+            if (!GetAce(sacl, i, &ace) || !ace) continue;
+            if (static_cast<ACE_HEADER*>(ace)->AceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE) continue;
+            auto* ml = static_cast<SYSTEM_MANDATORY_LABEL_ACE*>(ace);
+            hasLabel = true;
+            labelRid = SidLastRid(reinterpret_cast<PSID>(&ml->SidStart));
+            break;
+        }
+    }
+    if (sd) LocalFree(sd);
+    return ok && BlinkSectionLabelOk(hasLabel, labelRid);
+}
+
+// The copy into the tool's section, under an SEH guard: a file-backed section can raise an in-page
+// error and a hostile section can still fault. Kept apart with no C++ objects, since the build uses
+// /EHsc and __try cannot share a function with objects that need unwinding (C2712).
+static bool CopyFrameGuarded(unsigned char* dst, const BlinkFrameHeader* hdr, const unsigned char* src,
+                             size_t srcPitch, size_t row, unsigned h) {
+    __try {
+        std::memcpy(dst, hdr, sizeof(*hdr));
+        dst += sizeof(*hdr);
+        for (unsigned y = 0; y < h; ++y) std::memcpy(dst + size_t(y) * row, src + size_t(y) * srcPitch, row);
+        return true;
+    } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION || GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR
+                    ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        return false;
+    }
+}
+
 bool BlinkCapture::publish(const MonitorTarget& mon, DWORD toolPid) {
     if (!staging_) return false;
     wchar_t name[64];
     swprintf_s(name, L"Local\\Glint.CaptureFrame.%lu", (unsigned long)toolPid);
-    HANDLE section = OpenFileMappingW(FILE_MAP_WRITE, FALSE, name);
+    // READ_CONTROL so the owner and label can be checked before anything is written.
+    HANDLE section = OpenFileMappingW(FILE_MAP_WRITE | READ_CONTROL, FALSE, name);
     if (!section) return false;
+    if (!SectionSecurityOk(section)) {
+        Log(LogLevel::Warn, "blink", "section for pid %lu refused: not this user's or labelled below Medium",
+            (unsigned long)toolPid);
+        CloseHandle(section);
+        return false;
+    }
     const bool fp16 = stagingDesc_.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
     const unsigned bpp = fp16 ? 8u : 4u;
     const unsigned w = stagingDesc_.Width, h = stagingDesc_.Height, row = w * bpp;
@@ -97,17 +202,19 @@ bool BlinkCapture::publish(const MonitorTarget& mon, DWORD toolPid) {
     bool ok = false;
     if (void* view = MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, 0)) {
         MEMORY_BASIC_INFORMATION mbi{};
-        VirtualQuery(view, &mbi, sizeof(mbi));
+        const bool queried = VirtualQuery(view, &mbi, sizeof(mbi)) != 0;
+        const bool sectionOk = queried && BlinkSectionOk(mbi.RegionSize, mbi.State == MEM_COMMIT,
+                                                         mbi.Type == MEM_MAPPED, need);
+        if (!sectionOk)
+            Log(LogLevel::Warn, "blink", "section for pid %lu refused: not committed, not mapped or too small",
+                (unsigned long)toolPid);
         D3D11_MAPPED_SUBRESOURCE m{};
-        if (mbi.RegionSize >= need && SUCCEEDED(ctx_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) {
-            BlinkFrameHeader hdr{ 0x46424C47u, 1u, w, h, row, fp16 ? 2u : 1u, mon.x, mon.y };
-            auto* dst = static_cast<unsigned char*>(view);
-            std::memcpy(dst, &hdr, sizeof(hdr));
-            dst += sizeof(hdr);
-            const auto* src = static_cast<const unsigned char*>(m.pData);
-            for (unsigned y = 0; y < h; ++y) std::memcpy(dst + size_t(y) * row, src + size_t(y) * m.RowPitch, row);
+        if (sectionOk && SUCCEEDED(ctx_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+            const BlinkFrameHeader hdr{ 0x46424C47u, 1u, w, h, row, fp16 ? 2u : 1u, mon.x, mon.y };
+            ok = CopyFrameGuarded(static_cast<unsigned char*>(view), &hdr,
+                                  static_cast<const unsigned char*>(m.pData), m.RowPitch, row, h);
             ctx_->Unmap(staging_.Get(), 0);
-            ok = true;
+            if (!ok) Log(LogLevel::Warn, "blink", "copy into the section for pid %lu faulted", (unsigned long)toolPid);
         }
         UnmapViewOfFile(view);
     }

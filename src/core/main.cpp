@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include "blink_capture.h"   // Glint capture blink (#565)
+#include "blink_policy.h"    // capture blink sender/section/rate rules
 #include <magnification.h>
 #include <cmath>
 #include <cstdlib>
@@ -2889,21 +2890,38 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // pid, which names the section it created. Wind prepares the duplication first (slow once, then
     // warm), writes identity, flushes one composition, grabs that frame, writes the zoom straight
     // back (the visible blink is about one frame) and copies the pixels into the section.
-    // Reply 1 = the frame is in the section; 0 = not zoomed or it failed (Glint captures as usual).
-    // Runs on the tick thread (this window's thread), as the thread-affine Magnification API needs.
+    // Reply 1 = the frame is in the section; 0 = not zoomed, refused or it failed (Glint captures
+    // as usual). Runs on the tick thread (this window's thread), as the thread-affine Magnification
+    // API needs.
+    // The message is let through UIPI and carries no sender identity, so lParam is only a claim.
+    // Before anything visible happens: wParam must be 2, at most one attempt per 250 ms (a flood
+    // cannot flicker the view or stall the tick), and the claimed pid must be glint.exe at Medium
+    // or above, not sandboxed, in this session (blink_policy.h). publish() then checks the section
+    // itself (owner, label, committed and mapped, size) and copies under an SEH guard.
     static const UINT kCaptureBlinkMsg = RegisterWindowMessageW(L"Wind.CaptureBlink.v1");
     if (kCaptureBlinkMsg && msg == kCaptureBlinkMsg) {
         static wind::BlinkCapture s_blink;
+        static unsigned long long s_lastBlinkMs = 0;
         auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->model) : nullptr;
         if (wp != 2 || !tm || !tm->blinkable()) return 0;
+        const unsigned long long nowMs = GetTickCount64();
+        if (!wind::BlinkRateOk(nowMs, s_lastBlinkMs)) return 0;   // silent: a flood must not fill the log
+        s_lastBlinkMs = nowMs;                                    // every checked attempt uses the slot
+        const DWORD pid = static_cast<DWORD>(lp);
+        const char* why = nullptr;
+        if (!wind::BlinkSenderAllowed(pid, &why)) {
+            wind::Log(wind::LogLevel::Warn, "blink", "capture blink refused for pid %lu: %s",
+                      static_cast<unsigned long>(pid), why ? why : "?");
+            return 0;
+        }
         if (!s_blink.prepare(g_tick->mon)) return 0;
         tm->captureBlink(true);
         DwmFlush();                      // the identity frame is composited and on screen
         const bool grabbed = s_blink.grab();
         tm->captureBlink(false);         // zoom back before the slow part (reading the copy)
-        const bool ok = grabbed && s_blink.publish(g_tick->mon, static_cast<DWORD>(lp));
+        const bool ok = grabbed && s_blink.publish(g_tick->mon, pid);
         wind::Log(wind::LogLevel::Info, "blink", "capture blink for pid %lu: %s",
-                  static_cast<unsigned long>(lp), ok ? "ok" : "failed");
+                  static_cast<unsigned long>(pid), ok ? "ok" : "failed");
         return ok ? 1 : 0;
     }
     if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
@@ -3043,7 +3061,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind", WS_OVERLAPPED,
                                 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
-    // Glint's capture blink (#565) comes from an ordinary process; let it through UIPI.
+    // Glint's capture blink (#565) comes from an ordinary Medium process, below Wind's UIAccess
+    // token, so UIPI would drop it. The filter lets any sender through, Low IL included; that is
+    // safe because WndProc verifies the claimed sender pid and the section before blinking or
+    // writing anything (blink_policy.h, BlinkSenderAllowed, BlinkCapture::publish).
     ChangeWindowMessageFilterEx(hwnd, RegisterWindowMessageW(L"Wind.CaptureBlink.v1"), MSGFLT_ALLOW, nullptr);
 
     // Mouse AND keyboard (issue #167). The keyboard registration exists for exactly one reason: an
