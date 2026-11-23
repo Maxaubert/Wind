@@ -3,7 +3,10 @@
 // Tray menu lists (pure, no DOM): which quick controls the tray flyout shows and in what order.
 // Mirrors src/tray/tray_items.cpp (ParseTrayLayout / WriteTrayLayout) so the page and WindTray read the
 // same five global ini keys the same way: trayPerf, traySliders, traySliderOrder, trayToggles,
-// trayToggleOrder. Items and limits: docs/specs/2026-10-01-tray-flyout-design.md.
+// trayToggleOrder. Items and limits: docs/specs/2026-10-01-tray-flyout-design.md. The parse and write
+// rules are shared with the Mac's menu bar page: ui-shared/src/tray/listModel.js (imported relatively, so
+// node tests can load this file without the $shared alias).
+import { makeListModel } from '../../../ui-shared/src/tray/listModel.js';
 
 export const MAX_SLIDERS = 4;
 
@@ -28,55 +31,9 @@ export const TOGGLES = [
   // #315. A full-width dropdown under the toggle group in the tray that picks the main engine; a change restarts Wind.
   { key: 'engine', icon: 'engine', name: 'Engine', desc: 'Switch the engine from the tray' },
 ];
-const KINDS = {
-  sliders: { items: SLIDERS, enabledKey: 'traySliders', orderKey: 'traySliderOrder', defaultOn: ['colorWarmPct', 'colorDimPct'], cap: MAX_SLIDERS },
-  toggles: { items: TOGGLES, enabledKey: 'trayToggles', orderKey: 'trayToggleOrder', defaultOn: ['trackCaret', 'trackFocus', 'keepEdges', 'engine'], cap: 0 },   // all on by default (#329)
-};
-
-const split = (s) => String(s).split(',').map((t) => t.trim()).filter(Boolean);
-
-// Order = the order key's known items, then the enabled list's known items not yet seen, then every
-// remaining eligible item: after its `after` neighbour when that is in the order, else at the end. Enabled = the enabled list (the defaults when its key is absent); enabled
-// items beyond the cap read as off, in list order. Returns [{ ...itemMeta, on }].
-export function parseList(values, kind) {
-  const k = KINDS[kind];
-  const eligible = k.items.map((i) => i.key);
-  const en = values[k.enabledKey], od = values[k.orderKey];
-  const enabled = en === undefined || en === null ? k.defaultOn : split(en);
-  const order = [];
-  const add = (key) => { if (eligible.includes(key) && !order.includes(key)) order.push(key); };
-  if (od !== undefined && od !== null) split(od).forEach(add);
-  enabled.forEach(add);
-  k.items.forEach(({ key, after }) => {
-    if (order.includes(key)) return;
-    const at = after ? order.indexOf(after) : -1;
-    if (at >= 0) order.splice(at + 1, 0, key);
-    else order.push(key);
-  });
-  let on = 0;
-  return order.map((key) => {
-    const meta = k.items.find((i) => i.key === key);
-    const isOn = enabled.includes(key) && (!k.cap || on < k.cap);
-    if (isOn) on++;
-    return { ...meta, on: isOn };
-  });
-}
-
-export function parseTray(values) {
-  return {
-    perf: values.trayPerf === undefined || values.trayPerf === null || String(values.trayPerf).trim() === '1',   // on by default (#329)
-    sliders: parseList(values, 'sliders'),
-    toggles: parseList(values, 'toggles'),
-  };
-}
-
-// The two ini entries a list change writes: { [enabledKey]: 'a,b', [orderKey]: 'a,b,c,...' }.
-export function serialiseList(kind, items) {
-  const k = KINDS[kind];
-  return {
-    [k.enabledKey]: items.filter((i) => i.on).map((i) => i.key).join(','),
-    [k.orderKey]: items.map((i) => i.key).join(','),
-  };
-}
-
-export const onCount = (items) => items.filter((i) => i.on).length;
+export const { parseList, parseTray, serialiseList, onCount, defaults } = makeListModel({
+  sliders: SLIDERS, toggles: TOGGLES, maxSliders: MAX_SLIDERS,
+  defaultSliders: ['colorWarmPct', 'colorDimPct'],
+  defaultToggles: ['trackCaret', 'trackFocus', 'keepEdges', 'engine'],   // all on by default (#329)
+  keys: { perf: 'trayPerf', sliders: 'traySliders', sliderOrder: 'traySliderOrder', toggles: 'trayToggles', toggleOrder: 'trayToggleOrder' },
+});

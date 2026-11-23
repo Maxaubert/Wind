@@ -7,6 +7,10 @@ unchanged: design files, themes, generic controls and shell pieces. Each app imp
 - Small platform differences are props, set by each app: `Sidebar` (`searchHint`, `trafficLights` for
   the Mac's traffic-light corner), `About` (`onRepo` for the Windows star button, `note`) and `Results`
   (`Row`, the app's own `SettingRow`).
+- `tray/`: the quick-control list page (Windows Tray menu, Mac Menu bar): `listModel.js` (pure parse and
+  write rules, given each app's items and five config key names), `ItemListsPage.svelte` (props `model`,
+  `where`) and `DragList.svelte`. Windows passes `ui/src/tray/trayModel.js`, the Mac
+  `mac/ui/src/menubar/menuModel.js`.
 
 - Only platform-neutral files belong here. Anything that reads the schema, the bridge or a platform
   setting stays in its app.

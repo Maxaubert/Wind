@@ -157,7 +157,7 @@ export const groups = [
     ] },
 
   // Tray menu (#313): the Performance switch is an ordinary row; the two item lists are drawn by
-  // src/tray/TrayMenuPage.svelte (custom: 'tray'). All five tray keys are global, never profile keys.
+  // ui-shared/src/tray/ItemListsPage.svelte (custom: 'tray'). All five tray keys are global, never profile keys.
   { id: 'tray', label: 'Tray menu', icon: 'tray', custom: 'tray', bottom: true,
     desc: 'What the tray menu shows and in what order',
     cards: [

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
 // Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
-// The Settings window against the mock Mac host: five pages, live apply (one setConfig per change, no
+// The Settings window against the mock Mac host: six pages, live apply (one setConfig per change, no
 // Save), the advanced switch, showIf/offIf, the engine switch and its macOS zoom rows, pushed configs,
 // a refused write, and the Mac shortcuts.
 import { test, expect } from '@playwright/test';
@@ -10,12 +10,12 @@ test.beforeEach(async ({ page }) => { await mockHost(page, { values: { maxLevel:
 
 // ---- structure ------------------------------------------------------------------------------------
 
-test('Settings opens on Hotkeys; three pages, a divider, then Preferences and About', async ({ page }) => {
+test('Settings opens on Hotkeys; three pages, a divider, then Preferences, Menu bar and About', async ({ page }) => {
   await open(page);
   await expect(page.locator('h1')).toHaveText('Hotkeys');
   await expect(page.locator('.side nav:not(.bottom) .it')).toHaveText([/Hotkeys/, /Zoom/, /View/]);
-  await expect(page.locator('.side nav.bottom .it')).toHaveText([/Preferences/, /About/]);
-  for (const [g, title] of [['zoom', 'Zoom'], ['view', 'View'], ['prefs', 'Preferences'], ['hotkeys', 'Hotkeys']]) {
+  await expect(page.locator('.side nav.bottom .it')).toHaveText([/Preferences/, /Menu bar/, /About/]);
+  for (const [g, title] of [['zoom', 'Zoom'], ['view', 'View'], ['prefs', 'Preferences'], ['menubar', 'Menu bar'], ['hotkeys', 'Hotkeys']]) {
     await go(page, g);
     await expect(page.locator('h1')).toHaveText(title);
     await expect(page.locator('.side .it.sel')).toHaveAttribute('data-g', g);

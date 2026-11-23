@@ -1,0 +1,30 @@
+{
+  "about": "Menu bar list parse cases, run by swift run wind-checks (MenuLayout.swift) and npm run test:rules in mac/ui (menuModel.js). enabled or order null = the key is absent from config.json. wantOrder is the display order, wantOn the items that are on.",
+  "cases": [
+    { "name": "slider defaults", "kind": "sliders", "enabled": null, "order": null,
+      "wantOrder": "warmthPct,dimPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "warmthPct,dimPct" },
+    { "name": "toggle defaults are all on", "kind": "toggles", "enabled": null, "order": null,
+      "wantOrder": "trackCaret,trackFocus,keepEdges,engine", "wantOn": "trackCaret,trackFocus,keepEdges,engine" },
+    { "name": "order first, then enabled, then the rest; unknown dropped", "kind": "sliders",
+      "enabled": "zoomInSpeed,warmthPct,bogus", "order": "panSpeed,zoomInSpeed,nope,warmthPct",
+      "wantOrder": "panSpeed,zoomInSpeed,warmthPct,dimPct,satPct,maxLevel,zoomOutSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "zoomInSpeed,warmthPct" },
+    { "name": "enabled items lead when there is no order", "kind": "sliders", "enabled": "panSmoothMs,maxLevel", "order": null,
+      "wantOrder": "panSmoothMs,maxLevel,warmthPct,dimPct,satPct,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs", "wantOn": "panSmoothMs,maxLevel" },
+    { "name": "an empty order is the default order", "kind": "sliders", "enabled": "dimPct", "order": "",
+      "wantOrder": "dimPct,warmthPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "dimPct" },
+    { "name": "more than four sliders: the first four in display order are on", "kind": "sliders",
+      "enabled": "panSmoothMs,zoomEaseOutMs,panSpeed,zoomOutSpeed,zoomInSpeed",
+      "order": "warmthPct,dimPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs",
+      "wantOrder": "warmthPct,dimPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs" },
+    { "name": "toggles are uncapped", "kind": "toggles", "enabled": "engine,keepEdges,trackFocus,trackCaret", "order": null,
+      "wantOrder": "engine,keepEdges,trackFocus,trackCaret", "wantOn": "engine,keepEdges,trackFocus,trackCaret" },
+    { "name": "an empty enabled list turns every slider off", "kind": "sliders", "enabled": "", "order": null,
+      "wantOrder": "warmthPct,dimPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "" },
+    { "name": "an empty enabled list turns every toggle off", "kind": "toggles", "enabled": "", "order": "keepEdges,trackCaret",
+      "wantOrder": "keepEdges,trackCaret,trackFocus,engine", "wantOn": "" },
+    { "name": "spaces and duplicates", "kind": "sliders", "enabled": " dimPct , dimPct,satPct ", "order": "dimPct,dimPct, warmthPct",
+      "wantOrder": "dimPct,warmthPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "dimPct,satPct" },
+    { "name": "Windows names are not Mac items", "kind": "sliders", "enabled": "colorWarmPct,colorDimPct,panGlideMaxPx", "order": null,
+      "wantOrder": "warmthPct,dimPct,satPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,zoomEaseOutMs,panSmoothMs", "wantOn": "" }
+  ]
+}

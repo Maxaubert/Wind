@@ -6,7 +6,7 @@
 import { test, expect } from '@playwright/test';
 import { mockHost, open, go, row, advanced } from './mock.js';
 
-const GROUPS = ['hotkeys', 'zoom', 'view', 'prefs', 'about'];
+const GROUPS = ['hotkeys', 'zoom', 'view', 'prefs', 'menubar', 'about'];
 
 test.beforeEach(async ({ page }) => {
   await mockHost(page, { values: { maxLevel: '12', showAdvanced: '1', engine: 'zoom' },

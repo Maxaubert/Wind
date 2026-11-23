@@ -8,10 +8,10 @@ import { groups, groupRows, allRows, rowKeys, schemaDefaults, missingPermissions
 
 const TYPES = ['keybind', 'slider', 'toggle', 'select', 'palette', 'button', 'macstatus', 'about'];
 
-test('five pages in order, the last two below the divider', () => {
-  expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'about']);
-  expect(groups.map((g) => g.label)).toEqual(['Hotkeys', 'Zoom', 'View', 'Preferences', 'About']);
-  expect(groups.filter((g) => g.bottom).map((g) => g.id)).toEqual(['prefs', 'about']);
+test('six pages in order, the last three below the divider', () => {
+  expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'menubar', 'about']);
+  expect(groups.map((g) => g.label)).toEqual(['Hotkeys', 'Zoom', 'View', 'Preferences', 'Menu bar', 'About']);
+  expect(groups.filter((g) => g.bottom).map((g) => g.id)).toEqual(['prefs', 'menubar', 'about']);
   for (const g of groups) expect(g.icon, g.id).toBeTruthy();
 });
 
@@ -104,18 +104,29 @@ test('the engine select: Render, Backdrop or Transform (default), in the Engine 
   expect(schemaDefaults().engine).toBe('zoom');
 });
 
-test('the macOS card: status rows, the login and menu bar switches, log detail and four buttons', () => {
+test('the macOS card: status rows, the login switch, log detail and four buttons', () => {
   const prefs = groups.find((g) => g.id === 'prefs');
   const mac = prefs.cards.find((c) => c.caption === 'macOS');
   expect(mac.rows.map((r) => [r.key, r.type])).toEqual([
     ['__accessibility', 'macstatus'], ['__screenRecording', 'macstatus'], ['__zoomShortcuts', 'macstatus'],
-    ['__loginItem', 'macstatus'], ['showMenuBarIcon', 'toggle'], ['logLevel', 'select'],
+    ['__loginItem', 'macstatus'], ['logLevel', 'select'],
     ['__showLog', 'button'], ['__openIni', 'button'], ['__diagnostics', 'button'], ['__rerunSetup', 'button'],
   ]);
   const act = Object.fromEntries(mac.rows.map((r) => [r.key, r.action]));
   expect(act).toMatchObject({ __accessibility: 'openAccessibility', __screenRecording: 'openScreenRecording',
     __zoomShortcuts: 'fixZoomShortcuts', __loginItem: 'setLogin', __showLog: 'showLog', __openIni: 'openIni',
     __diagnostics: 'exportDiagnostics', __rerunSetup: 'rerunSetup' });
+});
+
+test('the Menu bar page: the icon and Performance switches, then the custom lists (menuModel.js)', () => {
+  const mb = groups.find((g) => g.id === 'menubar');
+  expect(mb.custom).toBe('menubar');
+  expect(mb.icon).toBe('tray');
+  expect(groupRows(mb).map((r) => [r.key, r.type, r.def])).toEqual([['showMenuBarIcon', 'toggle', 1], ['menuPerf', 'toggle', 1]]);
+  const d = schemaDefaults();
+  expect(d.menuSliders).toBe('warmthPct,dimPct');
+  expect(d.menuToggles).toBe('trackCaret,trackFocus,keepEdges,engine');
+  expect([d.menuSliderOrder, d.menuToggleOrder]).toEqual(['', '']);
 });
 
 test('missingPermissions: Accessibility always, Screen Recording on the render engine only', () => {

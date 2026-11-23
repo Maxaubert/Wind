@@ -466,3 +466,52 @@ struct SaturationTests {
         expect(Config().satPct == 100)
     }
 }
+
+/// Config's menu bar keys and MenuLayout, the parser the menu bar panel uses. The parse cases are shared
+/// with the settings page (mac/ui/tests/menu-layout.nodetest.mjs).
+struct MenuLayoutTests {
+    func defaults() {
+        let c = Config()
+        expect(c.menuPerf)
+        expect(MenuLayout.shown(MenuLayout.sliders(c)) == ["warmthPct", "dimPct"])
+        expect(MenuLayout.sliders(c).map(\.key) == MenuLayout.sliders)
+        expect(MenuLayout.shown(MenuLayout.toggles(c)) == MenuLayout.toggles)
+    }
+
+    func loadsFromTheFile() throws {
+        let c = try Config.load(from: Data(#"{"menuPerf": false, "menuSliders": "maxLevel,panSpeed", "menuToggles": [], "menuSliderOrder": ["panSpeed", "bogus"]}"#.utf8))
+        expect(!c.menuPerf)
+        expect(MenuLayout.shown(MenuLayout.sliders(c)) == ["panSpeed", "maxLevel"])
+        expect(MenuLayout.shown(MenuLayout.toggles(c)).isEmpty)
+        var dropped: [String] = []
+        let bad = try Config.load(from: Data(#"{"menuSliders": 3}"#.utf8), dropped: &dropped)
+        expect(dropped == ["menuSliders"] && bad.menuSliders == MenuLayout.defaultSliders)
+    }
+
+    func serialiseRoundTrips() {
+        let items = MenuLayout.parse(.sliders, enabled: ["satPct", "warmthPct"], order: ["maxLevel", "satPct"])
+        let w = MenuLayout.serialise(items)
+        expect(w.enabled == ["satPct", "warmthPct"])
+        expect(MenuLayout.parse(.sliders, enabled: w.enabled, order: w.order) == items)
+    }
+
+    func sharedCases() throws {
+        let url = DefaultsFixture.url.deletingLastPathComponent().appendingPathComponent("menu_layout_cases.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        let cases = root["cases"] as! [[String: Any]]
+        expect(cases.count >= 10)
+        let d = Config()
+        for t in cases {
+            let kind = MenuLayout.Kind(rawValue: t["kind"] as! String)!
+            // null = the key is absent: Config's default. A string is what the page writes (one item, split).
+            let enabled = (t["enabled"] as? String).map { [$0] } ?? (kind == .sliders ? d.menuSliders : d.menuToggles)
+            let order = (t["order"] as? String).map { [$0] } ?? (kind == .sliders ? d.menuSliderOrder : d.menuToggleOrder)
+            let items = MenuLayout.parse(kind, enabled: enabled, order: order)
+            let gotOrder = items.map(\.key).joined(separator: ","), gotOn = MenuLayout.shown(items).joined(separator: ",")
+            if gotOrder != t["wantOrder"] as! String || gotOn != t["wantOn"] as! String {
+                print("  \(t["name"]!): got \(gotOrder) on \(gotOn)")
+                expect(false)
+            }
+        }
+    }
+}

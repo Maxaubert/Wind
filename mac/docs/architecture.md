@@ -1172,8 +1172,15 @@ caret following off. Each Tab must move the view onto the focused button; passes
 Spec and plan: `~/Documents/Claude/research/wind-mac/2026-11-01-settings-port-spec-plan.md`.
 - **Opening Wind again** while it runs (Spotlight, Finder, `open -a Wind`) opens this window, or the
   setup when `needsSetup` holds (`applicationShouldHandleReopen`, 0.5.8).
-- **Menu bar icon** (0.6.0): `showMenuBarIcon` (menu item "Show in menu bar", and a Settings row) hides the status
+- **Menu bar icon** (0.6.0): `showMenuBarIcon` (menu item "Show in menu bar", and a row on the Menu bar page) hides the status
   item; Wind keeps running and opening it again shows Settings. It always shows while Accessibility is missing.
+- **Menu bar page** (0.9.0): Settings > Menu bar holds `showMenuBarIcon`, the panel's Performance header
+  (`menuPerf`) and its Sliders and Toggles lists (`menuSliders`, `menuSliderOrder`, `menuToggles`,
+  `menuToggleOrder`: config.json string lists, an empty order is the default one). The page is the Windows Tray
+  menu page shared in `ui-shared/src/tray/` (`listModel.js`, `ItemListsPage.svelte`, `DragList.svelte`) with the
+  Mac items in `ui/src/menubar/menuModel.js`; the panel reads the lists through `WindCore/MenuLayout.swift`.
+  Both follow Windows' rules (order key, then enabled items not yet seen, then the rest; unknown names
+  dropped; enabled sliders past four read as off), checked against `Tests/fixtures/menu_layout_cases.json`.
 - **A normal window while open** (0.5.9): Wind turns into a regular app (Dock icon, Cmd+Tab, moves aside for
   Show Desktop) and back to a menu-bar agent when it closes. The page covers the transparent title bar, so
   `DragWebView` drags the window from the top 28 px (only while the page sits at the top, reported by `titleBand`)
