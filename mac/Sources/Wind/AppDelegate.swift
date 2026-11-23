@@ -246,9 +246,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: menu bar icon, panel and menu
 
     /// The menu bar glyph, in one place so swapping it is one line. A template image: macOS tints it.
+    /// Wind's logo strokes (the app icon's `assets/Wind.icon/Assets/wind-strokes.svg`) as an 18 pt template
+    /// image, so macOS tints it for light and dark menu bars (owner's pick of three candidates, 2026-11-23).
+    static let statusIconSVG = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0.3 0.5 16.4 16.4">\
+        <g fill="none" stroke="#000" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">\
+        <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/><path d="M2 9h11a2 2 0 1 1-2 2"/>\
+        <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/></g></svg>
+        """
+
     static func statusIcon() -> NSImage? {
-        let i = NSImage(systemSymbolName: "plus.magnifyingglass", accessibilityDescription: "Wind")
+        let i = NSImage(data: Data(statusIconSVG.utf8))
+            ?? NSImage(systemSymbolName: "wind", accessibilityDescription: "Wind")
+        i?.size = NSSize(width: 18, height: 18)
         i?.isTemplate = true
+        i?.accessibilityDescription = "Wind"
         return i
     }
 
