@@ -12,7 +12,11 @@
 // Wind grey keeps the values the flyout already drew (docs/design/tray-2026-10/j01), like Settings keeps today's tokens.
 const fs = require('fs');
 const path = require('path');
-const iaDir = process.argv[2] || 'C:/Users/Admin/Documents/Claude/wind-settings-mockups/ia';
+const iaDir = process.argv[2] || process.env.WIND_MOCKUP_IA;
+if (!iaDir || !fs.existsSync(path.join(iaDir, 'palettes08.cjs'))) {
+  console.error('Mockup palettes not found. Pass the mockup ia folder as the first argument or set WIND_MOCKUP_IA (it must contain palettes08.cjs).');
+  process.exit(1);
+}
 const all = Object.assign({}, require(path.join(iaDir, 'palettes08.cjs')),
   require(path.join(iaDir, 'palettes-b1.cjs')), require(path.join(iaDir, 'palettes-b2.cjs')));
 const ORDER = [['grey', 'grey'], ['ember', 'ember'], ['ocean', 'b2_ocean'], ['hicon', 'b1_hicon']];
