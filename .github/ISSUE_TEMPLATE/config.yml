@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# New-issue chooser (#616): bugs and feature requests use the forms; questions and ideas go to Discussions.
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help
+    url: https://github.com/Maxaubert/Wind/discussions/categories/q-a
+    about: How do I, is it possible to, why does it. Ask here.
+  - name: Idea or feedback
+    url: https://github.com/Maxaubert/Wind/discussions/categories/ideas
+    about: Share an idea or tell us how you use Wind.

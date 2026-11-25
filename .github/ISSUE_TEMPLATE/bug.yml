@@ -1,0 +1,75 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Bug report form (#616). Asks for what a fix needs: version, platform, engine, screens and the log.
+name: Bug report
+description: Something in Wind does not work as it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The more of this you fill in, the faster it can be fixed.
+        Questions and ideas go in [Discussions](https://github.com/Maxaubert/Wind/discussions).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. Screenshots or a short video help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to make it happen
+      description: The steps, and the app or game you were using.
+      placeholder: |
+        1. Zoom in to about 4x
+        2. Open File Explorer
+        3. Hover the address bar
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Mac
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Wind version
+      description: Shown in Settings, under About.
+      placeholder: "0.31.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows or macOS version
+      placeholder: "Windows 11 24H2"
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine (Windows)
+      description: Settings > Engine.
+      options:
+        - Transform (default)
+        - Render
+        - Not sure
+        - Not Windows
+  - type: input
+    id: screens
+    attributes:
+      label: Screens and graphics card
+      description: How many screens, their resolution and scaling, and the graphics card.
+      placeholder: "One 4K screen at 150%, NVIDIA RTX 4070"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Windows: the newest file in `%LOCALAPPDATA%\Wind\logs\`. Mac: `~/Library/Logs/Wind/wind.log`.
+        Drag the file in here, or paste the part around the problem.
