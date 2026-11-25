@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Feature request form (#616). Open ideas belong in Discussions; this is for a concrete change.
+name: Feature request
+description: A concrete change or new setting you would like in Wind
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not sure yet, or want to talk it through first? Start in
+        [Discussions > Ideas](https://github.com/Maxaubert/Wind/discussions/categories/ideas).
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The task or situation, for example "aim in a shooter while zoomed". Not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you picture it working. Another app that does it well is a useful example.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Windows
+        - Mac
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Wind version
+      description: Shown in Settings, under About.
+      placeholder: "0.31.0"
