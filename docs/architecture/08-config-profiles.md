@@ -203,7 +203,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 |---|---|
 | `zoomInVk`/`zoomInMods`, `zoomInButton`/`zoomInButtonMods`, and the `*2` alternates; same for `zoomOut*` | Hold to zoom. Buttons: 1/2 side buttons, 3/4/5 left/right/middle click (with modifiers), 6/7 wheel up/down |
 | `panLeftVk`, `panRightVk`, `panUpVk`, `panDownVk` + `*Mods`, `panKeysOn` | Keyboard panning while zoomed |
-| `hideCursorVk`/`hideCursorMods`, `hideCursorOn` | Toggle the pointer while zoomed |
+| `hideCursorVk`/`hideCursorMods`, `hideCursorOn` | Hide or show the pointer, zoomed or at 1x |
 | `cursorLockVk`/`cursorLockMods`, `cursorLockOn` | Inspect mode |
 | `recenterVk`/`recenterMods` | Recentre the view on the cursor |
 | `quickZoomHotkeyMode`, `quickZoomModifier` (default Ctrl), `quickZoomVk`/`quickZoomMods`, `quickZoomDefault` (4.0) | Quick zoom: modifier + a zoom key (mode 0) or a dedicated hotkey (mode 1) toggles between 1x and the remembered level |

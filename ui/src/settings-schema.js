@@ -50,7 +50,7 @@ export const groups = [
           desc: 'Hold modifier keys and an arrow to pan',
           panArrows: true, onKey: 'panKeysOn',
           panKeys: ['panLeftVk', 'panUpVk', 'panRightVk', 'panDownVk', 'panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods'] },
-        { key: '__hideCursor', type: 'keybind', label: 'Hide pointer', keywords: ['hide mouse', 'hide cursor', 'invisible', 'pointer visibility', 'toggle', 'hotkey', 'shortcut', 'key', 'mouse cursor'], desc: 'Hide or show the pointer while zoomed',
+        { key: '__hideCursor', type: 'keybind', label: 'Hide pointer', keywords: ['hide mouse', 'hide cursor', 'invisible', 'pointer visibility', 'toggle', 'hotkey', 'shortcut', 'key', 'mouse cursor'], desc: 'Hide or show the pointer',
           vkKey: 'hideCursorVk', modsKey: 'hideCursorMods', onKey: 'hideCursorOn' },
         { key: '__cursorLock', type: 'keybind', label: 'Inspect mode', keywords: ['freeze', 'frozen', 'crosshair', 'tooltip', 'hover', 'look around', 'reticle', 'lock cursor', 'cursor lock', 'hotkey', 'shortcut', 'key'], desc: 'Freeze the pointer so you can look around',
           vkKey: 'cursorLockVk', modsKey: 'cursorLockMods', onKey: 'cursorLockOn' },
