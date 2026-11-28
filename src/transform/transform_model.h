@@ -61,6 +61,9 @@ public:
     // sprite standing in for it, which present() applies on its own). The tick loop mirrors it into
     // cursorHiddenByUs, the game-inspect tell, instead of tracking the calls itself.
     bool pointerHidden() const { return cursorHidden_; }
+    // The hide-cursor hotkey also works at 1x: while it is on, the zoom-out (setActive(false)) leaves
+    // the pointer hidden instead of giving it back, so the 1x hide needs no restore-and-hide flicker.
+    void setHoldHiddenAtExit(bool on) { holdHidden_ = on; }
     // While Wind's edge clip holds the pointer (cur is still ours), the clip it replaced: what
     // Inspect saves to give back at its exit, never Wind's own session clip (review #494).
     bool clipBeneathEdgeClip(const RECT& cur, RECT* beneath) const {
@@ -167,6 +170,7 @@ private:
     double ladderReq_ = 0.0, ladderOut_ = 0.0;       // smooth-zoom ladder: settled request -> held level
     void setDwmCentre(bool on);
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
+    bool holdHidden_ = false;                        // the zoom-out keeps the pointer hidden (1x hide-cursor hotkey)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;
     bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()

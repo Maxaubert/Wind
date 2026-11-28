@@ -175,7 +175,11 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   matched Wind's centre exactly, but panning then shook the pointer up to 30 px, so the nudges stay.
   A zero-distance injected move is dropped by Windows, so it is no substitute.
 - No cursor sprite, no blanking and no shell-panel handling in a normal zoom. The hide-cursor hotkey
-  and `cursorVisibility=never` blank the pointer the way Inspect does (below). Inspect keeps its
+  and `cursorVisibility=never` blank the pointer the way Inspect does (below). The hotkey works at 1x
+  too (2026-11-28): `IdleTick` hides the pointer through the current engine's `hideSystemCursor`
+  without starting a session, the 1x tint steps aside while it is hidden, a zoom-out with it on
+  keeps the pointer hidden (`setHoldHiddenAtExit`), and the engine pick at zoom-in hands the hide
+  over to the picked engine. Inspect keeps its
   crosshair window. Games pay nothing extra for the native cursor: a zoomed full-screen window is
   composed anyway, and at 1x the lens style is off.
 

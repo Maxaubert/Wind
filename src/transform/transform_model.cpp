@@ -299,11 +299,15 @@ void TransformModel::hideSystemCursor(bool hide) {
     if (hide && !ensureMag()) return;   // MagShowSystemCursor needs a live context
     cursorHidden_ = hide;
     // During NORMAL zoom the real pointer stays visible (DWM draws it magnified) and main.cpp never
-    // calls this. It is called only for INSPECT sessions, where the frozen real pointer must vanish
-    // under the crosshair: blanker for standard cursors, MagShowSystemCursor for the plane
-    // wholesale (app-custom cursors). Both are undone on exit.
+    // calls this. It is called for INSPECT sessions, where the frozen real pointer must vanish under
+    // the crosshair, and for the hide-cursor hotkey at 1x: blanker for standard cursors,
+    // MagShowSystemCursor for the plane wholesale (app-custom cursors). Both are undone on exit.
+    // The hide-cursor hotkey also calls this at 1x (main.cpp IdleTick). A pointer given back at rest
+    // stays invisible until the next cursor event, so the idle show nudges after the restore, as the
+    // zoom-out does. A session's own show (Inspect exit while zoomed) needs none: the tick moves it.
     if (hide) { blanker_->blank(); ShowSystemCursor(FALSE); }
-    else      { sprite_->hide(); ShowSystemCursor(TRUE); blanker_->restore(); }
+    else if (active_) { sprite_->hide(); ShowSystemCursor(TRUE); blanker_->restore(); }
+    else { sprite_->hide(); ShowSystemCursor(TRUE); blanker_->restore([] { NudgePointer(); }); }
 }
 
 
@@ -430,17 +434,19 @@ void TransformModel::leaveSession() {
     };
     // Give the real pointer back the moment the zoom ends (Inspect or the hide-cursor hotkey hid
     // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
-    if (cursorHidden_) {
+    // The hide-cursor hotkey left on keeps it hidden through the zoom-out: it applies at 1x too.
+    const bool keepHidden = holdHidden_ && cursorHidden_;
+    if (cursorHidden_ && !keepHidden) {
         sprite_->hide();
         ShowSystemCursor(TRUE);
         cursorHidden_ = false;
     }
-    sprite_->hide();   // a legacy sprite shown while the pointer was not ours to hide
+    sprite_->hide();   // a legacy sprite (or Inspect's crosshair) never outlives the session
     step(0);   // crosshair hide + system cursor show
     setDwmCentre(false);   // before the identity park, so DWM does not re-centre against it
     // Only a session that blanked the cursor set (Inspect, the hide-cursor hotkey, a legacy sprite
     // session) has anything to give back; the rest never touched it, so there is no scheme reload.
-    if (blanker_->blanked()) {
+    if (blanker_->blanked() && !keepHidden) {
         // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
         // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
         // back generates that event invisibly. It must FOLLOW the restore, which runs on the

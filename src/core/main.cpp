@@ -1258,7 +1258,14 @@ static void PickEngineAtZoomIn(TickState& t) {
         pin.renderLost            = RenderDeviceLost(t);
         FillCategoryInputs(t, pin);
         IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
-        if (pick && pick != t.model) t.model = pick;
+        if (pick && pick != t.model) {
+            // A 1x hide (hide-cursor hotkey, IdleTick) belongs to the engine that took it: hand it
+            // over, as the in-session switch does, so the old engine releases what it holds.
+            const bool held = t.cursorHiddenByUs;
+            if (held) SetSystemCursorHidden(t, t.model, false);
+            t.model = pick;
+            if (held) SetSystemCursorHidden(t, t.model, true);
+        }
     }
 }
 
@@ -2517,12 +2524,15 @@ static void TeardownSession(TickState& t) {
     // bright unfiltered one (review 2026-09-30).
     { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
     LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
+    // The hide-cursor hotkey applies at 1x too: with it on, the zoom-out keeps the pointer hidden.
+    if (auto* tmHold = dynamic_cast<TransformModel*>(t.model)) tmHold->setHoldHiddenAtExit(t.cursorHidden);
     { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
     if (t.cfg.zoomTrace) {
         LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
         t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
     }
-    SetSystemCursorHidden(t, t.model, false);
+    // 1x follows the hide-cursor hotkey: hidden stays hidden (IdleTick keeps it so from here on).
+    SetSystemCursorHidden(t, t.model, t.cursorHidden);
     t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
     t.gamePacing = false;                         // idle: normal timer pacing
     t.pushPhase = 0;
@@ -2553,7 +2563,17 @@ static void IdleTick(TickState& t) {
     // half get the tick (in model=transform the transform IS t.model); others no-op.
     t.model->idleTick();
     if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
-    UpdateCursorTint(t);
+    // The hide-cursor hotkey works at 1x as well, hiding the pointer the way Inspect does at 1x
+    // (blanker + MagShowSystemCursor), without starting a session. The 1x tint swaps the same
+    // system cursors, so it steps aside while the pointer is hidden and re-applies after.
+    if (t.cursorHidden != t.cursorHiddenByUs) {
+        if (t.cursorHidden) g_tint.restore(false);
+        SetSystemCursorHidden(t, t.model, t.cursorHidden);
+        // The transform hide can fail (no context): read it back so the tells stay truthful.
+        if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
+        if (!t.cursorHiddenByUs) g_tint.invalidate();
+    }
+    if (!t.cursorHiddenByUs) UpdateCursorTint(t);
 }
 
 // Active tick (zoomed or Inspect): the session phases in order, from the enter/Inspect edges to
